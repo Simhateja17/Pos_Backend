@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { createClient } from '@supabase/supabase-js'
-import { SignupSchema, LoginSchema } from '../contracts/schemas/auth'
+import bcrypt from 'bcrypt'
+import { SignupSchema, LoginSchema, SetPinSchema } from '../contracts/schemas/auth'
+import { authMiddleware } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
 import { basePrisma } from '../db/prisma'
 
@@ -205,6 +207,47 @@ router.post('/login', async (req, res) => {
       refreshToken: data.session.refresh_token,
     },
   })
+})
+
+/**
+ * POST /set-pin — an authenticated staff member (owner, manager, or a
+ * newly-activated invited manager/cashier) provisions/changes their own PIN
+ * (closes the plan-checker BLOCKER: 01-06's validatePin only ever compared
+ * against an existing hash, and no route wrote one for real, non-seed staff).
+ *
+ * SECURITY (T-1-11, Elevation of Privilege, mitigated): gated behind
+ * authMiddleware (a real Supabase session is required — this is NOT the
+ * PIN-switch mechanism), and the target row is resolved EXCLUSIVELY via
+ * req.user.id/req.user.tenantId from verified JWT claims — never a
+ * client-supplied staffId/memberId — so no caller can ever set another
+ * staff member's PIN through this endpoint.
+ */
+router.post('/set-pin', authMiddleware, async (req, res) => {
+  const parsed = SetPinSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid PIN', details: parsed.error.flatten() })
+  }
+
+  const pinHash = await bcrypt.hash(parsed.data.pin, 10)
+
+  // updateMany (not update): the lookup key is user_id, not the primary key
+  // id — Prisma's update requires a unique/primary-key where clause, and
+  // user_id isn't declared as a DB-level unique constraint in 01-02's
+  // schema, so updateMany is the safe choice that doesn't assume a
+  // constraint that doesn't exist.
+  const updated = await forTenant(req.user!.tenantId).staff_members.updateMany({
+    where: { user_id: req.user!.id },
+    data: { pin_hash: pinHash, pin_attempts: 0, pin_locked_until: null },
+  })
+
+  if (updated.count === 0) {
+    // req.user.id has no matching staff_members row — shouldn't happen for
+    // a real authenticated staff session, but fail loudly rather than
+    // silently succeeding.
+    return res.status(404).json({ error: 'No staff record found for this account' })
+  }
+
+  return res.status(200).json({ ok: true })
 })
 
 export default router

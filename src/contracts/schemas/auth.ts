@@ -43,6 +43,13 @@ export const AuthResponseSchema = z
   })
   .openapi('AuthResponse')
 
+export const SetPinSchema = z
+  .object({
+    pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
+  })
+  .openapi('SetPinRequest')
+
 export type SignupInput = z.infer<typeof SignupSchema>
 export type LoginInput = z.infer<typeof LoginSchema>
 export type AuthResponse = z.infer<typeof AuthResponseSchema>
+export type SetPinInput = z.infer<typeof SetPinSchema>
