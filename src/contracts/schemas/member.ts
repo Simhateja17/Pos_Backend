@@ -1,9 +1,12 @@
 import { z } from 'zod'
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 
-// NOTE: extendZodWithOpenApi(z) is NOT called here — `./auth.ts` already calls
-// it exactly once at process load (per that file's own comment), and this
-// module is always imported alongside it (openapi.ts imports both). Calling
-// it twice against the same `zod` module instance is unnecessary/unsafe.
+// extendZodWithOpenApi is internally guarded (upstream `zod-to-openapi`
+// no-ops if `z.ZodType.prototype.openapi` is already defined), so calling it
+// here as well as in `./auth.ts` is safe — this module can be imported
+// directly (e.g. from `routes/members.ts`) without depending on `auth.ts`
+// having been imported first in every code path (route files, tests, etc.).
+extendZodWithOpenApi(z)
 
 export const MemberSchema = z
   .object({

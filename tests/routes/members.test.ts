@@ -5,6 +5,7 @@ import request from 'supertest'
 process.env.SUPABASE_URL = 'http://localhost:54321'
 process.env.SUPABASE_ANON_KEY = 'anon-key'
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+process.env.INVITE_REDIRECT_URL = 'http://localhost:3000/accept-invite'
 
 // authMiddleware instantiates its own createClient(url, anonKey) for
 // getUser(); members.ts instantiates a separate admin createClient(url,
