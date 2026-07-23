@@ -1,0 +1,14 @@
+-- The Custom Access Token Hook runs as supabase_auth_admin (the invoker),
+-- which has no grant on public.staff_members and is subject to RLS like any
+-- other role. Without SECURITY DEFINER, the hook's lookup query fails
+-- (permission denied / RLS default-deny), silently breaking every real
+-- Supabase login — the auth flow itself never surfaced a useful error,
+-- just an opaque failure. SECURITY DEFINER makes the function run as its
+-- owner (postgres), which as table owner bypasses RLS — this is Supabase's
+-- documented pattern for custom claims hooks; our 0003 migration missed it.
+--
+-- Caught by plan 01-09's real-Supabase integration tests (login.test.ts,
+-- role-gating.test.ts, invite-flow.test.ts all failed identically until
+-- this was fixed) — every prior test/verification pass had been mocked or
+-- blocked from actually executing against the live project.
+alter function public.custom_access_token_hook(jsonb) security definer;
