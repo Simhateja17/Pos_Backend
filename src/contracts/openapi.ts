@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi'
 import { z } from 'zod'
-import { SignupSchema, LoginSchema, AuthResponseSchema } from './schemas/auth'
+import { SignupSchema, LoginSchema, AuthResponseSchema, SetPinSchema } from './schemas/auth'
 import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './schemas/member'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
@@ -91,9 +91,19 @@ registry.registerPath({
   },
 })
 
-// Note for 01-13 (later wave): that plan adds a 7th path, POST /auth/set-pin,
-// to this same registry — append another registry.registerPath(...) call,
-// this construction is a simple sequence, not a closed/frozen structure.
+registry.registerPath({
+  method: 'post',
+  path: '/auth/set-pin',
+  description: 'An authenticated staff member (owner, manager, or a newly-activated invited manager/cashier) provisions/changes their own PIN. Requires a real Supabase session (authMiddleware) — never the PIN-switch mechanism. Always targets the caller\'s own staff_members row.',
+  request: {
+    body: { content: { 'application/json': { schema: SetPinSchema } } },
+  },
+  responses: {
+    200: { description: 'PIN set', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+    400: { description: 'Invalid PIN' },
+    404: { description: 'No staff record found for this account' },
+  },
+})
 
 const generator = new OpenApiGeneratorV31(registry.definitions)
 

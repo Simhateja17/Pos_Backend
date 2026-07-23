@@ -208,6 +208,18 @@
         "required": [
           "role"
         ]
+      },
+      "SetPinRequest": {
+        "type": "object",
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^\\d{4}$"
+          }
+        },
+        "required": [
+          "pin"
+        ]
       }
     },
     "parameters": {}
@@ -396,6 +408,46 @@
           },
           "404": {
             "description": "Member not found"
+          }
+        }
+      }
+    },
+    "/auth/set-pin": {
+      "post": {
+        "description": "An authenticated staff member (owner, manager, or a newly-activated invited manager/cashier) provisions/changes their own PIN. Requires a real Supabase session (authMiddleware) — never the PIN-switch mechanism. Always targets the caller's own staff_members row.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PIN set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid PIN"
+          },
+          "404": {
+            "description": "No staff record found for this account"
           }
         }
       }
