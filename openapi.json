@@ -220,6 +220,53 @@
         "required": [
           "pin"
         ]
+      },
+      "PinSwitchResponse": {
+        "type": "object",
+        "properties": {
+          "operatorToken": {
+            "type": "string"
+          },
+          "staff": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "manager",
+                  "cashier"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "role"
+            ]
+          }
+        },
+        "required": [
+          "operatorToken",
+          "staff"
+        ]
+      },
+      "PinSwitchRequest": {
+        "type": "object",
+        "properties": {
+          "staffId": {
+            "type": "string"
+          },
+          "pin": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "staffId",
+          "pin"
+        ]
       }
     },
     "parameters": {}
@@ -448,6 +495,35 @@
           },
           "404": {
             "description": "No staff record found for this account"
+          }
+        }
+      }
+    },
+    "/terminal/pin/switch": {
+      "post": {
+        "description": "PIN-switch the acting operator on a shared terminal. Requires an existing authenticated session (authMiddleware); does not create a new Supabase Auth session — issues a short-lived signed operator token instead (D-09/D-10).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinSwitchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PIN-switch successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinSwitchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Incorrect PIN, locked out, or unauthenticated"
           }
         }
       }

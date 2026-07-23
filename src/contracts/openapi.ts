@@ -4,6 +4,7 @@ import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-ope
 import { z } from 'zod'
 import { SignupSchema, LoginSchema, AuthResponseSchema, SetPinSchema } from './schemas/auth'
 import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './schemas/member'
+import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -102,6 +103,19 @@ registry.registerPath({
     200: { description: 'PIN set', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
     400: { description: 'Invalid PIN' },
     404: { description: 'No staff record found for this account' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/terminal/pin/switch',
+  description: 'PIN-switch the acting operator on a shared terminal. Requires an existing authenticated session (authMiddleware); does not create a new Supabase Auth session — issues a short-lived signed operator token instead (D-09/D-10).',
+  request: {
+    body: { content: { 'application/json': { schema: PinSwitchSchema } } },
+  },
+  responses: {
+    200: { description: 'PIN-switch successful', content: { 'application/json': { schema: PinSwitchResponseSchema } } },
+    401: { description: 'Incorrect PIN, locked out, or unauthenticated' },
   },
 })
 
