@@ -118,8 +118,31 @@ router.patch('/:memberId/role', requireRole('owner'), async (req, res) => {
     return res.status(400).json({ error: 'Invalid request' })
   }
 
+  const client = forTenant(req.user!.tenantId) as any
+
   try {
-    const staff = await (forTenant(req.user!.tenantId) as any).staff_members.update({
+    const target = await client.staff_members.findFirst({
+      where: { id: req.params.memberId },
+    })
+    if (!target) {
+      return res.status(404).json({ error: 'Member not found' })
+    }
+
+    // WR-04: demoting the tenant's only remaining active owner would
+    // permanently lock the tenant out of every owner-gated action (further
+    // invites, role changes, deactivations), with no self-service recovery.
+    const isDemotingOwner =
+      target.role === 'owner' && target.is_active && parsed.data.role !== 'owner'
+    if (isDemotingOwner) {
+      const activeOwners = await client.staff_members.count({
+        where: { role: 'owner', is_active: true },
+      })
+      if (activeOwners <= 1) {
+        return res.status(409).json({ error: 'Cannot remove the last owner' })
+      }
+    }
+
+    const staff = await client.staff_members.update({
       where: { id: req.params.memberId },
       data: { role: parsed.data.role },
     })
@@ -135,8 +158,29 @@ router.patch('/:memberId/role', requireRole('owner'), async (req, res) => {
  * sales/shift records per CLAUDE.md's append-only/attribution discipline.
  */
 router.delete('/:memberId', requireRole('owner'), async (req, res) => {
+  const client = forTenant(req.user!.tenantId) as any
+
   try {
-    const staff = await (forTenant(req.user!.tenantId) as any).staff_members.update({
+    const target = await client.staff_members.findFirst({
+      where: { id: req.params.memberId },
+    })
+    if (!target) {
+      return res.status(404).json({ error: 'Member not found' })
+    }
+
+    // WR-04: deactivating the tenant's only remaining active owner would
+    // permanently lock the tenant out of every owner-gated action, with no
+    // self-service recovery — same safeguard as the role-change endpoint.
+    if (target.role === 'owner' && target.is_active) {
+      const activeOwners = await client.staff_members.count({
+        where: { role: 'owner', is_active: true },
+      })
+      if (activeOwners <= 1) {
+        return res.status(409).json({ error: 'Cannot remove the last owner' })
+      }
+    }
+
+    const staff = await client.staff_members.update({
       where: { id: req.params.memberId },
       data: { is_active: false },
     })

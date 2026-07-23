@@ -29,6 +29,8 @@ vi.mock('@supabase/supabase-js', () => ({
 const staffMembersFindManyMock = vi.fn()
 const staffMembersCreateMock = vi.fn()
 const staffMembersUpdateMock = vi.fn()
+const staffMembersFindFirstMock = vi.fn()
+const staffMembersCountMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
@@ -36,6 +38,8 @@ vi.mock('../../src/db/tenantClient', () => ({
       findMany: staffMembersFindManyMock,
       create: staffMembersCreateMock,
       update: staffMembersUpdateMock,
+      findFirst: staffMembersFindFirstMock,
+      count: staffMembersCountMock,
     },
   })),
 }))
@@ -62,6 +66,8 @@ describe('members routes', () => {
     staffMembersFindManyMock.mockReset()
     staffMembersCreateMock.mockReset()
     staffMembersUpdateMock.mockReset()
+    staffMembersFindFirstMock.mockReset()
+    staffMembersCountMock.mockReset()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
   })
 
@@ -201,5 +207,91 @@ describe('members routes', () => {
         data: expect.objectContaining({ user_id: 'distinct-invited-id-999' }),
       }),
     )
+  })
+
+  it('WR-04: PATCH /:memberId/role rejects (409) demoting the tenant\'s only active owner', async () => {
+    staffMembersFindFirstMock.mockResolvedValue({
+      id: 'staff-owner-1',
+      role: 'owner',
+      is_active: true,
+    })
+    staffMembersCountMock.mockResolvedValue(1)
+
+    const app = await buildApp()
+    const res = await request(app)
+      .patch('/members/staff-owner-1/role')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send({ role: 'manager' })
+
+    expect(res.status).toBe(409)
+    expect(res.body).toEqual({ error: 'Cannot remove the last owner' })
+    expect(staffMembersUpdateMock).not.toHaveBeenCalled()
+  })
+
+  it('WR-04: PATCH /:memberId/role allows demoting an owner when another active owner still exists', async () => {
+    staffMembersFindFirstMock.mockResolvedValue({
+      id: 'staff-owner-1',
+      role: 'owner',
+      is_active: true,
+    })
+    staffMembersCountMock.mockResolvedValue(2)
+    staffMembersUpdateMock.mockResolvedValue({
+      id: 'staff-owner-1',
+      name: 'Former Owner',
+      role: 'manager',
+      is_active: true,
+      created_at: new Date('2026-01-04T00:00:00Z'),
+    })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .patch('/members/staff-owner-1/role')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send({ role: 'manager' })
+
+    expect(res.status).toBe(200)
+    expect(staffMembersUpdateMock).toHaveBeenCalled()
+  })
+
+  it("WR-04: DELETE /:memberId rejects (409) deactivating the tenant's only active owner", async () => {
+    staffMembersFindFirstMock.mockResolvedValue({
+      id: 'staff-owner-1',
+      role: 'owner',
+      is_active: true,
+    })
+    staffMembersCountMock.mockResolvedValue(1)
+
+    const app = await buildApp()
+    const res = await request(app)
+      .delete('/members/staff-owner-1')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+
+    expect(res.status).toBe(409)
+    expect(res.body).toEqual({ error: 'Cannot remove the last owner' })
+    expect(staffMembersUpdateMock).not.toHaveBeenCalled()
+  })
+
+  it('WR-04: DELETE /:memberId allows deactivating a non-owner member without checking owner count', async () => {
+    staffMembersFindFirstMock.mockResolvedValue({
+      id: 'staff-cashier-1',
+      role: 'cashier',
+      is_active: true,
+    })
+    staffMembersUpdateMock.mockResolvedValue({
+      id: 'staff-cashier-1',
+      name: 'Some Cashier',
+      role: 'cashier',
+      is_active: false,
+      created_at: new Date('2026-01-05T00:00:00Z'),
+    })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .delete('/members/staff-cashier-1')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+
+    expect(res.status).toBe(200)
+    expect(staffMembersCountMock).not.toHaveBeenCalled()
+    expect(staffMembersUpdateMock).toHaveBeenCalled()
   })
 })
