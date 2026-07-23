@@ -41,7 +41,7 @@ router.post('/switch', async (req, res) => {
   }
 
   return res.status(200).json({
-    operatorToken: signOperatorToken(result.staff),
+    operatorToken: signOperatorToken(result.staff, req.user.tenantId),
     staff: result.staff,
   })
 })

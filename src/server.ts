@@ -1,7 +1,6 @@
 import express from 'express'
 import routes from './routes'
 import { errorHandler } from './middleware/errorHandler'
-import { operatorContext } from './middleware/operatorContext'
 
 const app = express()
 app.use(express.json())
@@ -10,12 +9,11 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' })
 })
 
-// operatorContext reads an independent header (X-Operator-Token) and doesn't
-// itself require authMiddleware to have run first, but it must run before
-// any route that calls requireRole (every tenant-scoped route in this
-// phase), so req.actingStaff is available everywhere requireRole checks it.
-app.use(operatorContext)
-
+// operatorContext (CR-01 fix) now requires req.user to already be populated
+// (it verifies the token's tenant_id against req.user.tenantId), so it is no
+// longer mounted globally here ahead of authMiddleware. It's mounted per-route
+// in routes/index.ts, directly after authMiddleware, on every route that uses
+// requireRole/req.actingStaff.
 app.use('/api', routes)
 
 // Error middleware must be registered LAST, after all routes.

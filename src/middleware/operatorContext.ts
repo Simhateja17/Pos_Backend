@@ -13,9 +13,16 @@ import { verifyOperatorToken } from './pinSwitch'
  * never silently ignored, since silently falling through could mask an
  * attempted spoof.
  *
- * Mounted in server.ts directly after authMiddleware and before the routes
- * aggregator (01-08 wiring), so req.actingStaff is available to every
- * route's requireRole check.
+ * SECURITY (CR-01): the token's `tenant_id` claim MUST match the current
+ * session's req.user.tenantId (populated exclusively from a verified
+ * Supabase JWT by authMiddleware, never client input) before the token is
+ * trusted. Without this check, an operator token minted while validated
+ * inside Tenant A could be replayed as X-Operator-Token against a session
+ * authenticated in Tenant B, escalating that unrelated request to whatever
+ * role the token claims. Because this check depends on req.user, this
+ * middleware MUST be mounted AFTER authMiddleware on any route that uses it
+ * (see routes/index.ts) — it is no longer mounted globally ahead of
+ * authMiddleware in server.ts.
  */
 export function operatorContext(req: Request, res: Response, next: NextFunction) {
   const token = req.headers['x-operator-token']
@@ -27,7 +34,7 @@ export function operatorContext(req: Request, res: Response, next: NextFunction)
   const tokenString = Array.isArray(token) ? token[0] : token
   const claims = verifyOperatorToken(tokenString)
 
-  if (!claims) {
+  if (!claims || !req.user || claims.tenantId !== req.user.tenantId) {
     return res.status(401).json({ error: 'Invalid operator session' })
   }
 

@@ -85,19 +85,35 @@ export async function validatePin(
  * tampered/expired/malformed token can never be mistaken for a thrown
  * exception that accidentally propagates trust.
  */
-export function signOperatorToken(staff: OperatorClaims): string {
-  return jwt.sign({ id: staff.id, role: staff.role }, process.env.SUPABASE_JWT_SECRET as string, {
-    expiresIn: OPERATOR_TOKEN_EXPIRY,
-  })
+export function signOperatorToken(staff: OperatorClaims, tenantId: string): string {
+  return jwt.sign(
+    { id: staff.id, role: staff.role, tenant_id: tenantId },
+    process.env.SUPABASE_JWT_SECRET as string,
+    { expiresIn: OPERATOR_TOKEN_EXPIRY },
+  )
 }
 
-export function verifyOperatorToken(token: string): OperatorClaims | null {
+/**
+ * SECURITY (CR-01 fix): the operator token is bound to the tenant it was
+ * minted in via the `tenant_id` claim. `operatorContext` middleware compares
+ * this against req.user.tenantId (verified JWT claim) before trusting the
+ * token, so a token minted in one tenant can never be replayed against a
+ * different tenant's session to escalate privilege.
+ */
+export function verifyOperatorToken(
+  token: string,
+): (OperatorClaims & { tenantId: string }) | null {
   try {
     const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET as string) as jwt.JwtPayload
-    if (!decoded || typeof decoded.id !== 'string' || typeof decoded.role !== 'string') {
+    if (
+      !decoded ||
+      typeof decoded.id !== 'string' ||
+      typeof decoded.role !== 'string' ||
+      typeof decoded.tenant_id !== 'string'
+    ) {
       return null
     }
-    return { id: decoded.id, role: decoded.role as StaffRole }
+    return { id: decoded.id, role: decoded.role as StaffRole, tenantId: decoded.tenant_id }
   } catch {
     return null
   }

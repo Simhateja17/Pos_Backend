@@ -94,10 +94,10 @@ describe('pinSwitch', () => {
     expect(findFirstMock).toHaveBeenCalledWith('tenant-2', expect.anything())
   })
 
-  it('Test 4: signOperatorToken/verifyOperatorToken round-trip; tampered token returns null, never throws', () => {
-    const token = signOperatorToken({ id: 'staff-1', role: 'manager' })
+  it('Test 4: signOperatorToken/verifyOperatorToken round-trip (with tenant_id binding); tampered token returns null, never throws', () => {
+    const token = signOperatorToken({ id: 'staff-1', role: 'manager' }, 'tenant-1')
     const decoded = verifyOperatorToken(token)
-    expect(decoded).toEqual({ id: 'staff-1', role: 'manager' })
+    expect(decoded).toEqual({ id: 'staff-1', role: 'manager', tenantId: 'tenant-1' })
 
     expect(() => verifyOperatorToken('garbage.tampered.token')).not.toThrow()
     expect(verifyOperatorToken('garbage.tampered.token')).toBeNull()
