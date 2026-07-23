@@ -1,0 +1,42 @@
+name: Real-Supabase Integration Tests
+
+# Manual-trigger only: these tests seed/delete real rows and real Supabase Auth
+# users in a live project. They need a direct Postgres connection (DATABASE_URL,
+# RLS_DATABASE_URL) which is blocked on some networks (sandboxed CI runners,
+# some campus/corporate wifi) — GitHub's hosted runners have unrestricted
+# outbound egress, so this workflow exists to run them from there instead.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Phase 1 real-Supabase integration tests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RLS_DATABASE_URL: ${{ secrets.RLS_DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET }}
+          INVITE_REDIRECT_URL: http://localhost:3000/accept-invite
+          CORS_ORIGIN: http://localhost:3000
+        run: >
+          npx vitest run
+          tests/tenancy/rls-enforcement.test.ts
+          tests/auth/login.test.ts
+          tests/auth/role-gating.test.ts
+          tests/auth/invite-flow.test.ts
