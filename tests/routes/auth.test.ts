@@ -82,10 +82,15 @@ describe('POST /auth/signup and /auth/login', () => {
       data: { user: { id: 'user-1', email: 'owner@example.com' } },
       error: null,
     })
-    tenantsCreateMock.mockResolvedValue({ id: 'tenant-1', business_name: "Jane's Boutique" })
+    // Signup generates the new tenant's id up front (randomUUID()) and uses it
+    // for both the tenants and staff_members inserts — echo it back so the
+    // assertions below can verify tenant/staff rows share the same id without
+    // hard-coding a UUID the route itself generates.
+    tenantsCreateMock.mockImplementation((args: { data: { id: string; business_name: string } }) =>
+      Promise.resolve({ id: args.data.id, business_name: args.data.business_name }),
+    )
     staffMembersCreateMock.mockResolvedValue({
       id: 'staff-1',
-      tenant_id: 'tenant-1',
       user_id: 'user-1',
       role: 'owner',
     })
@@ -105,7 +110,7 @@ describe('POST /auth/signup and /auth/login', () => {
       id: 'user-1',
       email: 'owner@example.com',
       role: 'owner',
-      tenantId: 'tenant-1',
+      tenantId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     })
     expect(res.body.session).toEqual({
       accessToken: 'access-token-1',
@@ -118,7 +123,7 @@ describe('POST /auth/signup and /auth/login', () => {
     expect(staffMembersCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          tenant_id: 'tenant-1',
+          tenant_id: res.body.user.tenantId,
           user_id: 'user-1',
           role: 'owner',
         }),
