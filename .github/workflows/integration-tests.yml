@@ -25,6 +25,15 @@ jobs:
         # ci's strict lockfile-sync check even though the lockfile is fine.
         run: npm install
 
+      - name: Generate Prisma Client
+        # @prisma/client is installed as a package, but the actual generated
+        # client code (node_modules/.prisma/client) only exists after this
+        # runs — never ran in CI before, so tests failed with "Cannot find
+        # module '.prisma/client/default'".
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma generate
+
       - name: Run Phase 1 real-Supabase integration tests
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
