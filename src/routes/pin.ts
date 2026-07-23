@@ -1,13 +1,8 @@
 import { Router } from 'express'
-import { z } from 'zod'
 import { validatePin, signOperatorToken } from '../middleware/pinSwitch'
+import { PinSwitchSchema } from '../contracts/schemas/pin'
 
 const router = Router()
-
-const switchBodySchema = z.object({
-  staffId: z.string(),
-  pin: z.string(),
-})
 
 /**
  * POST /switch — PIN-switch the acting operator on a shared terminal.
@@ -20,7 +15,7 @@ const switchBodySchema = z.object({
  * from "wrong PIN".
  */
 router.post('/switch', async (req, res) => {
-  const parsed = switchBodySchema.safeParse(req.body)
+  const parsed = PinSwitchSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request' })
   }
