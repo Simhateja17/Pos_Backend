@@ -19,7 +19,11 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: npm ci
+        # npm ci fails here: an optional wasm dependency of vitest's rolldown
+        # bundler resolves inconsistently in package-lock.json across host
+        # platforms (macOS arm64 vs. this runner's linux x64), tripping npm
+        # ci's strict lockfile-sync check even though the lockfile is fine.
+        run: npm install
 
       - name: Run Phase 1 real-Supabase integration tests
         env:
