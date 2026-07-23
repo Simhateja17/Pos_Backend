@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:pull": "prisma db pull",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "generate:openapi": "tsx src/contracts/openapi.ts"
   },
   "repository": {
     "type": "git",
