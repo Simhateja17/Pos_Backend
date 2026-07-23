@@ -3,9 +3,8 @@ import { Router } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcrypt'
 import { SignupSchema, LoginSchema, SetPinSchema } from '../contracts/schemas/auth'
-import { authMiddleware } from '../middleware/auth'
+import { authMiddleware, decodeJwtPayload } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
-import { basePrisma } from '../db/prisma'
 
 const router = Router()
 
@@ -184,14 +183,25 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
 
-  // Direct basePrisma lookup (not forTenant) is the documented exception here:
-  // we don't yet have req.user.tenantId to scope through, and this reads the
-  // caller's OWN row by their own verified auth id — not a cross-tenant query.
-  const staff = await basePrisma.staff_members.findFirst({
-    where: { user_id: data.user.id },
-  })
+  // Role/tenantId come from the JWT's custom claims (written server-side by
+  // the Custom Access Token Hook), NOT a basePrisma DB lookup. A direct
+  // app_runtime (NOBYPASSRLS) query here is a dead end: RLS's USING clause
+  // requires app.tenant_id, which we don't have yet at login time and can't
+  // set in advance since discovering the tenant is the whole point of this
+  // lookup — there is no bypass, confirmed during 01-07's signup work. The
+  // hook already resolved this at token-issuance time, so decode it from
+  // there instead, the same way authMiddleware does for every other route.
+  let claims: Record<string, unknown>
+  try {
+    claims = decodeJwtPayload(data.session.access_token)
+  } catch {
+    return res.status(401).json({ error: 'Invalid email or password' })
+  }
 
-  if (!staff) {
+  const role = claims.role as ('owner' | 'manager' | 'cashier' | undefined)
+  const tenantId = claims.tenant_id as (string | undefined)
+
+  if (!role || !tenantId) {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
 
@@ -199,8 +209,8 @@ router.post('/login', async (req, res) => {
     user: {
       id: data.user.id,
       email: data.user.email,
-      role: staff.role,
-      tenantId: staff.tenant_id,
+      role,
+      tenantId,
     },
     session: {
       accessToken: data.session.access_token,

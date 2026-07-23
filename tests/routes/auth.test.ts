@@ -48,6 +48,17 @@ vi.mock('../../src/db/prisma', () => ({
   },
 }))
 
+// Login now reads role/tenantId from the JWT's decoded claims (written by
+// the Custom Access Token Hook) instead of a basePrisma DB lookup — see
+// src/routes/auth.ts's login handler comment. Build a real-shaped
+// (unsigned test) JWT so decodeJwtPayload() can parse it the same way it
+// would a real Supabase-issued token.
+function fakeJwt(claims: Record<string, unknown>): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url')
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url')
+  return `${header}.${payload}.signature`
+}
+
 function validSignupBody() {
   return {
     email: 'owner@example.com',
@@ -165,18 +176,13 @@ describe('POST /auth/signup and /auth/login', () => {
   })
 
   it('Test 3a: login with valid credentials returns 200 with { user: { role, tenantId, ... }, session }', async () => {
+    const accessToken = fakeJwt({ role: 'owner', tenant_id: 'tenant-1', sub: 'user-1' })
     signInWithPasswordMock.mockResolvedValue({
       data: {
         user: { id: 'user-1', email: 'owner@example.com' },
-        session: { access_token: 'access-token-2', refresh_token: 'refresh-token-2' },
+        session: { access_token: accessToken, refresh_token: 'refresh-token-2' },
       },
       error: null,
-    })
-    staffMembersFindFirstMock.mockResolvedValue({
-      id: 'staff-1',
-      tenant_id: 'tenant-1',
-      user_id: 'user-1',
-      role: 'owner',
     })
 
     const app = await buildApp()
@@ -192,9 +198,10 @@ describe('POST /auth/signup and /auth/login', () => {
       tenantId: 'tenant-1',
     })
     expect(res.body.session).toEqual({
-      accessToken: 'access-token-2',
+      accessToken,
       refreshToken: 'refresh-token-2',
     })
+    expect(staffMembersFindFirstMock).not.toHaveBeenCalled()
   })
 
   it('Test 3b: login with invalid credentials returns 401 { error: "Invalid email or password" }', async () => {

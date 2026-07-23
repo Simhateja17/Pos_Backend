@@ -18,7 +18,7 @@ const supabase = createClient(
  * (called before this in authMiddleware) is the actual verification step.
  * This function only extracts already-trusted claims for local use.
  */
-function decodeJwtPayload(token: string): Record<string, unknown> {
+export function decodeJwtPayload(token: string): Record<string, unknown> {
   const segments = token.split('.')
   if (segments.length !== 3) {
     throw new Error('Malformed JWT')
