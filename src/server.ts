@@ -1,8 +1,31 @@
 import express from 'express'
+import cors from 'cors'
 import routes from './routes'
 import { errorHandler } from './middleware/errorHandler'
 
 const app = express()
+
+// CORS (WR-06 fix): the frontend (Next.js) runs on its own origin/port and
+// calls this API directly via NEXT_PUBLIC_API_URL, so without an explicit
+// Access-Control-Allow-Origin response header, every cross-origin frontend
+// request is blocked by the browser's same-origin policy.
+//
+// CORS_ORIGIN is a comma-separated allowlist of exact origins (scheme +
+// host + port), driven by env rather than hardcoded/wildcard, so each
+// deployment (local dev, staging, prod) can configure its own frontend
+// origin(s) without a code change. Defaults to the local Next.js dev server
+// origins if unset.
+const allowedOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:3000,http://127.0.0.1:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  }),
+)
 app.use(express.json())
 
 app.get('/health', (_req, res) => {
