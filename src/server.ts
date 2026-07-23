@@ -1,3 +1,9 @@
+// Must load before any other import — routes/auth.ts and middleware/auth.ts
+// construct Supabase clients from process.env at module-load time, so .env
+// has to be populated before those modules are first required. Tests and
+// prisma.config.ts already did this explicitly; the app entrypoint itself
+// never did, so `npm run dev` crashed with "supabaseUrl is required."
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import routes from './routes'
