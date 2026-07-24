@@ -62,23 +62,42 @@ async function generateSku(client: any, tenantId: string, productName: string, e
 }
 
 /**
- * GET / — list the caller's tenant's products with variants + current stock.
+ * GET /?search= — list the caller's tenant's products with variants +
+ * current stock. An optional `search` param filters to an exact-sku match
+ * (CHECK-01's barcode-scan target, the same `sku` field Phase 2 encodes into
+ * printed labels) OR a partial product-name match (CHECK-02), matching in
+ * memory after the existing findMany calls (small-shop catalog scale,
+ * consistent with this route's existing in-memory-join style — no
+ * $queryRaw, which forTenant()'s wrapper does not intercept).
  * No requireRole gate — catalog viewing/management is not gated per CONTEXT.md
  * (only stock adjustments are, D-13, enforced in stockMovements.ts).
  */
 router.get('/', async (req, res) => {
+  const search = (req.query.search as string | undefined)?.trim().toLowerCase()
   const client = forTenant(req.user!.tenantId) as any
   const products = await client.products.findMany({ orderBy: { created_at: 'asc' } })
   const variants = await client.variants.findMany({ orderBy: { created_at: 'asc' } })
   const stockLevels = await client.variant_stock_levels.findMany({})
   const stockByVariant = new Map(stockLevels.map((s: any) => [s.variant_id, s.quantity]))
 
-  const result = products.map((product: any) => {
-    const productVariants = variants
-      .filter((v: any) => v.product_id === product.id)
-      .map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0)))
-    return toProductJson(product, productVariants)
-  })
+  const filteredVariants = search
+    ? variants.filter((v: any) => v.sku.toLowerCase() === search || v.sku.toLowerCase().includes(search))
+    : variants
+  const relevantProductIds = search
+    ? new Set([
+        ...filteredVariants.map((v: any) => v.product_id),
+        ...products.filter((p: any) => p.name.toLowerCase().includes(search)).map((p: any) => p.id),
+      ])
+    : null
+
+  const result = products
+    .filter((product: any) => !relevantProductIds || relevantProductIds.has(product.id))
+    .map((product: any) => {
+      const productVariants = variants
+        .filter((v: any) => v.product_id === product.id)
+        .map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0)))
+      return toProductJson(product, productVariants)
+    })
   res.json(result)
 })
 
