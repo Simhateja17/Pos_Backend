@@ -8,6 +8,8 @@ import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
 import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
 import { CreateSaleSchema, SaleSchema } from './schemas/sale'
+import { CreateReturnSchema } from './schemas/return'
+import { CustomerSchema } from './schemas/customer'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -98,7 +100,8 @@ registry.registerPath({
 registry.registerPath({
   method: 'get',
   path: '/products',
-  description: "List the caller's tenant's products with variants and current stock.",
+  description: "List the caller's tenant's products with variants and current stock. Optional `search` filters to an exact-sku or partial-name match (CHECK-01/CHECK-02).",
+  request: { query: z.object({ search: z.string().optional() }) },
   responses: {
     200: { description: 'List of products', content: { 'application/json': { schema: z.array(ProductSchema) } } },
   },
@@ -232,6 +235,29 @@ registry.registerPath({
   responses: {
     200: { description: 'Sale', content: { 'application/json': { schema: SaleSchema } } },
     404: { description: 'Sale not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/returns',
+  description: "Process a partial or full return/refund against a prior sale (CHECK-07, D-09 through D-12). Writes a positive-delta return stock movement and refund payment row(s) against the original payment method — server-validated against the original sale's actual payment methods (D-10).",
+  request: { body: { content: { 'application/json': { schema: CreateReturnSchema } } } },
+  responses: {
+    201: { description: 'Return processed' },
+    400: { description: 'Invalid request, over-return, refund-sum mismatch, or refund method not used on the original sale' },
+    404: { description: 'Sale or line item not found' },
+    409: { description: 'Target shift is already closed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/customers',
+  description: 'Search customers by phone, email, or name (CUST-01, D-09).',
+  request: { query: z.object({ search: z.string().optional() }) },
+  responses: {
+    200: { description: 'Matching customers', content: { 'application/json': { schema: z.array(CustomerSchema) } } },
   },
 })
 

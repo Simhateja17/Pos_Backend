@@ -889,6 +889,112 @@
           "method",
           "amount"
         ]
+      },
+      "CreateReturnRequest": {
+        "type": "object",
+        "properties": {
+          "saleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "shiftId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "saleLineItemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "saleLineItemId",
+                "quantity"
+              ]
+            },
+            "minItems": 1
+          },
+          "refundPayments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "cash",
+                    "card",
+                    "check"
+                  ]
+                },
+                "amount": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d{2}$"
+                },
+                "referenceCode": {
+                  "type": "string",
+                  "maxLength": 50
+                }
+              },
+              "required": [
+                "method",
+                "amount"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "saleId",
+          "shiftId",
+          "lines",
+          "refundPayments"
+        ]
+      },
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "phone",
+          "email",
+          "createdAt"
+        ]
       }
     },
     "parameters": {}
@@ -1083,7 +1189,17 @@
     },
     "/products": {
       "get": {
-        "description": "List the caller's tenant's products with variants and current stock.",
+        "description": "List the caller's tenant's products with variants and current stock. Optional `search` filters to an exact-sku or partial-name match (CHECK-01/CHECK-02).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
             "description": "List of products",
@@ -1466,6 +1582,64 @@
           },
           "404": {
             "description": "Sale not found"
+          }
+        }
+      }
+    },
+    "/returns": {
+      "post": {
+        "description": "Process a partial or full return/refund against a prior sale (CHECK-07, D-09 through D-12). Writes a positive-delta return stock movement and refund payment row(s) against the original payment method — server-validated against the original sale's actual payment methods (D-10).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReturnRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Return processed"
+          },
+          "400": {
+            "description": "Invalid request, over-return, refund-sum mismatch, or refund method not used on the original sale"
+          },
+          "404": {
+            "description": "Sale or line item not found"
+          },
+          "409": {
+            "description": "Target shift is already closed"
+          }
+        }
+      }
+    },
+    "/customers": {
+      "get": {
+        "description": "Search customers by phone, email, or name (CUST-01, D-09).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching customers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Customer"
+                  }
+                }
+              }
+            }
           }
         }
       }

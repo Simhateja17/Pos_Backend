@@ -7,6 +7,8 @@ import membersRouter from './members'
 import productsRouter from './products'
 import stockMovementsRouter from './stockMovements'
 import salesRouter from './sales'
+import returnsRouter from './returns'
+import customersRouter from './customers'
 
 const router = Router()
 
@@ -27,5 +29,7 @@ router.use('/members', authMiddleware, operatorContext, membersRouter)
 router.use('/products', authMiddleware, operatorContext, productsRouter)
 router.use('/stock-movements', authMiddleware, operatorContext, stockMovementsRouter)
 router.use('/sales', authMiddleware, operatorContext, salesRouter)
+router.use('/returns', authMiddleware, operatorContext, returnsRouter)
+router.use('/customers', authMiddleware, operatorContext, customersRouter)
 
 export default router
