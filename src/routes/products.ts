@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { CreateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
-import { forTenant } from '../db/tenantClient'
+import { forTenant, forTenantTransaction } from '../db/tenantClient'
 
 const router = Router()
 
@@ -118,33 +118,41 @@ router.post('/', async (req, res) => {
   }
 
   const tenantId = req.user!.tenantId
-  const client = forTenant(tenantId) as any
 
   try {
-    const product = await client.products.create({
-      data: { tenant_id: tenantId, name: parsed.data.name, category: parsed.data.category ?? null },
+    // CR-02: the whole product + N variants create runs as ONE real DB
+    // transaction, not N independently-committed forTenant() calls — a
+    // mid-loop failure (SKU collision, DB error) now rolls back the
+    // product and every variant created so far, instead of leaving a
+    // partial product permanently committed.
+    const { product, createdVariants } = await forTenantTransaction(tenantId, async (tx) => {
+      const product = await tx.products.create({
+        data: { tenant_id: tenantId, name: parsed.data.name, category: parsed.data.category ?? null },
+      })
+
+      const createdVariants: VariantRow[] = []
+      for (let i = 0; i < parsed.data.variants.length; i++) {
+        const input = parsed.data.variants[i]
+        const sku = input.sku ?? (await generateSku(tx, tenantId, parsed.data.name, createdVariants.length, i))
+        const variant = await tx.variants.create({
+          data: {
+            tenant_id: tenantId,
+            product_id: product.id,
+            sku,
+            size: input.size ?? null,
+            color: input.color ?? null,
+            material: input.material ?? null,
+            price: input.price,
+            reorder_threshold: input.reorderThreshold ?? 4,
+          },
+        })
+        createdVariants.push(variant)
+      }
+
+      return { product, createdVariants }
     })
 
-    const createdVariants: VariantRow[] = []
-    for (let i = 0; i < parsed.data.variants.length; i++) {
-      const input = parsed.data.variants[i]
-      const sku = input.sku ?? (await generateSku(client, tenantId, parsed.data.name, createdVariants.length, i))
-      const variant = await client.variants.create({
-        data: {
-          tenant_id: tenantId,
-          product_id: product.id,
-          sku,
-          size: input.size ?? null,
-          color: input.color ?? null,
-          material: input.material ?? null,
-          price: input.price,
-          reorder_threshold: input.reorderThreshold ?? 4,
-        },
-      })
-      createdVariants.push(variant)
-    }
-
-    const variantJson = createdVariants.map((v) => toVariantJson(v, 0))
+    const variantJson = createdVariants.map((v: VariantRow) => toVariantJson(v, 0))
     return res.status(201).json(toProductJson(product, variantJson))
   } catch (err: any) {
     if (err.code === 'P2002') {

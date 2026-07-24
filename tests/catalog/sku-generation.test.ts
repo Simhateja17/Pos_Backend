@@ -25,6 +25,15 @@ vi.mock('../../src/db/tenantClient', () => ({
       findFirst: variantsFindFirstMock,
     },
   })),
+  // CR-02: POST /products now runs its writes through forTenantTransaction,
+  // not forTenant() — the mock callback receives the same tx-shaped client
+  // the real one passes into `fn`, so route behavior/tests are unaffected.
+  forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
+    fn({
+      products: { create: productsCreateMock },
+      variants: { create: variantsCreateMock, findFirst: variantsFindFirstMock },
+    }),
+  ),
 }))
 
 function fakeJwt(payload: Record<string, unknown>): string {
