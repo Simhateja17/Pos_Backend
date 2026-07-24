@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { SignupSchema, LoginSchema, AuthResponseSchema, SetPinSchema } from './schemas/auth'
 import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './schemas/member'
 import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
+import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -89,6 +90,53 @@ registry.registerPath({
     200: { description: 'Member deactivated', content: { 'application/json': { schema: MemberSchema } } },
     403: { description: 'Insufficient permissions' },
     404: { description: 'Member not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/products',
+  description: "List the caller's tenant's products with variants and current stock.",
+  responses: {
+    200: { description: 'List of products', content: { 'application/json': { schema: z.array(ProductSchema) } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/products',
+  description: 'Create a product with one or more variants (D-01/D-02). SKU auto-generated per variant unless supplied.',
+  request: { body: { content: { 'application/json': { schema: CreateProductSchema } } } },
+  responses: {
+    201: { description: 'Product created', content: { 'application/json': { schema: ProductSchema } } },
+    400: { description: 'Invalid request' },
+    409: { description: 'SKU collision' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/products/{productId}',
+  description: 'Get a single product with its variants and current stock.',
+  request: { params: z.object({ productId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Product', content: { 'application/json': { schema: ProductSchema } } },
+    404: { description: 'Product not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/products/{productId}/variants/{variantId}',
+  description: "Edit a variant. Price/reorderThreshold always editable; size/color/material blocked once stock has moved (D-04).",
+  request: {
+    params: z.object({ productId: z.string().uuid(), variantId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdateVariantSchema } } },
+  },
+  responses: {
+    200: { description: 'Variant updated', content: { 'application/json': { schema: VariantSchema } } },
+    404: { description: 'Variant not found' },
+    409: { description: 'Variant identity is locked' },
   },
 })
 

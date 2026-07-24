@@ -209,6 +209,180 @@
           "role"
         ]
       },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Variant"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "category",
+          "createdAt",
+          "variants"
+        ]
+      },
+      "Variant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "material": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "type": "string"
+          },
+          "reorderThreshold": {
+            "type": "integer"
+          },
+          "identityLocked": {
+            "type": "boolean"
+          },
+          "currentStock": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "productId",
+          "sku",
+          "size",
+          "color",
+          "material",
+          "price",
+          "reorderThreshold",
+          "identityLocked",
+          "currentStock",
+          "createdAt"
+        ]
+      },
+      "CreateProductRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9-]+$"
+                },
+                "size": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "color": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "material": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "price": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "reorderThreshold": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "price"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "name",
+          "variants"
+        ]
+      },
+      "UpdateVariantRequest": {
+        "type": "object",
+        "properties": {
+          "size": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "color": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "material": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "price": {
+            "type": "number",
+            "minimum": 0
+          },
+          "reorderThreshold": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "SetPinRequest": {
         "type": "object",
         "properties": {
@@ -455,6 +629,139 @@
           },
           "404": {
             "description": "Member not found"
+          }
+        }
+      }
+    },
+    "/products": {
+      "get": {
+        "description": "List the caller's tenant's products with variants and current stock.",
+        "responses": {
+          "200": {
+            "description": "List of products",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Product"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Create a product with one or more variants (D-01/D-02). SKU auto-generated per variant unless supplied.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Product created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "409": {
+            "description": "SKU collision"
+          }
+        }
+      }
+    },
+    "/products/{productId}": {
+      "get": {
+        "description": "Get a single product with its variants and current stock.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "productId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product not found"
+          }
+        }
+      }
+    },
+    "/products/{productId}/variants/{variantId}": {
+      "patch": {
+        "description": "Edit a variant. Price/reorderThreshold always editable; size/color/material blocked once stock has moved (D-04).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "productId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "variantId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVariantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Variant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Variant"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Variant not found"
+          },
+          "409": {
+            "description": "Variant identity is locked"
           }
         }
       }

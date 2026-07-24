@@ -4,6 +4,7 @@ import { operatorContext } from '../middleware/operatorContext'
 import authRouter from './auth'
 import pinRouter from './pin'
 import membersRouter from './members'
+import productsRouter from './products'
 
 const router = Router()
 
@@ -21,5 +22,6 @@ router.use('/auth', authRouter)
 // populated from a trusted source.
 router.use('/terminal/pin', authMiddleware, operatorContext, pinRouter)
 router.use('/members', authMiddleware, operatorContext, membersRouter)
+router.use('/products', authMiddleware, operatorContext, productsRouter)
 
 export default router
