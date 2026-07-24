@@ -323,6 +323,7 @@
               "properties": {
                 "sku": {
                   "type": "string",
+                  "maxLength": 40,
                   "pattern": "^[A-Za-z0-9-]+$"
                 },
                 "size": {

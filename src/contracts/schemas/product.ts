@@ -35,7 +35,7 @@ export const ProductSchema = z
 // Regex restricts to a safe charset (RESEARCH.md Security Domain V5) since this
 // string is later encoded directly into a CODE128 barcode and used in URL paths.
 export const CreateVariantInputSchema = z.object({
-  sku: z.string().regex(/^[A-Za-z0-9-]+$/).optional(),
+  sku: z.string().max(40).regex(/^[A-Za-z0-9-]+$/).optional(),
   size: z.string().max(50).optional(),
   color: z.string().max(50).optional(),
   material: z.string().max(50).optional(),
