@@ -661,6 +661,12 @@
             "items": {
               "$ref": "#/components/schemas/Payment"
             }
+          },
+          "businessName": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [

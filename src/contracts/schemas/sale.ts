@@ -81,6 +81,12 @@ export const SaleSchema = z
     createdAt: z.string(),
     lines: z.array(SaleLineItemSchema),
     payments: z.array(PaymentSchema),
+    // Populated on the POST /sales success response only (the tenant row is
+    // already loaded there) so the receipt component (03-07) can render the
+    // real store name without a second client-side fetch or a fabricated
+    // placeholder. Optional/nullable on GET /sales, /sales/:id since those
+    // paths don't currently load the tenant row.
+    businessName: z.string().nullable().optional(),
   })
   .openapi('Sale')
 

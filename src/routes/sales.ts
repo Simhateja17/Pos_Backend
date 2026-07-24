@@ -75,7 +75,7 @@ function toLineJson(row: any) {
   }
 }
 
-function toSaleJson(sale: any, lines: any[], payments: any[]) {
+function toSaleJson(sale: any, lines: any[], payments: any[], businessName?: string | null) {
   return {
     id: sale.id,
     clientSaleId: sale.client_sale_id,
@@ -90,6 +90,7 @@ function toSaleJson(sale: any, lines: any[], payments: any[]) {
     createdAt: sale.created_at.toISOString(),
     lines: lines.map(toLineJson),
     payments: payments.map(toPaymentJson),
+    businessName: businessName ?? null,
   }
 }
 
@@ -289,7 +290,7 @@ router.post('/', async (req, res) => {
 
       return {
         status: 201,
-        body: toSaleJson(sale, createdLines, createdPayments),
+        body: toSaleJson(sale, createdLines, createdPayments, tenant.business_name as string),
         receiptEmailTarget,
         businessName: tenant.business_name as string,
       }
