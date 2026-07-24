@@ -1,0 +1,136 @@
+import { Router } from 'express'
+import { CreateStockMovementSchema } from '../contracts/schemas/stockMovement'
+import { ROLE_RANK } from '../middleware/requireRole'
+import { forTenant } from '../db/tenantClient'
+
+const router = Router()
+
+type MovementRow = {
+  id: string
+  variant_id: string
+  movement_type: string
+  quantity_delta: number
+  reason_code: string | null
+  reason_note: string | null
+  created_by: string | null
+  created_at: Date
+}
+
+function toMovementJson(row: MovementRow) {
+  return {
+    id: row.id,
+    variantId: row.variant_id,
+    movementType: row.movement_type,
+    quantityDelta: row.quantity_delta,
+    reasonCode: row.reason_code,
+    reasonNote: row.reason_note,
+    createdBy: row.created_by,
+    createdAt: row.created_at.toISOString(),
+  }
+}
+
+// D-13: only manager+ can record ADJUSTMENT movements; receive/transfer are
+// open to any authenticated staff. Cannot use router-level requireRole()
+// since the gate depends on the request body, not just the route — this
+// mirrors requireRole's own acting-identity precedence exactly.
+function isAllowedToAdjust(req: import('express').Request): boolean {
+  const actingRole = req.actingStaff?.role ?? req.user?.role
+  if (!actingRole) return false
+  return ROLE_RANK[actingRole] >= ROLE_RANK.manager
+}
+
+async function resolveActingStaffId(client: any, req: import('express').Request): Promise<string | null> {
+  if (req.actingStaff?.id) return req.actingStaff.id
+  const staff = await client.staff_members.findFirst({ where: { user_id: req.user!.id } })
+  return staff?.id ?? null
+}
+
+/**
+ * POST / — record a stock movement (INV-01: append-only insert only, no
+ * update/delete path exists on this router or the DB grants). The
+ * variant_stock_levels balance is derived entirely by the 0008 migration's
+ * trigger — this handler never writes current stock itself (INV-02).
+ */
+router.post('/', async (req, res) => {
+  const parsed = CreateStockMovementSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request' })
+  }
+
+  if (parsed.data.movementType === 'adjustment' && !isAllowedToAdjust(req)) {
+    return res.status(403).json({ error: 'Insufficient permissions' })
+  }
+
+  const client = forTenant(req.user!.tenantId) as any
+  const createdBy = await resolveActingStaffId(client, req)
+
+  try {
+    const movement = await client.stock_movements.create({
+      data: {
+        tenant_id: req.user!.tenantId,
+        variant_id: parsed.data.variantId,
+        movement_type: parsed.data.movementType,
+        quantity_delta: parsed.data.quantityDelta,
+        reason_code: parsed.data.reasonCode ?? null,
+        reason_note: parsed.data.reasonNote ?? null,
+        created_by: createdBy,
+      },
+    })
+    return res.status(201).json(toMovementJson(movement))
+  } catch {
+    return res.status(400).json({ error: 'Could not record stock movement' })
+  }
+})
+
+/**
+ * GET /?variantId=X — read-only chronological movement history for one
+ * variant (INV-01). No mutation route exists for this data anywhere.
+ */
+router.get('/', async (req, res) => {
+  const variantId = req.query.variantId as string | undefined
+  if (!variantId) {
+    return res.status(400).json({ error: 'variantId query parameter is required' })
+  }
+  const client = forTenant(req.user!.tenantId) as any
+  const rows = await client.stock_movements.findMany({
+    where: { variant_id: variantId },
+    orderBy: { created_at: 'desc' },
+  })
+  res.json(rows.map(toMovementJson))
+})
+
+/**
+ * GET /low-stock — variants at/below their reorder_threshold (INV-03). Uses
+ * model-level findMany + in-memory filter rather than $queryRaw, since
+ * forTenant()'s tenant-context wrapper only intercepts $allModels operations,
+ * NOT $queryRaw (see tenantClient.ts's own documented caveat) — a raw query
+ * here would silently run with no tenant context set.
+ */
+router.get('/low-stock', async (req, res) => {
+  const client = forTenant(req.user!.tenantId) as any
+  const variants = await client.variants.findMany({})
+  const stockLevels = await client.variant_stock_levels.findMany({})
+  const stockByVariant = new Map(stockLevels.map((s: any) => [s.variant_id, s.quantity]))
+  const productIds = [...new Set(variants.map((v: any) => v.product_id))]
+  const products = await client.products.findMany({ where: { id: { in: productIds } } })
+  const productNameById = new Map(products.map((p: any) => [p.id, p.name]))
+
+  const lowStock = variants
+    .map((v: any) => ({ v, quantity: Number(stockByVariant.get(v.id) ?? 0) }))
+    .filter(({ v, quantity }: any) => quantity <= v.reorder_threshold)
+    .map(({ v, quantity }: any) => ({
+      variantId: v.id,
+      productId: v.product_id,
+      productName: productNameById.get(v.product_id) ?? '',
+      sku: v.sku,
+      size: v.size,
+      color: v.color,
+      material: v.material,
+      quantity,
+      reorderThreshold: v.reorder_threshold,
+    }))
+
+  res.json(lowStock)
+})
+
+export default router
