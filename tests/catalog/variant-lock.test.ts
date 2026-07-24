@@ -37,8 +37,8 @@ function tokenFor(role: 'owner' | 'manager' | 'cashier', tenantId = 'tenant-abc'
 }
 
 const lockedVariant = {
-  id: 'variant-1',
-  product_id: 'product-1',
+  id: '11111111-1111-4111-8111-111111111111',
+  product_id: '22222222-2222-4222-8222-222222222222',
   sku: 'BLUE-0001',
   size: 'M',
   color: 'Blue',
@@ -73,7 +73,7 @@ describe('products routes — variant identity lock (CATALOG-01/D-04)', () => {
 
     const app = await buildApp()
     const res = await request(app)
-      .patch('/products/product-1/variants/variant-1')
+      .patch('/products/22222222-2222-4222-8222-222222222222/variants/11111111-1111-4111-8111-111111111111')
       .set('Authorization', `Bearer ${tokenFor('owner')}`)
       .send({ size: 'L' })
 
@@ -85,16 +85,27 @@ describe('products routes — variant identity lock (CATALOG-01/D-04)', () => {
   it('Test 2: PATCH .../variants/:variantId changing only price on a locked variant succeeds (200)', async () => {
     variantsFindFirstMock.mockResolvedValue(lockedVariant)
     variantsUpdateMock.mockResolvedValue({ ...lockedVariant, price: '55.00' })
-    variantStockLevelsFindFirstMock.mockResolvedValue({ variant_id: 'variant-1', quantity: 3 })
+    variantStockLevelsFindFirstMock.mockResolvedValue({ variant_id: '11111111-1111-4111-8111-111111111111', quantity: 3 })
 
     const app = await buildApp()
     const res = await request(app)
-      .patch('/products/product-1/variants/variant-1')
+      .patch('/products/22222222-2222-4222-8222-222222222222/variants/11111111-1111-4111-8111-111111111111')
       .set('Authorization', `Bearer ${tokenFor('owner')}`)
       .send({ price: 55 })
 
     expect(res.status).toBe(200)
     expect(res.body.price).toBe('55.00')
     expect(variantsUpdateMock).toHaveBeenCalled()
+  })
+
+  it('Test 3 (WR-03): PATCH with a malformed (non-UUID) variantId returns 400 without hitting the DB', async () => {
+    const app = await buildApp()
+    const res = await request(app)
+      .patch('/products/22222222-2222-4222-8222-222222222222/variants/not-a-uuid')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send({ price: 55 })
+
+    expect(res.status).toBe(400)
+    expect(variantsFindFirstMock).not.toHaveBeenCalled()
   })
 })

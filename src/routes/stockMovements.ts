@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { z } from 'zod'
 import { CreateStockMovementSchema } from '../contracts/schemas/stockMovement'
 import { ROLE_RANK } from '../middleware/requireRole'
 import { forTenant } from '../db/tenantClient'
@@ -103,6 +104,9 @@ router.get('/', async (req, res) => {
   const variantId = req.query.variantId as string | undefined
   if (!variantId) {
     return res.status(400).json({ error: 'variantId query parameter is required' })
+  }
+  if (!z.string().uuid().safeParse(variantId).success) {
+    return res.status(400).json({ error: 'Invalid variantId' })
   }
   const client = forTenant(req.user!.tenantId) as any
   const rows = await client.stock_movements.findMany({

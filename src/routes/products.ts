@@ -1,6 +1,9 @@
 import { Router } from 'express'
+import { z } from 'zod'
 import { CreateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
+
+const uuidSchema = z.string().uuid()
 
 const router = Router()
 
@@ -85,6 +88,9 @@ router.get('/', async (req, res) => {
  * productId belonging to another tenant simply 404s.
  */
 router.get('/:productId', async (req, res) => {
+  if (!uuidSchema.safeParse(req.params.productId).success) {
+    return res.status(400).json({ error: 'Invalid productId' })
+  }
   const client = forTenant(req.user!.tenantId) as any
   const product = await client.products.findFirst({ where: { id: req.params.productId } })
   if (!product) {
@@ -169,6 +175,10 @@ router.post('/', async (req, res) => {
  * app-level check gives a friendly 409 before the DB trigger would raise.
  */
 router.patch('/:productId/variants/:variantId', async (req, res) => {
+  if (!uuidSchema.safeParse(req.params.productId).success || !uuidSchema.safeParse(req.params.variantId).success) {
+    return res.status(400).json({ error: 'Invalid productId or variantId' })
+  }
+
   const parsed = UpdateVariantSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request' })
