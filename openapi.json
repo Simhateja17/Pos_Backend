@@ -599,6 +599,296 @@
           "staffId",
           "pin"
         ]
+      },
+      "Sale": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clientSaleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "shiftId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "subtotal": {
+            "type": "string"
+          },
+          "discountAmount": {
+            "type": "string"
+          },
+          "taxAmount": {
+            "type": "string"
+          },
+          "totalAmount": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SaleLineItem"
+            }
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Payment"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "clientSaleId",
+          "shiftId",
+          "customerId",
+          "subtotal",
+          "discountAmount",
+          "taxAmount",
+          "totalAmount",
+          "status",
+          "createdBy",
+          "createdAt",
+          "lines",
+          "payments"
+        ]
+      },
+      "SaleLineItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "unitPrice": {
+            "type": "string"
+          },
+          "discountPercent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discountAmount": {
+            "type": "string"
+          },
+          "isTaxable": {
+            "type": "boolean"
+          },
+          "lineTotal": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "variantId",
+          "quantity",
+          "unitPrice",
+          "discountPercent",
+          "discountAmount",
+          "isTaxable",
+          "lineTotal"
+        ]
+      },
+      "Payment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "saleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "card",
+              "check"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "amount": {
+            "type": "string"
+          },
+          "referenceCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "saleId",
+          "method",
+          "direction",
+          "amount",
+          "referenceCode",
+          "createdBy",
+          "createdAt"
+        ]
+      },
+      "CreateSaleRequest": {
+        "type": "object",
+        "properties": {
+          "clientSaleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "shiftId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "variantId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "discountPercent": {
+                  "type": "string",
+                  "pattern": "^\\d{1,2}(\\.\\d{1,2})?$"
+                },
+                "discountAmount": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d{2}$"
+                }
+              },
+              "required": [
+                "variantId",
+                "quantity"
+              ]
+            },
+            "minItems": 1
+          },
+          "cartDiscountPercent": {
+            "type": "string",
+            "pattern": "^\\d{1,2}(\\.\\d{1,2})?$"
+          },
+          "cartDiscountAmount": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d{2}$"
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentInput"
+            },
+            "minItems": 1
+          },
+          "customer": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "phone": {
+                "type": "string",
+                "maxLength": 20
+              },
+              "email": {
+                "type": "string",
+                "maxLength": 200,
+                "format": "email"
+              }
+            }
+          }
+        },
+        "required": [
+          "clientSaleId",
+          "shiftId",
+          "lines",
+          "payments"
+        ]
+      },
+      "PaymentInput": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "card",
+              "check"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d{2}$"
+          },
+          "referenceCode": {
+            "type": "string",
+            "maxLength": 50
+          }
+        },
+        "required": [
+          "method",
+          "amount"
+        ]
       }
     },
     "parameters": {}
@@ -1073,6 +1363,109 @@
           },
           "401": {
             "description": "Incorrect PIN, locked out, or unauthenticated"
+          }
+        }
+      }
+    },
+    "/sales": {
+      "post": {
+        "description": "Complete a checkout sale — server recomputes totals, enforces payment-sum, gates above-threshold discounts behind manager+ approval (D-05), writes sale+lines+payments+stock movements atomically. Response includes the sale's payments array.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSaleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sale completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sale"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, variant not found, or payment sum mismatch"
+          },
+          "403": {
+            "description": "Discount exceeds the tenant's manager-approval threshold and the acting role is not manager+"
+          },
+          "409": {
+            "description": "Target shift is already closed"
+          }
+        }
+      },
+      "get": {
+        "description": "Look up prior sales by receipt number or customer search (D-09). Each returned sale includes its lines and payments.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "receiptNumber",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "customerSearch",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching sales",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Sale"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sales/{saleId}": {
+      "get": {
+        "description": "Get a single sale with its line items and payments.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "saleId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sale"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sale not found"
           }
         }
       }

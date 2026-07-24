@@ -7,6 +7,7 @@ import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './sche
 import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
 import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
+import { CreateSaleSchema, SaleSchema } from './schemas/sale'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -197,6 +198,40 @@ registry.registerPath({
   responses: {
     200: { description: 'PIN-switch successful', content: { 'application/json': { schema: PinSwitchResponseSchema } } },
     401: { description: 'Incorrect PIN, locked out, or unauthenticated' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/sales',
+  description: "Complete a checkout sale — server recomputes totals, enforces payment-sum, gates above-threshold discounts behind manager+ approval (D-05), writes sale+lines+payments+stock movements atomically. Response includes the sale's payments array.",
+  request: { body: { content: { 'application/json': { schema: CreateSaleSchema } } } },
+  responses: {
+    201: { description: 'Sale completed', content: { 'application/json': { schema: SaleSchema } } },
+    400: { description: 'Invalid request, variant not found, or payment sum mismatch' },
+    403: { description: "Discount exceeds the tenant's manager-approval threshold and the acting role is not manager+" },
+    409: { description: 'Target shift is already closed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/sales',
+  description: 'Look up prior sales by receipt number or customer search (D-09). Each returned sale includes its lines and payments.',
+  request: { query: z.object({ receiptNumber: z.string().uuid().optional(), customerSearch: z.string().optional() }) },
+  responses: {
+    200: { description: 'Matching sales', content: { 'application/json': { schema: z.array(SaleSchema) } } },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/sales/{saleId}',
+  description: 'Get a single sale with its line items and payments.',
+  request: { params: z.object({ saleId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Sale', content: { 'application/json': { schema: SaleSchema } } },
+    404: { description: 'Sale not found' },
   },
 })
 
