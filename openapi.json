@@ -6,6 +6,840 @@
   },
   "components": {
     "schemas": {
+      "OnboardingState": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OnboardingData"
+          },
+          "currentStep": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "data",
+          "currentStep",
+          "completed",
+          "completedAt"
+        ]
+      },
+      "OnboardingData": {
+        "type": "object",
+        "properties": {
+          "1": {
+            "$ref": "#/components/schemas/OnboardingBusinessIdentityStep"
+          },
+          "2": {
+            "$ref": "#/components/schemas/OnboardingGstComplianceStep"
+          },
+          "3": {
+            "$ref": "#/components/schemas/OnboardingStoreSetupStep"
+          },
+          "4": {
+            "$ref": "#/components/schemas/OnboardingBillingInvoiceStep"
+          },
+          "5": {
+            "$ref": "#/components/schemas/OnboardingPaymentMethodsStep"
+          },
+          "6": {
+            "$ref": "#/components/schemas/OnboardingProductCatalogStep"
+          },
+          "7": {
+            "$ref": "#/components/schemas/OnboardingHardwareDevicesStep"
+          },
+          "8": {
+            "$ref": "#/components/schemas/OnboardingTeamAccessStep"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OnboardingBusinessIdentityStep": {
+        "type": "object",
+        "properties": {
+          "storeCategory": {
+            "type": "string",
+            "enum": [
+              "fashion",
+              "beauty",
+              "electronics",
+              "footwear",
+              "jewellery",
+              "books",
+              "pharmacy",
+              "grocery",
+              "multi"
+            ]
+          },
+          "trialPlan": {
+            "type": "string",
+            "enum": [
+              "starter",
+              "growth",
+              "enterprise"
+            ]
+          },
+          "billingCycle": {
+            "type": "string",
+            "enum": [
+              "monthly",
+              "annual"
+            ]
+          },
+          "legalName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "tradeName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "businessStructure": {
+            "type": "string",
+            "enum": [
+              "pvtltd",
+              "llp",
+              "partnership",
+              "proprietorship",
+              "public",
+              "huf",
+              "trust"
+            ]
+          },
+          "yearEstablished": {
+            "type": "integer",
+            "minimum": 1800,
+            "maximum": 2026
+          },
+          "registrationNumber": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "natureOfBusiness": {
+            "type": "string",
+            "enum": [
+              "retailer",
+              "wholesaler",
+              "both",
+              "mfr_retail",
+              "service"
+            ]
+          },
+          "storeCount": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6-10",
+              "11-20",
+              "20+"
+            ]
+          }
+        },
+        "required": [
+          "storeCategory",
+          "trialPlan",
+          "billingCycle",
+          "legalName",
+          "businessStructure",
+          "yearEstablished",
+          "natureOfBusiness",
+          "storeCount"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingGstComplianceStep": {
+        "type": "object",
+        "properties": {
+          "gstStatus": {
+            "type": "string",
+            "enum": [
+              "regular",
+              "composition",
+              "unregistered"
+            ]
+          },
+          "gstin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 15
+          },
+          "pan": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10
+          },
+          "placeOfSupply": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "fssai": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30
+          },
+          "drugLicense": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "msmeRegistration": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "shopEstablishmentLicense": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "eInvoiceEnabled": {
+            "type": "boolean"
+          },
+          "eWayBillEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "gstStatus",
+          "placeOfSupply",
+          "eInvoiceEnabled",
+          "eWayBillEnabled"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingStoreSetupStep": {
+        "type": "object",
+        "properties": {
+          "storeName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "addressLine1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          },
+          "addressLine2": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          },
+          "postalCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12
+          },
+          "city": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "storeType": {
+            "type": "string",
+            "enum": [
+              "mall_kiosk",
+              "mall_shop",
+              "high_street",
+              "standalone",
+              "airport",
+              "outlet"
+            ]
+          },
+          "storeClassification": {
+            "type": "string",
+            "enum": [
+              "flagship",
+              "branch",
+              "franchise",
+              "popup"
+            ]
+          },
+          "carpetAreaSqFt": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 1000000
+          },
+          "storeCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30
+          },
+          "openingTime": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}$"
+          },
+          "managerName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "managerPhone": {
+            "type": "string",
+            "minLength": 7,
+            "maxLength": 24
+          }
+        },
+        "required": [
+          "storeName",
+          "addressLine1",
+          "postalCode",
+          "city",
+          "state",
+          "storeType",
+          "storeClassification",
+          "openingTime"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingBillingInvoiceStep": {
+        "type": "object",
+        "properties": {
+          "invoicePrefix": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "invoiceStartNumber": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "paymentTermsDays": {
+            "type": "string",
+            "enum": [
+              "0",
+              "7",
+              "15",
+              "30",
+              "45",
+              "60"
+            ]
+          },
+          "gstPricingMode": {
+            "type": "string",
+            "enum": [
+              "exclusive",
+              "inclusive"
+            ]
+          },
+          "defaultGstSlab": {
+            "type": "string",
+            "enum": [
+              "0",
+              "5",
+              "12",
+              "18",
+              "28"
+            ]
+          },
+          "rounding": {
+            "type": "string",
+            "enum": [
+              "nearest1",
+              "nearest50p",
+              "none"
+            ]
+          },
+          "financialYearStart": {
+            "type": "string",
+            "enum": [
+              "april",
+              "jan"
+            ]
+          },
+          "printHsn": {
+            "type": "boolean"
+          },
+          "printDuplicateCopy": {
+            "type": "boolean"
+          },
+          "invoiceQrEnabled": {
+            "type": "boolean"
+          },
+          "invoiceFooter": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "invoicePrefix",
+          "invoiceStartNumber",
+          "paymentTermsDays",
+          "gstPricingMode",
+          "defaultGstSlab",
+          "rounding",
+          "financialYearStart",
+          "printHsn",
+          "printDuplicateCopy",
+          "invoiceQrEnabled"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingPaymentMethodsStep": {
+        "type": "object",
+        "properties": {
+          "cashEnabled": {
+            "type": "boolean"
+          },
+          "maxCashPerTransaction": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200000
+          },
+          "upiEnabled": {
+            "type": "boolean"
+          },
+          "upiPartner": {
+            "type": "string",
+            "enum": [
+              "razorpay",
+              "phonepe",
+              "bharatpe",
+              "paytm",
+              "pinelabs_upi",
+              "googlepay"
+            ]
+          },
+          "soundBoxEnabled": {
+            "type": "boolean"
+          },
+          "cardEnabled": {
+            "type": "boolean"
+          },
+          "cardProvider": {
+            "type": "string",
+            "enum": [
+              "pinelabs",
+              "mosambee",
+              "mswipe",
+              "hdfc",
+              "payu",
+              "plural"
+            ]
+          },
+          "contactlessEnabled": {
+            "type": "boolean"
+          },
+          "emiEnabled": {
+            "type": "boolean"
+          },
+          "giftCardEnabled": {
+            "type": "boolean"
+          },
+          "storeCreditEnabled": {
+            "type": "boolean"
+          },
+          "maxStoreCredit": {
+            "type": "number",
+            "minimum": 0
+          },
+          "splitPaymentEnabled": {
+            "type": "boolean"
+          },
+          "advancePaymentEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cashEnabled",
+          "upiEnabled",
+          "soundBoxEnabled",
+          "cardEnabled",
+          "contactlessEnabled",
+          "emiEnabled",
+          "giftCardEnabled",
+          "storeCreditEnabled",
+          "splitPaymentEnabled",
+          "advancePaymentEnabled"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingProductCatalogStep": {
+        "type": "object",
+        "properties": {
+          "skuCount": {
+            "type": "string",
+            "enum": [
+              "under100",
+              "100-500",
+              "500-2000",
+              "2000-10000",
+              "10000plus"
+            ]
+          },
+          "importMethod": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "barcode",
+              "tally",
+              "manual"
+            ]
+          },
+          "unitOfMeasure": {
+            "type": "string",
+            "enum": [
+              "piece",
+              "kg",
+              "gram",
+              "litre",
+              "ml",
+              "metre",
+              "box",
+              "pack",
+              "set",
+              "pair"
+            ]
+          },
+          "barcodeFormat": {
+            "type": "string",
+            "enum": [
+              "ean13",
+              "code128",
+              "qr",
+              "upca",
+              "internal"
+            ]
+          },
+          "hsnAutoLookup": {
+            "type": "boolean"
+          },
+          "mrpRequired": {
+            "type": "boolean"
+          },
+          "variantTracking": {
+            "type": "boolean"
+          },
+          "batchTracking": {
+            "type": "boolean"
+          },
+          "expiryTracking": {
+            "type": "boolean"
+          },
+          "serialTracking": {
+            "type": "boolean"
+          },
+          "serviceItemsEnabled": {
+            "type": "boolean"
+          },
+          "negativeStockPolicy": {
+            "type": "string",
+            "enum": [
+              "block",
+              "warn",
+              "allow"
+            ]
+          }
+        },
+        "required": [
+          "skuCount",
+          "importMethod",
+          "unitOfMeasure",
+          "barcodeFormat",
+          "hsnAutoLookup",
+          "mrpRequired",
+          "variantTracking",
+          "batchTracking",
+          "expiryTracking",
+          "serialTracking",
+          "serviceItemsEnabled",
+          "negativeStockPolicy"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingHardwareDevicesStep": {
+        "type": "object",
+        "properties": {
+          "billingCounters": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "5plus"
+            ]
+          },
+          "printerConnection": {
+            "type": "string",
+            "enum": [
+              "cloud",
+              "lan",
+              "bluetooth",
+              "none"
+            ]
+          },
+          "paperWidthMm": {
+            "type": "string",
+            "enum": [
+              "58",
+              "80"
+            ]
+          },
+          "scannerConnection": {
+            "type": "string",
+            "enum": [
+              "usb",
+              "bluetooth",
+              "rf",
+              "none"
+            ]
+          },
+          "cashDrawerMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual",
+              "none"
+            ]
+          },
+          "cardTerminalType": {
+            "type": "string",
+            "enum": [
+              "pinelabs",
+              "mosambee",
+              "order",
+              "none"
+            ]
+          },
+          "customerDisplayEnabled": {
+            "type": "boolean"
+          },
+          "weighingScaleEnabled": {
+            "type": "boolean"
+          },
+          "labelPrinterEnabled": {
+            "type": "boolean"
+          },
+          "kitchenDisplayEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "billingCounters",
+          "printerConnection",
+          "scannerConnection",
+          "cashDrawerMode",
+          "cardTerminalType",
+          "customerDisplayEnabled",
+          "weighingScaleEnabled",
+          "labelPrinterEnabled",
+          "kitchenDisplayEnabled"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingTeamAccessStep": {
+        "type": "object",
+        "properties": {
+          "approvalRules": {
+            "type": "object",
+            "properties": {
+              "discountEnabled": {
+                "type": "boolean"
+              },
+              "discountThresholdPercent": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "refundEnabled": {
+                "type": "boolean"
+              },
+              "voidEnabled": {
+                "type": "boolean"
+              },
+              "settingsEnabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "discountEnabled",
+              "discountThresholdPercent",
+              "refundEnabled",
+              "voidEnabled",
+              "settingsEnabled"
+            ],
+            "additionalProperties": false
+          },
+          "firstStaff": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "phone": {
+                "type": "string",
+                "minLength": 7,
+                "maxLength": 24
+              },
+              "email": {
+                "type": "string",
+                "maxLength": 200,
+                "format": "email"
+              },
+              "accessLevel": {
+                "type": "string",
+                "enum": [
+                  "cashier",
+                  "senior_cashier",
+                  "floor_staff",
+                  "manager"
+                ]
+              },
+              "defaultShift": {
+                "type": "string",
+                "enum": [
+                  "morning",
+                  "mid",
+                  "evening",
+                  "full"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "accessLevel",
+              "defaultShift"
+            ],
+            "additionalProperties": false
+          },
+          "openingFloatPerCounter": {
+            "type": "number",
+            "minimum": 0
+          },
+          "endOfDayReminder": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}$"
+          },
+          "autoClockOutHours": {
+            "type": "string",
+            "enum": [
+              "8",
+              "10",
+              "12"
+            ]
+          }
+        },
+        "required": [
+          "approvalRules",
+          "openingFloatPerCounter",
+          "endOfDayReminder",
+          "autoClockOutHours"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingStepNumber": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8
+      },
+      "OnboardingStepRequest": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/OnboardingBusinessIdentityStep"
+          },
+          {
+            "$ref": "#/components/schemas/OnboardingGstComplianceStep"
+          },
+          {
+            "$ref": "#/components/schemas/OnboardingStoreSetupStep"
+          },
+          {
+            "$ref": "#/components/schemas/OnboardingBillingInvoiceStep"
+          },
+          {
+            "$ref": "#/components/schemas/OnboardingPaymentMethodsStep"
+          },
+          {
+            "$ref": "#/components/schemas/OnboardingProductCatalogStep"
+          },
+          {
+            "$ref": "#/components/schemas/OnboardingHardwareDevicesStep"
+          },
+          {
+            "$ref": "#/components/schemas/OnboardingTeamAccessStep"
+          }
+        ]
+      },
+      "OnboardingCompletionResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/OnboardingState"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "object",
+                "properties": {
+                  "businessName": {
+                    "type": "string"
+                  },
+                  "storeName": {
+                    "type": "string"
+                  },
+                  "storeCategory": {
+                    "type": "string"
+                  },
+                  "trialPlan": {
+                    "type": "string"
+                  },
+                  "billingCounters": {
+                    "type": "string"
+                  },
+                  "gstStatus": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "businessName",
+                  "storeName",
+                  "storeCategory",
+                  "trialPlan",
+                  "billingCounters",
+                  "gstStatus"
+                ]
+              }
+            },
+            "required": [
+              "summary"
+            ]
+          }
+        ]
+      },
+      "CompleteOnboardingRequest": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
       "AuthResponse": {
         "type": "object",
         "properties": {
@@ -1167,6 +2001,112 @@
     "parameters": {}
   },
   "paths": {
+    "/onboarding": {
+      "get": {
+        "description": "Read the authenticated tenant's server-owned onboarding draft and completion state.",
+        "responses": {
+          "200": {
+            "description": "Persisted onboarding state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/onboarding/steps/{step}": {
+      "put": {
+        "description": "Save one validated onboarding step for the authenticated tenant. Owner-only.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/OnboardingStepNumber"
+            },
+            "required": true,
+            "name": "step",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingStepRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding step saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid step or step payload"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "409": {
+            "description": "Earlier steps are incomplete or onboarding is already complete"
+          }
+        }
+      }
+    },
+    "/onboarding/complete": {
+      "post": {
+        "description": "Complete onboarding only after all eight persisted steps pass server validation. Owner-only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteOnboardingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingCompletionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid completion request"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "409": {
+            "description": "One or more required onboarding steps are incomplete"
+          }
+        }
+      }
+    },
     "/auth/signup": {
       "post": {
         "description": "Real self-serve signup — creates a Supabase Auth user, a tenants row with the full business/tax profile, and an owner staff_members row.",

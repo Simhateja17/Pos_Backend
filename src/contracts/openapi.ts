@@ -11,6 +11,13 @@ import { CreateSaleSchema, SaleSchema, ResendReceiptInputSchema, ResendReceiptRe
 import { CreateReturnSchema } from './schemas/return'
 import { CustomerSchema } from './schemas/customer'
 import { OpenShiftSchema, CloseShiftSchema, ShiftSchema, XReportSchema, ZReportSchema } from './schemas/shift'
+import {
+  CompleteOnboardingSchema,
+  OnboardingCompletionResponseSchema,
+  OnboardingStateSchema,
+  OnboardingStepInputSchema,
+  OnboardingStepNumberSchema,
+} from './schemas/onboarding'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -19,6 +26,49 @@ import { OpenShiftSchema, CloseShiftSchema, ShiftSchema, XReportSchema, ZReportS
 // comment for the authoritative single-call-site note.
 
 const registry = new OpenAPIRegistry()
+
+registry.registerPath({
+  method: 'get',
+  path: '/onboarding',
+  description: "Read the authenticated tenant's server-owned onboarding draft and completion state.",
+  responses: {
+    200: { description: 'Persisted onboarding state', content: { 'application/json': { schema: OnboardingStateSchema } } },
+    401: { description: 'Unauthenticated' },
+  },
+})
+
+registry.registerPath({
+  method: 'put',
+  path: '/onboarding/steps/{step}',
+  description: 'Save one validated onboarding step for the authenticated tenant. Owner-only.',
+  request: {
+    params: z.object({ step: OnboardingStepNumberSchema }),
+    body: { content: { 'application/json': { schema: OnboardingStepInputSchema } } },
+  },
+  responses: {
+    200: { description: 'Onboarding step saved', content: { 'application/json': { schema: OnboardingStateSchema } } },
+    400: { description: 'Invalid step or step payload' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    409: { description: 'Earlier steps are incomplete or onboarding is already complete' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/onboarding/complete',
+  description: 'Complete onboarding only after all eight persisted steps pass server validation. Owner-only.',
+  request: {
+    body: { content: { 'application/json': { schema: CompleteOnboardingSchema } } },
+  },
+  responses: {
+    200: { description: 'Onboarding completed', content: { 'application/json': { schema: OnboardingCompletionResponseSchema } } },
+    400: { description: 'Invalid completion request' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    409: { description: 'One or more required onboarding steps are incomplete' },
+  },
+})
 
 registry.registerPath({
   method: 'post',

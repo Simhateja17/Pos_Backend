@@ -251,6 +251,8 @@ export const OnboardingStateSchema = z
   })
   .openapi('OnboardingState')
 
+export const CompleteOnboardingSchema = z.object({}).strict().openapi('CompleteOnboardingRequest')
+
 export const OnboardingCompletionResponseSchema = OnboardingStateSchema.extend({
   summary: z.object({
     businessName: z.string(),
