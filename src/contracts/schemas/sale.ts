@@ -1,0 +1,82 @@
+import { z } from 'zod'
+import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
+import { PaymentInputSchema, PaymentSchema } from './payment'
+
+extendZodWithOpenApi(z)
+
+// Mutually exclusive discount forms — request accepts either, persisted row
+// always ends up with a concrete computed dollar amount (RESEARCH.md Open
+// Question #2's resolution).
+export const SaleLineInputSchema = z
+  .object({
+    variantId: z.string().uuid(),
+    quantity: z.number().int().positive(),
+    discountPercent: z.string().regex(/^\d{1,2}(\.\d{1,2})?$/).optional(),
+    discountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
+  })
+  .refine((l) => !(l.discountPercent && l.discountAmount), {
+    message: 'Provide discountPercent or discountAmount, not both',
+    path: ['discountAmount'],
+  })
+
+export const CreateSaleSchema = z
+  .object({
+    clientSaleId: z.string().uuid(),
+    shiftId: z.string().uuid(),
+    lines: z.array(SaleLineInputSchema).min(1),
+    cartDiscountPercent: z.string().regex(/^\d{1,2}(\.\d{1,2})?$/).optional(),
+    cartDiscountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
+    payments: z.array(PaymentInputSchema).min(1),
+    customer: z
+      .object({
+        id: z.string().uuid().optional(),
+        name: z.string().max(200).optional(),
+        phone: z.string().max(20).optional(),
+        email: z.string().email().max(200).optional(),
+      })
+      .optional(),
+  })
+  .refine((data) => !(data.cartDiscountPercent && data.cartDiscountAmount), {
+    message: 'Provide cartDiscountPercent or cartDiscountAmount, not both',
+    path: ['cartDiscountAmount'],
+  })
+  .openapi('CreateSaleRequest')
+
+export const SaleLineItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    variantId: z.string().uuid(),
+    quantity: z.number().int(),
+    unitPrice: z.string(),
+    discountPercent: z.string().nullable(),
+    discountAmount: z.string(),
+    isTaxable: z.boolean(),
+    lineTotal: z.string(),
+  })
+  .openapi('SaleLineItem')
+
+// SaleSchema.payments is REQUIRED, not optional — every sale has at least one
+// payment row (checkout enforces payments.min(1)) and every read path
+// (GET /sales, GET /sales/:id) must populate it, since the returns page (D-10)
+// reads sale.payments to render "Refunded to the original payment method: {method}."
+// This array also carries direction:'refund' rows once a return is processed.
+export const SaleSchema = z
+  .object({
+    id: z.string().uuid(),
+    clientSaleId: z.string().uuid(),
+    shiftId: z.string().uuid().nullable(),
+    customerId: z.string().uuid().nullable(),
+    subtotal: z.string(),
+    discountAmount: z.string(),
+    taxAmount: z.string(),
+    totalAmount: z.string(),
+    status: z.string(),
+    createdBy: z.string().uuid().nullable(),
+    createdAt: z.string(),
+    lines: z.array(SaleLineItemSchema),
+    payments: z.array(PaymentSchema),
+  })
+  .openapi('Sale')
+
+export type CreateSaleInput = z.infer<typeof CreateSaleSchema>
+export type Sale = z.infer<typeof SaleSchema>
