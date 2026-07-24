@@ -6,6 +6,7 @@ import { SignupSchema, LoginSchema, AuthResponseSchema, SetPinSchema } from './s
 import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './schemas/member'
 import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
 import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
+import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -137,6 +138,38 @@ registry.registerPath({
     200: { description: 'Variant updated', content: { 'application/json': { schema: VariantSchema } } },
     404: { description: 'Variant not found' },
     409: { description: 'Variant identity is locked' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/stock-movements',
+  description: 'Record a stock movement (receive/adjustment/transfer). Adjustment requires manager or owner role (D-13).',
+  request: { body: { content: { 'application/json': { schema: CreateStockMovementSchema } } } },
+  responses: {
+    201: { description: 'Movement recorded', content: { 'application/json': { schema: StockMovementSchema } } },
+    400: { description: 'Invalid request' },
+    403: { description: 'Insufficient permissions (adjustment requires manager+)' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/stock-movements',
+  description: 'Read-only movement history for a variant.',
+  request: { query: z.object({ variantId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Movement history', content: { 'application/json': { schema: z.array(StockMovementSchema) } } },
+    400: { description: 'variantId is required' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/stock-movements/low-stock',
+  description: 'Variants at or below their reorder threshold (INV-03).',
+  responses: {
+    200: { description: 'Low-stock variants', content: { 'application/json': { schema: z.array(LowStockVariantSchema) } } },
   },
 })
 

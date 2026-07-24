@@ -383,6 +383,163 @@
           }
         }
       },
+      "StockMovement": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "movementType": {
+            "type": "string",
+            "enum": [
+              "sale",
+              "receive",
+              "adjustment",
+              "return",
+              "transfer"
+            ]
+          },
+          "quantityDelta": {
+            "type": "integer"
+          },
+          "reasonCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "damage",
+              "shrinkage_theft",
+              "count_correction",
+              "other",
+              null
+            ]
+          },
+          "reasonNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "variantId",
+          "movementType",
+          "quantityDelta",
+          "reasonCode",
+          "reasonNote",
+          "createdBy",
+          "createdAt"
+        ]
+      },
+      "CreateStockMovementRequest": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "movementType": {
+            "type": "string",
+            "enum": [
+              "receive",
+              "adjustment",
+              "transfer"
+            ]
+          },
+          "quantityDelta": {
+            "type": "integer"
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "damage",
+              "shrinkage_theft",
+              "count_correction",
+              "other"
+            ]
+          },
+          "reasonNote": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "variantId",
+          "movementType",
+          "quantityDelta"
+        ]
+      },
+      "LowStockVariant": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "material": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "reorderThreshold": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "variantId",
+          "productId",
+          "productName",
+          "sku",
+          "size",
+          "color",
+          "material",
+          "quantity",
+          "reorderThreshold"
+        ]
+      },
       "SetPinRequest": {
         "type": "object",
         "properties": {
@@ -762,6 +919,90 @@
           },
           "409": {
             "description": "Variant identity is locked"
+          }
+        }
+      }
+    },
+    "/stock-movements": {
+      "post": {
+        "description": "Record a stock movement (receive/adjustment/transfer). Adjustment requires manager or owner role (D-13).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStockMovementRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Movement recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockMovement"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Insufficient permissions (adjustment requires manager+)"
+          }
+        }
+      },
+      "get": {
+        "description": "Read-only movement history for a variant.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "variantId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Movement history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StockMovement"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "variantId is required"
+          }
+        }
+      }
+    },
+    "/stock-movements/low-stock": {
+      "get": {
+        "description": "Variants at or below their reorder threshold (INV-03).",
+        "responses": {
+          "200": {
+            "description": "Low-stock variants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LowStockVariant"
+                  }
+                }
+              }
+            }
           }
         }
       }
