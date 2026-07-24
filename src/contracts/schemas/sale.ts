@@ -35,6 +35,12 @@ export const CreateSaleSchema = z
         email: z.string().email().max(200).optional(),
       })
       .optional(),
+    // CHECK-06: optional explicit email target for the fire-and-forget receipt
+    // send at charge time, sourced from the checkout UI's "Email receipt"
+    // action — independent of `customer.email` (a walk-in sale can still
+    // request a one-off receipt email without creating/matching a customer
+    // profile field for it).
+    receiptEmail: z.string().email().optional(),
   })
   .refine((data) => !(data.cartDiscountPercent && data.cartDiscountAmount), {
     message: 'Provide cartDiscountPercent or cartDiscountAmount, not both',
@@ -78,5 +84,24 @@ export const SaleSchema = z
   })
   .openapi('Sale')
 
+// CHECK-06: real resend-receipt request/response contract. `email` is
+// optional — when omitted, the resend endpoint resolves the sale's own
+// on-file customer email instead (never a client-guessed cross-tenant
+// address, per T-03-19).
+export const ResendReceiptInputSchema = z
+  .object({
+    email: z.string().email().optional(),
+  })
+  .openapi('ResendReceiptRequest')
+
+export const ResendReceiptResponseSchema = z
+  .object({
+    ok: z.boolean(),
+    email: z.string().email(),
+  })
+  .openapi('ResendReceiptResponse')
+
 export type CreateSaleInput = z.infer<typeof CreateSaleSchema>
 export type Sale = z.infer<typeof SaleSchema>
+export type ResendReceiptInput = z.infer<typeof ResendReceiptInputSchema>
+export type ResendReceiptResponse = z.infer<typeof ResendReceiptResponseSchema>

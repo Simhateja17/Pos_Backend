@@ -1,11 +1,12 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
-import { CreateSaleSchema } from '../contracts/schemas/sale'
+import { CreateSaleSchema, ResendReceiptInputSchema } from '../contracts/schemas/sale'
 import { ROLE_RANK } from '../middleware/requireRole'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { computeCheckout } from '../lib/money'
 import { findOrCreateCustomer, searchCustomers } from '../lib/customers'
+import { sendReceiptEmail } from '../lib/receiptEmail'
 
 const router = Router()
 
@@ -278,7 +279,20 @@ router.post('/', async (req, res) => {
         })
       }
 
-      return { status: 201, body: toSaleJson(sale, createdLines, createdPayments) }
+      // CHECK-06: resolve the fire-and-forget receipt-email target — the
+      // caller-supplied receiptEmail, else customer.email from the request,
+      // else the found/created customer row's own on-file email. This is
+      // captured here (still inside the transaction, before commit) since
+      // `customer` and `tenant` are only in scope here; the actual send
+      // happens AFTER the transaction commits and the HTTP response is sent.
+      const receiptEmailTarget = parsed.data.receiptEmail ?? parsed.data.customer?.email ?? (customer as any)?.email ?? null
+
+      return {
+        status: 201,
+        body: toSaleJson(sale, createdLines, createdPayments),
+        receiptEmailTarget,
+        businessName: tenant.business_name as string,
+      }
     })
 
     // Dispatch explicitly per status so each response path is grep-able and
@@ -293,8 +307,31 @@ router.post('/', async (req, res) => {
         return res.status(403).json(result.body)
       case 400:
         return res.status(400).json(result.body)
-      default:
-        return res.status(201).json(result.body)
+      default: {
+        const successBody = result.body as { id: string; totalAmount: string }
+        res.status(201).json(successBody)
+        // CHECK-06: fire-and-forget — deliberately NOT awaited. A slow/failed
+        // email must never delay or fail the sale's own HTTP response (the
+        // sale already committed above). `void` makes the intentional
+        // non-await explicit; any { ok: false } outcome is logged
+        // server-side only (T-03-15 — never surfaced to the client here).
+        const receiptEmailTarget = (result as any).receiptEmailTarget as string | null
+        const businessName = (result as any).businessName as string | undefined
+        if (receiptEmailTarget) {
+          void sendReceiptEmail({
+            to: receiptEmailTarget,
+            saleId: successBody.id,
+            totalAmount: successBody.totalAmount,
+            businessName: businessName ?? '',
+          }).then((outcome) => {
+            if (!outcome.ok) {
+              // eslint-disable-next-line no-console
+              console.error(`Receipt email failed for sale ${successBody.id}: ${outcome.error}`)
+            }
+          })
+        }
+        return
+      }
     }
   } catch (err: any) {
     // Postgres floor-guard (23514, adjustment/transfer only from this route's
@@ -362,6 +399,60 @@ router.get('/:saleId', async (req, res) => {
   const lines = await client.sale_line_items.findMany({ where: { sale_id: sale.id } })
   const payments = await client.payments.findMany({ where: { sale_id: sale.id } })
   res.json(toSaleJson(sale, lines, payments))
+})
+
+/**
+ * POST /:saleId/resend-receipt — CHECK-06's real retriable resend endpoint.
+ * Unlike the fire-and-forget call on the original charge path, this handler
+ * `await`s sendReceiptEmail directly and returns its REAL outcome — the
+ * entire point of this endpoint is to report success/failure synchronously
+ * to the caller, so the frontend never has to fabricate an outcome.
+ */
+router.post('/:saleId/resend-receipt', async (req, res) => {
+  if (!z.string().uuid().safeParse(req.params.saleId).success) {
+    return res.status(400).json({ error: 'Invalid saleId' })
+  }
+
+  const parsed = ResendReceiptInputSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request' })
+  }
+
+  const client = forTenant(req.user!.tenantId) as any
+  // CR-01/T-03-19: tenant-scoped lookup — a saleId belonging to another
+  // tenant simply returns 404, identical to every other tenant-scoped miss
+  // elsewhere in this codebase.
+  const sale = await client.sales.findFirst({ where: { id: req.params.saleId } })
+  if (!sale) {
+    return res.status(404).json({ error: 'Sale not found' })
+  }
+
+  let email = parsed.data.email
+  if (!email && sale.customer_id) {
+    const customer = await client.customers.findFirst({ where: { id: sale.customer_id } })
+    email = customer?.email ?? undefined
+  }
+  if (!email) {
+    return res.status(400).json({ error: 'No email address is on file for this sale — enter one to send a receipt.' })
+  }
+
+  const tenant = await client.tenants.findFirst({ where: { id: req.user!.tenantId } })
+  const result = await sendReceiptEmail({
+    to: email,
+    saleId: sale.id,
+    totalAmount: sale.total_amount.toString(),
+    businessName: tenant?.business_name ?? '',
+  })
+
+  if (!result.ok) {
+    // T-03-15: never forward the raw provider error to the client — only the
+    // exact UI-SPEC copy contract string.
+    return res.status(502).json({
+      error: "Couldn't send the receipt email. The sale is saved — try emailing it again from the receipt lookup.",
+    })
+  }
+
+  return res.status(200).json({ ok: true, email })
 })
 
 export default router
