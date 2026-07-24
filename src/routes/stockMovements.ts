@@ -62,6 +62,19 @@ router.post('/', async (req, res) => {
   }
 
   const client = forTenant(req.user!.tenantId) as any
+
+  // CR-01: the variants FK only constrains variant_id to *some* row in
+  // public.variants, not one owned by the caller's tenant, and
+  // apply_stock_movement() is SECURITY DEFINER so it bypasses RLS on
+  // update. Without this check an attacker can corrupt another tenant's
+  // stock levels / identity-lock their variants by guessing a UUID.
+  // findFirst here is RLS-scoped via forTenant(), so a variant belonging
+  // to another tenant simply won't be found.
+  const variant = await client.variants.findFirst({ where: { id: parsed.data.variantId } })
+  if (!variant) {
+    return res.status(404).json({ error: 'Variant not found' })
+  }
+
   const createdBy = await resolveActingStaffId(client, req)
 
   try {

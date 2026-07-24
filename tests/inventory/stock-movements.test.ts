@@ -16,6 +16,7 @@ vi.mock('@supabase/supabase-js', () => ({
 const stockMovementsCreateMock = vi.fn()
 const stockMovementsFindManyMock = vi.fn()
 const staffMembersFindFirstMock = vi.fn()
+const variantsFindFirstMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
@@ -25,6 +26,9 @@ vi.mock('../../src/db/tenantClient', () => ({
     },
     staff_members: {
       findFirst: staffMembersFindFirstMock,
+    },
+    variants: {
+      findFirst: variantsFindFirstMock,
     },
   })),
 }))
@@ -45,8 +49,13 @@ describe('stock-movements routes (INV-01)', () => {
     stockMovementsCreateMock.mockReset()
     stockMovementsFindManyMock.mockReset()
     staffMembersFindFirstMock.mockReset()
+    variantsFindFirstMock.mockReset()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
     staffMembersFindFirstMock.mockResolvedValue({ id: 'staff-1' })
+    // CR-01: the caller's tenant-scoped variant lookup finds the variant by
+    // default; individual tests override to null to simulate a cross-tenant
+    // (not found) variant.
+    variantsFindFirstMock.mockResolvedValue({ id: '11111111-1111-4111-8111-111111111111' })
   })
 
   async function buildApp() {
@@ -167,5 +176,18 @@ describe('stock-movements routes (INV-01)', () => {
         orderBy: { created_at: 'desc' },
       }),
     )
+  })
+
+  it('Test 5 (CR-01): POST /stock-movements with a variantId that does not resolve within the caller\'s own tenant returns 404 and never inserts', async () => {
+    variantsFindFirstMock.mockResolvedValue(null)
+
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/stock-movements')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send({ variantId: '22222222-2222-4222-8222-222222222222', movementType: 'receive', quantityDelta: 5 })
+
+    expect(res.status).toBe(404)
+    expect(stockMovementsCreateMock).not.toHaveBeenCalled()
   })
 })
