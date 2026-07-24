@@ -42,7 +42,7 @@ function isAllowedToAdjust(req: import('express').Request): boolean {
 
 async function resolveActingStaffId(client: any, req: import('express').Request): Promise<string | null> {
   if (req.actingStaff?.id) return req.actingStaff.id
-  const staff = await client.staff_members.findFirst({ where: { user_id: req.user!.id } })
+  const staff = await client.staff_members.findFirst({ where: { user_id: req.user!.id, is_active: true } })
   return staff?.id ?? null
 }
 
