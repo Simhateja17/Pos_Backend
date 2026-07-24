@@ -7,9 +7,10 @@ import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './sche
 import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
 import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
-import { CreateSaleSchema, SaleSchema } from './schemas/sale'
+import { CreateSaleSchema, SaleSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema } from './schemas/sale'
 import { CreateReturnSchema } from './schemas/return'
 import { CustomerSchema } from './schemas/customer'
+import { OpenShiftSchema, CloseShiftSchema, ShiftSchema, XReportSchema, ZReportSchema } from './schemas/shift'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -258,6 +259,58 @@ registry.registerPath({
   request: { query: z.object({ search: z.string().optional() }) },
   responses: {
     200: { description: 'Matching customers', content: { 'application/json': { schema: z.array(CustomerSchema) } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/sales/{saleId}/resend-receipt',
+  description: 'Resend a receipt email for a completed sale (CHECK-06) — resolves a real target email and reports the actual send outcome.',
+  request: {
+    params: z.object({ saleId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: ResendReceiptInputSchema } } },
+  },
+  responses: {
+    200: { description: 'Receipt sent', content: { 'application/json': { schema: ResendReceiptResponseSchema } } },
+    400: { description: 'No email address available' },
+    404: { description: 'Sale not found' },
+    502: { description: 'Email delivery failed' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/shifts',
+  description: 'Open a shift with a starting cash count (D-14).',
+  request: { body: { content: { 'application/json': { schema: OpenShiftSchema } } } },
+  responses: {
+    201: { description: 'Shift opened', content: { 'application/json': { schema: ShiftSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/shifts/{shiftId}/x-report',
+  description: 'Live, non-resetting shift snapshot (D-15, CASH-02).',
+  request: { params: z.object({ shiftId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'X report', content: { 'application/json': { schema: XReportSchema } } },
+    404: { description: 'Shift not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/shifts/{shiftId}/close',
+  description: 'Close a shift (Z report) — counted cash, variance, locks the shift (D-15/D-16).',
+  request: {
+    params: z.object({ shiftId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: CloseShiftSchema } } },
+  },
+  responses: {
+    200: { description: 'Shift closed', content: { 'application/json': { schema: ZReportSchema } } },
+    404: { description: 'Shift not found' },
+    409: { description: 'Shift already closed' },
   },
 })
 

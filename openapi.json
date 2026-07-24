@@ -856,6 +856,10 @@
                 "format": "email"
               }
             }
+          },
+          "receiptEmail": {
+            "type": "string",
+            "format": "email"
           }
         },
         "required": [
@@ -994,6 +998,163 @@
           "phone",
           "email",
           "createdAt"
+        ]
+      },
+      "ResendReceiptResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "ok",
+          "email"
+        ]
+      },
+      "ResendReceiptRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "Shift": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "staffId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "startingCash": {
+            "type": "string"
+          },
+          "openedAt": {
+            "type": "string"
+          },
+          "countedCash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "variance": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "staffId",
+          "startingCash",
+          "openedAt",
+          "countedCash",
+          "variance",
+          "closedAt"
+        ]
+      },
+      "OpenShiftRequest": {
+        "type": "object",
+        "properties": {
+          "startingCash": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d{2}$"
+          }
+        },
+        "required": [
+          "startingCash"
+        ]
+      },
+      "XReport": {
+        "type": "object",
+        "properties": {
+          "shiftId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedCash": {
+            "type": "string"
+          },
+          "cashSalesTotal": {
+            "type": "string"
+          },
+          "cardSalesTotal": {
+            "type": "string"
+          },
+          "checkSalesTotal": {
+            "type": "string"
+          },
+          "refundsTotal": {
+            "type": "string"
+          },
+          "saleCount": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shiftId",
+          "expectedCash",
+          "cashSalesTotal",
+          "cardSalesTotal",
+          "checkSalesTotal",
+          "refundsTotal",
+          "saleCount"
+        ]
+      },
+      "ZReport": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/XReport"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "countedCash": {
+                "type": "string"
+              },
+              "variance": {
+                "type": "string"
+              },
+              "closedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "countedCash",
+              "variance",
+              "closedAt"
+            ]
+          }
+        ]
+      },
+      "CloseShiftRequest": {
+        "type": "object",
+        "properties": {
+          "countedCash": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d{2}$"
+          }
+        },
+        "required": [
+          "countedCash"
         ]
       }
     },
@@ -1640,6 +1801,152 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/sales/{saleId}/resend-receipt": {
+      "post": {
+        "description": "Resend a receipt email for a completed sale (CHECK-06) — resolves a real target email and reports the actual send outcome.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "saleId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendReceiptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Receipt sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResendReceiptResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No email address available"
+          },
+          "404": {
+            "description": "Sale not found"
+          },
+          "502": {
+            "description": "Email delivery failed"
+          }
+        }
+      }
+    },
+    "/shifts": {
+      "post": {
+        "description": "Open a shift with a starting cash count (D-14).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenShiftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Shift opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Shift"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shifts/{shiftId}/x-report": {
+      "get": {
+        "description": "Live, non-resetting shift snapshot (D-15, CASH-02).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "shiftId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "X report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/XReport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Shift not found"
+          }
+        }
+      }
+    },
+    "/shifts/{shiftId}/close": {
+      "post": {
+        "description": "Close a shift (Z report) — counted cash, variance, locks the shift (D-15/D-16).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "shiftId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseShiftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Shift closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZReport"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Shift not found"
+          },
+          "409": {
+            "description": "Shift already closed"
           }
         }
       }
