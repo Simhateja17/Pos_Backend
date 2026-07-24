@@ -500,18 +500,19 @@ model webauthn_credentials {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model staff_members {
-  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id        String    @db.Uuid
-  user_id          String?   @db.Uuid
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id        String            @db.Uuid
+  user_id          String?           @db.Uuid
   name             String
   role             String
   pin_hash         String?
-  pin_attempts     Int       @default(0)
-  pin_locked_until DateTime? @db.Timestamptz(6)
-  is_active        Boolean   @default(true)
-  created_at       DateTime  @default(now()) @db.Timestamptz(6)
-  tenants          tenants   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users            users?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  pin_attempts     Int               @default(0)
+  pin_locked_until DateTime?         @db.Timestamptz(6)
+  is_active        Boolean           @default(true)
+  created_at       DateTime          @default(now()) @db.Timestamptz(6)
+  tenants          tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users            users?            @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  stock_movements  stock_movements[]
 
   @@index([tenant_id], map: "idx_staff_members_tenant_id")
   @@index([user_id], map: "idx_staff_members_user_id")
@@ -520,18 +521,115 @@ model staff_members {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model tenants {
-  id                         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   business_name              String
   address_line1              String
   address_line2              String?
   city                       String
   state                      String
   postal_code                String
-  country                    String          @default("US")
+  country                    String                 @default("US")
   tax_id                     String?
-  discount_threshold_percent Decimal         @default(15.00) @db.Decimal(5, 2)
-  created_at                 DateTime        @default(now()) @db.Timestamptz(6)
+  discount_threshold_percent Decimal                @default(15.00) @db.Decimal(5, 2)
+  created_at                 DateTime               @default(now()) @db.Timestamptz(6)
   staff_members              staff_members[]
+  products                   products[]
+  variants                   variants[]
+  stock_movements            stock_movements[]
+  variant_stock_levels       variant_stock_levels[]
+
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model products {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String     @db.Uuid
+  name       String
+  category   String?
+  created_at DateTime   @default(now()) @db.Timestamptz(6)
+  tenants    tenants    @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  variants   variants[]
+
+  @@index([tenant_id], map: "idx_products_tenant_id")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model variants {
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id            String                @db.Uuid
+  product_id           String                @db.Uuid
+  sku                  String
+  size                 String?
+  color                String?
+  material             String?
+  price                Decimal               @db.Decimal(10, 2)
+  reorder_threshold    Int                   @default(4)
+  identity_locked      Boolean               @default(false)
+  created_at           DateTime              @default(now()) @db.Timestamptz(6)
+  tenants              tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  products             products              @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stock_movements      stock_movements[]
+  variant_stock_levels variant_stock_levels?
+
+  @@unique([tenant_id, sku])
+  @@index([tenant_id], map: "idx_variants_tenant_id")
+  @@index([product_id], map: "idx_variants_product_id")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model stock_movements {
+  id             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id      String                   @db.Uuid
+  variant_id     String                   @db.Uuid
+  movement_type  stock_movement_type
+  quantity_delta Int
+  reason_code    stock_adjustment_reason?
+  reason_note    String?
+  reference_id   String?                  @db.Uuid
+  created_by     String?                  @db.Uuid
+  created_at     DateTime                 @default(now()) @db.Timestamptz(6)
+  tenants        tenants                  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  variants       variants                 @relation(fields: [variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  staff_members  staff_members?           @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_stock_movements_tenant_id")
+  @@index([variant_id], map: "idx_stock_movements_variant_id")
+  @@index([created_at], map: "idx_stock_movements_created_at")
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model variant_stock_levels {
+  variant_id String   @id @db.Uuid
+  tenant_id  String   @db.Uuid
+  quantity   Int      @default(0)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  tenants    tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  variants   variants @relation(fields: [variant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@schema("public")
+}
+
+enum stock_movement_type {
+  sale
+  receive
+  adjustment
+  return
+  transfer
+
+  @@schema("public")
+}
+
+enum stock_adjustment_reason {
+  damage
+  shrinkage_theft
+  count_correction
+  other
 
   @@schema("public")
 }
