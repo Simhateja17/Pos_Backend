@@ -539,6 +539,9 @@ model tenants {
   tax_rate_city              Decimal                @default(0) @db.Decimal(6, 4)
   tax_rate_district          Decimal                @default(0) @db.Decimal(6, 4)
   tax_rounding_basis         String                 @default("per_invoice")
+  onboarding_data            Json                   @default("{}")
+  onboarding_step            Int                    @default(0) @db.SmallInt
+  onboarding_completed_at    DateTime?              @db.Timestamptz(6)
   created_at                 DateTime               @default(now()) @db.Timestamptz(6)
   staff_members              staff_members[]
   products                   products[]
