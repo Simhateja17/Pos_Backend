@@ -211,50 +211,49 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
     expect(ledger).toBe(80)
   }, 60000)
 
-  /**
-   * Test 8 and 9 assert the CORRECT behaviour of the 0009/0010 floor guard and
-   * currently FAIL — `it.fails` passes while the bug is present and turns red
-   * the moment it is fixed, so neither can be silently forgotten. Both were
-   * reproduced against the live project; see
-   * docs/reference/known-issues-phase-02.md ("Floor guard").
-   */
-  it.fails(
-    'Test 8: a stock-increasing `receive` is accepted even when the balance is still negative afterwards',
-    async () => {
-      const vId = await freshVariant()
-      await addMovement(vId, 'receive', 10)
-      await addMovement(vId, 'sale', -60) // D-17: sale may push negative
-      // -50 + 20 = -30: still negative, but a receipt ADDS stock and must never
-      // be refused. The guard tests the resulting sign, not the direction, so a
-      // partial receipt against an oversold variant is currently rejected.
-      await addMovement(vId, 'receive', 20)
+  // Tests 8-10 cover the two floor-guard defects found while verifying INV-02
+  // and fixed in 0019_stock_floor_guard_direction.sql. See
+  // docs/reference/known-issues-phase-02.md entries 02-06 and 02-07.
 
-      const { derived, ledger } = await derivedAndLedger(vId)
-      expect(derived).toBe(-30)
-      expect(ledger).toBe(-30)
-    },
-    60000,
-  )
+  it('Test 8 (02-06): a stock-increasing `receive` is accepted even when the balance is still negative afterwards', async () => {
+    const vId = await freshVariant()
+    await addMovement(vId, 'receive', 10)
+    await addMovement(vId, 'sale', -60) // D-17: sale may push negative
+    // -50 + 20 = -30: still negative, but a receipt ADDS stock and must never be
+    // refused. Partial receipt against an oversold variant is the normal case.
+    await addMovement(vId, 'receive', 20)
 
-  it.fails(
-    'Test 9: concurrent adjustments cannot breach the zero floor',
-    async () => {
-      const vId = await freshVariant()
-      await addMovement(vId, 'receive', 80)
+    const { derived, ledger } = await derivedAndLedger(vId)
+    expect(derived).toBe(-30)
+    expect(ledger).toBe(-30)
+  }, 60000)
 
-      // 20 simultaneous -8 adjustments against a balance of 80. At most 10 may
-      // succeed. The guard's `SELECT quantity INTO existing_qty` takes no row
-      // lock, so concurrent transactions all read the same pre-value and pass.
-      const results = await Promise.allSettled(
-        Array.from({ length: 20 }, () => addMovement(vId, 'adjustment', -8)),
-      )
-      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(10)
+  it('Test 9 (02-06 regression): an adjustment that genuinely decreases past zero is still rejected', async () => {
+    const vId = await freshVariant()
+    await addMovement(vId, 'receive', 5)
 
-      const { derived, ledger } = await derivedAndLedger(vId)
-      expect(derived).toBe(0)
-      expect(ledger).toBe(0)
-      expect(derived).toBeGreaterThanOrEqual(0)
-    },
-    60000,
-  )
+    await expect(addMovement(vId, 'adjustment', -9)).rejects.toThrow()
+
+    const { derived, ledger } = await derivedAndLedger(vId)
+    expect(derived).toBe(5)
+    expect(ledger).toBe(5)
+  }, 60000)
+
+  it('Test 10 (02-07): concurrent adjustments cannot breach the zero floor', async () => {
+    const vId = await freshVariant()
+    await addMovement(vId, 'receive', 80)
+
+    // 20 simultaneous -8 adjustments against a balance of 80: at most 10 may
+    // succeed. Before 0019 the guard read the balance without a row lock, so
+    // every transaction saw the same pre-value — 19 were accepted and the
+    // balance landed at -72.
+    const results = await Promise.allSettled(
+      Array.from({ length: 20 }, () => addMovement(vId, 'adjustment', -8)),
+    )
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(10)
+
+    const { derived, ledger } = await derivedAndLedger(vId)
+    expect(derived).toBe(0)
+    expect(ledger).toBe(0)
+  }, 60000)
 })
