@@ -510,12 +510,12 @@ model staff_members {
   pin_locked_until DateTime?         @db.Timestamptz(6)
   is_active        Boolean           @default(true)
   created_at       DateTime          @default(now()) @db.Timestamptz(6)
+  payments         payments[]
+  sales            sales[]
+  shifts           shifts[]
   tenants          tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users            users?            @relation(fields: [user_id], references: [id], onUpdate: NoAction)
   stock_movements  stock_movements[]
-  shifts           shifts[]
-  sales            sales[]
-  payments         payments[]
 
   @@index([tenant_id], map: "idx_staff_members_tenant_id")
   @@index([user_id], map: "idx_staff_members_user_id")
@@ -534,6 +534,7 @@ model tenants {
   country                    String                 @default("US")
   tax_id                     String?
   discount_threshold_percent Decimal                @default(15.00) @db.Decimal(5, 2)
+  created_at                 DateTime               @default(now()) @db.Timestamptz(6)
   tax_rate_state             Decimal                @default(0) @db.Decimal(6, 4)
   tax_rate_county            Decimal                @default(0) @db.Decimal(6, 4)
   tax_rate_city              Decimal                @default(0) @db.Decimal(6, 4)
@@ -542,17 +543,16 @@ model tenants {
   onboarding_data            Json                   @default("{}")
   onboarding_step            Int                    @default(0) @db.SmallInt
   onboarding_completed_at    DateTime?              @db.Timestamptz(6)
-  created_at                 DateTime               @default(now()) @db.Timestamptz(6)
-  staff_members              staff_members[]
+  customers                  customers[]
+  payments                   payments[]
   products                   products[]
-  variants                   variants[]
+  sale_line_items            sale_line_items[]
+  sales                      sales[]
+  shifts                     shifts[]
+  staff_members              staff_members[]
   stock_movements            stock_movements[]
   variant_stock_levels       variant_stock_levels[]
-  customers                  customers[]
-  shifts                     shifts[]
-  sales                      sales[]
-  sale_line_items            sale_line_items[]
-  payments                   payments[]
+  variants                   variants[]
 
   @@schema("public")
 }
@@ -584,13 +584,13 @@ model variants {
   price                Decimal               @db.Decimal(10, 2)
   reorder_threshold    Int                   @default(4)
   identity_locked      Boolean               @default(false)
-  is_taxable           Boolean               @default(true)
   created_at           DateTime              @default(now()) @db.Timestamptz(6)
-  tenants              tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  products             products              @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  is_taxable           Boolean               @default(true)
+  sale_line_items      sale_line_items[]
   stock_movements      stock_movements[]
   variant_stock_levels variant_stock_levels?
-  sale_line_items      sale_line_items[]
+  products             products              @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants              tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([tenant_id, sku])
   @@index([tenant_id], map: "idx_variants_tenant_id")
@@ -611,9 +611,9 @@ model stock_movements {
   reference_id   String?                  @db.Uuid
   created_by     String?                  @db.Uuid
   created_at     DateTime                 @default(now()) @db.Timestamptz(6)
+  staff_members  staff_members?           @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tenants        tenants                  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  variants       variants                 @relation(fields: [variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  staff_members  staff_members?           @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+  variants       variants                 @relation(fields: [variant_id], references: [id], onUpdate: NoAction)
 
   @@index([tenant_id], map: "idx_stock_movements_tenant_id")
   @@index([variant_id], map: "idx_stock_movements_variant_id")
@@ -635,6 +635,7 @@ model variant_stock_levels {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model customers {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id  String   @db.Uuid
@@ -645,24 +646,24 @@ model customers {
   tenants    tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   sales      sales[]
 
-  @@unique([tenant_id, phone], map: "idx_customers_tenant_phone")
+  @@unique([tenant_id, phone], map: "idx_customers_tenant_phone", where: raw("(phone IS NOT NULL)"))
   @@index([tenant_id], map: "idx_customers_tenant_id")
   @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model shifts {
-  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id     String         @db.Uuid
-  staff_id      String         @db.Uuid
-  starting_cash Decimal        @db.Decimal(12, 2)
-  opened_at     DateTime       @default(now()) @db.Timestamptz(6)
-  counted_cash  Decimal?       @db.Decimal(12, 2)
-  variance      Decimal?       @db.Decimal(12, 2)
-  closed_at     DateTime?      @db.Timestamptz(6)
-  tenants       tenants        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  staff_members staff_members  @relation(fields: [staff_id], references: [id], onUpdate: NoAction)
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id     String        @db.Uuid
+  staff_id      String        @db.Uuid
+  starting_cash Decimal       @db.Decimal(12, 2)
+  opened_at     DateTime      @default(now()) @db.Timestamptz(6)
+  counted_cash  Decimal?      @db.Decimal(12, 2)
+  variance      Decimal?      @db.Decimal(12, 2)
+  closed_at     DateTime?     @db.Timestamptz(6)
   sales         sales[]
+  staff_members staff_members @relation(fields: [staff_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants       tenants       @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([tenant_id], map: "idx_shifts_tenant_id")
   @@index([staff_id], map: "idx_shifts_staff_id")
@@ -671,24 +672,24 @@ model shifts {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model sales {
-  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id        String            @db.Uuid
-  client_sale_id   String            @db.Uuid
-  shift_id         String?           @db.Uuid
-  customer_id      String?           @db.Uuid
-  subtotal         Decimal           @db.Decimal(12, 2)
-  discount_amount  Decimal           @default(0) @db.Decimal(12, 2)
-  tax_amount       Decimal           @db.Decimal(12, 2)
-  total_amount     Decimal           @db.Decimal(12, 2)
-  status           String            @default("completed")
-  created_by       String?           @db.Uuid
-  created_at       DateTime          @default(now()) @db.Timestamptz(6)
-  tenants          tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  shifts           shifts?           @relation(fields: [shift_id], references: [id], onUpdate: NoAction)
-  customers        customers?        @relation(fields: [customer_id], references: [id], onUpdate: NoAction)
-  staff_members    staff_members?    @relation(fields: [created_by], references: [id], onUpdate: NoAction)
-  sale_line_items  sale_line_items[]
-  payments         payments[]
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id       String            @db.Uuid
+  client_sale_id  String            @db.Uuid
+  shift_id        String?           @db.Uuid
+  customer_id     String?           @db.Uuid
+  subtotal        Decimal           @db.Decimal(12, 2)
+  discount_amount Decimal           @default(0) @db.Decimal(12, 2)
+  tax_amount      Decimal           @db.Decimal(12, 2)
+  total_amount    Decimal           @db.Decimal(12, 2)
+  status          String            @default("completed")
+  created_by      String?           @db.Uuid
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  payments        payments[]
+  sale_line_items sale_line_items[]
+  staff_members   staff_members?    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  customers       customers?        @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shifts          shifts?           @relation(fields: [shift_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants         tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([tenant_id], map: "idx_sales_tenant_id")
   @@index([client_sale_id], map: "idx_sales_client_sale_id")
@@ -700,20 +701,20 @@ model sales {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model sale_line_items {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id         String   @db.Uuid
-  sale_id           String   @db.Uuid
-  variant_id        String   @db.Uuid
-  quantity          Int
-  unit_price        Decimal  @db.Decimal(10, 2)
-  discount_percent  Decimal? @db.Decimal(5, 2)
-  discount_amount   Decimal  @default(0) @db.Decimal(10, 2)
-  is_taxable        Boolean
-  line_total        Decimal  @db.Decimal(12, 2)
-  created_at        DateTime @default(now()) @db.Timestamptz(6)
-  tenants           tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  sales             sales    @relation(fields: [sale_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  variants          variants @relation(fields: [variant_id], references: [id], onUpdate: NoAction)
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id        String   @db.Uuid
+  sale_id          String   @db.Uuid
+  variant_id       String   @db.Uuid
+  quantity         Int
+  unit_price       Decimal  @db.Decimal(10, 2)
+  discount_percent Decimal? @db.Decimal(5, 2)
+  discount_amount  Decimal  @default(0) @db.Decimal(10, 2)
+  is_taxable       Boolean
+  line_total       Decimal  @db.Decimal(12, 2)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  sales            sales    @relation(fields: [sale_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants          tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  variants         variants @relation(fields: [variant_id], references: [id], onUpdate: NoAction)
 
   @@index([sale_id], map: "idx_sale_line_items_sale_id")
   @@index([tenant_id], map: "idx_sale_line_items_tenant_id")
@@ -732,9 +733,9 @@ model payments {
   reference_code String?
   created_by     String?           @db.Uuid
   created_at     DateTime          @default(now()) @db.Timestamptz(6)
-  tenants        tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  staff_members  staff_members?    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   sales          sales             @relation(fields: [sale_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  staff_members  staff_members?    @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+  tenants        tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([sale_id], map: "idx_payments_sale_id")
   @@index([tenant_id], map: "idx_payments_tenant_id")
