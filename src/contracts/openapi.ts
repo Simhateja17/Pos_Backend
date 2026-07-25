@@ -29,6 +29,7 @@ import {
   MappingSuggestionSchema,
   UploadImportSchema,
 } from './schemas/import'
+import { ReportCatalogSchema, ReportQuerySchema, ReportTableSchema } from './schemas/reports'
 import { SupplierSchema, SupplierListSchema, CreateSupplierInputSchema, UpdateSupplierInputSchema } from './schemas/supplier'
 import { ReorderSuggestionListSchema } from './schemas/reorder'
 import {
@@ -642,6 +643,29 @@ registry.registerPath({
     403: { description: 'Owner role required' },
     404: { description: 'No such import' },
     409: { description: 'That import has already been applied' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/reports/catalog',
+  description: 'List the reports this store can run.',
+  responses: {
+    200: { description: 'Available reports', content: { 'application/json': { schema: ReportCatalogSchema } } },
+    401: { description: 'Unauthenticated' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/reports',
+  description: 'REPORT-01: run one report over a business-date range in the tenant timezone. Manager or owner.',
+  request: { query: ReportQuerySchema },
+  responses: {
+    200: { description: 'Report table', content: { 'application/json': { schema: ReportTableSchema } } },
+    400: { description: 'Unknown report or invalid range' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Manager or owner role required' },
   },
 })
 
