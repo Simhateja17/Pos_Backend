@@ -553,7 +553,28 @@ model tenants {
   stock_movements            stock_movements[]
   variant_stock_levels       variant_stock_levels[]
   variants                   variants[]
+  suppliers                  suppliers[]
 
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model suppliers {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id       String   @db.Uuid
+  name            String
+  contact_name    String?
+  email           String?
+  phone           String?
+  address         String?
+  lead_time_days  Int      @default(7)
+  min_order_value Decimal? @db.Decimal(12, 2)
+  payment_terms   String?
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  tenants         tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_suppliers_tenant_id")
   @@schema("public")
 }
 

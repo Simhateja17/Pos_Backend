@@ -96,6 +96,28 @@ function toSaleJson(sale: any, lines: any[], payments: any[], businessName?: str
 }
 
 /**
+ * OFFLINE-01 — load an already-committed sale by its client-supplied id.
+ *
+ * Returns the sale in exactly the shape POST / returns on first write, so a
+ * replay is indistinguishable from the original response apart from its 200
+ * status. Tenant-scoped through forTenant(), so a client_sale_id minted by
+ * another tenant can never resolve here.
+ */
+async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string) {
+  const client = forTenant(tenantId) as any
+  const sale = await client.sales.findFirst({ where: { client_sale_id: clientSaleId } })
+  if (!sale) return null
+
+  const [lines, payments, tenant] = await Promise.all([
+    client.sale_line_items.findMany({ where: { sale_id: sale.id } }),
+    client.payments.findMany({ where: { sale_id: sale.id, direction: 'payment' } }),
+    client.tenants.findFirst({ where: { id: tenantId } }),
+  ])
+
+  return toSaleJson(sale, lines, payments, tenant?.business_name ?? null)
+}
+
+/**
  * POST / — complete a checkout sale (CHECK-01 through CHECK-05, PAY-01/02,
  * CUST-01). Server always recomputes the authoritative total from variant
  * prices + the tenant's tax profile via computeCheckout() (Pattern 2) — the
@@ -113,6 +135,20 @@ router.post('/', async (req, res) => {
   const tenantId = req.user!.tenantId
 
   try {
+    // OFFLINE-01 fast path. A retried or queue-redelivered sale must record
+    // exactly once, so a client_sale_id we have already committed short-circuits
+    // before any recompute or write. This is an optimisation and a nicety, NOT
+    // the guarantee — the guarantee is the unique index from migration 0017,
+    // which is what actually holds under concurrency. The catch block below
+    // handles the race this lookup cannot.
+    const replayed = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId)
+    if (replayed) {
+      // 200 rather than 201: nothing was created by THIS request. The body is
+      // byte-identical to the original 201 so a retrying client needs no
+      // special-casing. No receipt email is re-sent — that already happened.
+      return res.status(200).json(replayed)
+    }
+
     const result = await forTenantTransaction(tenantId, async (tx) => {
       // T-03-14 / CASH-02 / D-13/D-15: shift lookup + closed-shift guard MUST
       // happen before any variant lookup or write, so a stale client-held
@@ -336,6 +372,20 @@ router.post('/', async (req, res) => {
       }
     }
   } catch (err: any) {
+    // OFFLINE-01 race path. Two concurrent submissions of the same
+    // client_sale_id both miss the fast-path lookup, both compute, and both
+    // attempt the insert; the unique index from 0017 lets exactly one commit
+    // and rejects the other with P2002. The loser is not an error — its sale
+    // demonstrably exists — so re-read and return it exactly as the winner did.
+    // The whole write is one transaction, so the loser rolled back completely:
+    // no orphan lines, payments, or stock movements.
+    if (err?.code === 'P2002') {
+      const winner = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId)
+      if (winner) {
+        return res.status(200).json(winner)
+      }
+      // A P2002 on some other constraint, or the row vanished. Fall through.
+    }
     // Postgres floor-guard (23514, adjustment/transfer only from this route's
     // own perspective) or payment-sum trigger errors map to a 400; anything
     // else is a generic 500, never leaking raw internals.

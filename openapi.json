@@ -2493,6 +2493,168 @@
         "required": [
           "countedCash"
         ]
+      },
+      "SupplierList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Supplier"
+        }
+      },
+      "Supplier": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "contactName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "minOrderValue": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paymentTerms": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "contactName",
+          "email",
+          "phone",
+          "address",
+          "leadTimeDays",
+          "minOrderValue",
+          "paymentTerms",
+          "isActive",
+          "createdAt"
+        ]
+      },
+      "CreateSupplierRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 200,
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "minOrderValue": {
+            "type": "number",
+            "minimum": 0
+          },
+          "paymentTerms": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "name",
+          "leadTimeDays"
+        ]
+      },
+      "UpdateSupplierRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 200,
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "address": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "minOrderValue": {
+            "type": "number",
+            "minimum": 0
+          },
+          "paymentTerms": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
       }
     },
     "parameters": {}
@@ -3662,6 +3824,119 @@
           },
           "409": {
             "description": "Shift already closed"
+          }
+        }
+      }
+    },
+    "/suppliers": {
+      "get": {
+        "description": "List the caller's tenant's suppliers, active first.",
+        "responses": {
+          "200": {
+            "description": "List of suppliers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Create a supplier. leadTimeDays is a direct input to the reorder heuristic (Phase 5 Task 5) and is required.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSupplierRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Supplier created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Supplier"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/suppliers/{supplierId}": {
+      "get": {
+        "description": "Get a single supplier.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "supplierId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supplier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Supplier"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Supplier not found"
+          }
+        }
+      },
+      "patch": {
+        "description": "Edit a supplier, or deactivate/reactivate via isActive. There is no delete — past purchase orders keep referencing this row.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "supplierId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSupplierRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Supplier updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Supplier"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Supplier not found"
           }
         }
       }

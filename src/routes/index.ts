@@ -13,6 +13,7 @@ import shiftsRouter from './shifts'
 import onboardingRouter from './onboarding'
 import contextRouter from './context'
 import dashboardRouter from './dashboard'
+import suppliersRouter from './suppliers'
 
 const router = Router()
 
@@ -41,5 +42,6 @@ router.use('/onboarding', authMiddleware, operatorContext, onboardingRouter)
 // establish its server-owned identity before record pages request data.
 router.use('/context', authMiddleware, operatorContext, contextRouter)
 router.use('/dashboard', authMiddleware, operatorContext, dashboardRouter)
+router.use('/suppliers', authMiddleware, operatorContext, suppliersRouter)
 
 export default router

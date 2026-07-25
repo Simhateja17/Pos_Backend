@@ -21,6 +21,7 @@ import {
   OnboardingStepInputSchema,
   OnboardingStepNumberSchema,
 } from './schemas/onboarding'
+import { SupplierSchema, SupplierListSchema, CreateSupplierInputSchema, UpdateSupplierInputSchema } from './schemas/supplier'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -420,6 +421,51 @@ registry.registerPath({
     200: { description: 'Shift closed', content: { 'application/json': { schema: ZReportSchema } } },
     404: { description: 'Shift not found' },
     409: { description: 'Shift already closed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/suppliers',
+  description: "List the caller's tenant's suppliers, active first.",
+  responses: {
+    200: { description: 'List of suppliers', content: { 'application/json': { schema: SupplierListSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/suppliers',
+  description: 'Create a supplier. leadTimeDays is a direct input to the reorder heuristic (Phase 5 Task 5) and is required.',
+  request: { body: { content: { 'application/json': { schema: CreateSupplierInputSchema } } } },
+  responses: {
+    201: { description: 'Supplier created', content: { 'application/json': { schema: SupplierSchema } } },
+    400: { description: 'Invalid request' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/suppliers/{supplierId}',
+  description: 'Get a single supplier.',
+  request: { params: z.object({ supplierId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Supplier', content: { 'application/json': { schema: SupplierSchema } } },
+    404: { description: 'Supplier not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/suppliers/{supplierId}',
+  description: 'Edit a supplier, or deactivate/reactivate via isActive. There is no delete — past purchase orders keep referencing this row.',
+  request: {
+    params: z.object({ supplierId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdateSupplierInputSchema } } },
+  },
+  responses: {
+    200: { description: 'Supplier updated', content: { 'application/json': { schema: SupplierSchema } } },
+    404: { description: 'Supplier not found' },
   },
 })
 
