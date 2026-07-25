@@ -519,6 +519,7 @@ model staff_members {
   purchase_orders  purchase_orders[]
   purchase_order_receipts purchase_order_receipts[]
   import_batches          import_batches[]
+  email_log               email_log[]
 
   @@index([tenant_id], map: "idx_staff_members_tenant_id")
   @@index([user_id], map: "idx_staff_members_user_id")
@@ -558,6 +559,8 @@ model tenants {
   variant_stock_levels       variant_stock_levels[]
   variants                   variants[]
   import_batches             import_batches[]
+  email_log                  email_log[]
+  email_suppressions         email_suppressions[]
   suppliers                  suppliers[]
   purchase_orders            purchase_orders[]
   purchase_order_lines       purchase_order_lines[]
@@ -879,6 +882,7 @@ model sales {
   payments        payments[]
   sale_line_items sale_line_items[]
   import_batches  import_batches?   @relation(fields: [import_batch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  email_log       email_log[]
   staff_members   staff_members?    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   customers       customers?        @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   shifts          shifts?           @relation(fields: [shift_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -1064,5 +1068,46 @@ model import_batches {
   tenants         tenants        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([tenant_id, created_at], map: "idx_import_batches_tenant_created")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model email_log {
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String         @db.Uuid
+  kind                String
+  recipient           String
+  subject             String
+  status              String         @default("queued")
+  provider_message_id String?
+  error_message       String?
+  sale_id             String?        @db.Uuid
+  attempts            Int            @default(0)
+  last_attempt_at     DateTime?      @db.Timestamptz(6)
+  delivered_at        DateTime?      @db.Timestamptz(6)
+  failed_at           DateTime?      @db.Timestamptz(6)
+  created_by          String?        @db.Uuid
+  created_at          DateTime       @default(now()) @db.Timestamptz(6)
+  sales               sales?         @relation(fields: [sale_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  staff_members       staff_members? @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  tenants             tenants        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id, created_at], map: "idx_email_log_tenant_created")
+  @@index([tenant_id, status], map: "idx_email_log_tenant_status")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model email_suppressions {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String   @db.Uuid
+  email      String
+  reason     String
+  detail     String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  tenants    tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
   @@schema("public")
 }

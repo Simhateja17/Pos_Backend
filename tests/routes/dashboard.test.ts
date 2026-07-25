@@ -80,7 +80,10 @@ describe('dashboard route', () => {
     })
     expect(response.body).toMatchObject({
       range: '7d', cashDrawer: { status: 'no_open_shift' }, lowStock: { count: 0, items: [] },
-      settlement: { status: 'unavailable', reason: 'Settlement status is not persisted.' },
+      settlement: {
+        status: 'unavailable',
+        reason: 'Payments are collected on your own card machine or UPI app, so we cannot see when they settle.',
+      },
       trend: { revenue: [], profit: { status: 'unavailable' } }, actionable: { items: [] },
     })
   })

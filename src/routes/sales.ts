@@ -7,7 +7,7 @@ import { ROLE_RANK } from '../middleware/requireRole'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { computeCheckout } from '../lib/money'
 import { findOrCreateCustomer, searchCustomers } from '../lib/customers'
-import { sendReceiptEmail } from '../lib/receiptEmail'
+import { sendLoggedEmail } from '../services/email'
 
 const router = Router()
 
@@ -356,15 +356,21 @@ router.post('/', async (req, res) => {
         const receiptEmailTarget = (result as any).receiptEmailTarget as string | null
         const businessName = (result as any).businessName as string | undefined
         if (receiptEmailTarget) {
-          void sendReceiptEmail({
+          // COMMS-01: still fire-and-forget, but now every attempt lands in
+          // email_log with its outcome — a receipt that silently failed used to
+          // leave nothing but a server log line the owner could not see.
+          void sendLoggedEmail({
+            tenantId: req.user!.tenantId,
+            kind: 'receipt',
             to: receiptEmailTarget,
             saleId: successBody.id,
-            totalAmount: successBody.totalAmount,
+            subject: `Receipt from ${businessName ?? ''} — ${successBody.totalAmount}`,
             businessName: businessName ?? '',
+            totalAmount: successBody.totalAmount,
           }).then((outcome) => {
-            if (!outcome.ok) {
+            if (outcome.status !== 'sent') {
               // eslint-disable-next-line no-console
-              console.error(`Receipt email failed for sale ${successBody.id}: ${outcome.error}`)
+              console.error(`Receipt email ${outcome.status} for sale ${successBody.id}: ${outcome.reason ?? ''}`)
             }
           })
         }
@@ -577,14 +583,29 @@ router.post('/:saleId/resend-receipt', async (req, res) => {
   }
 
   const tenant = await client.tenants.findFirst({ where: { id: req.user!.tenantId } })
-  const result = await sendReceiptEmail({
+  const result = await sendLoggedEmail({
+    tenantId: req.user!.tenantId,
+    kind: 'receipt',
     to: email,
     saleId: sale.id,
-    totalAmount: sale.total_amount.toString(),
+    subject: `Receipt from ${tenant?.business_name ?? ''} — ${sale.total_amount.toString()}`,
     businessName: tenant?.business_name ?? '',
+    totalAmount: sale.total_amount.toString(),
   })
 
-  if (!result.ok) {
+  if (result.status === 'suppressed') {
+    // A receipt is transactional, so only a bounce or a spam complaint reaches
+    // here — an unsubscribe does not suppress it. Say which, because the fix
+    // differs: a wrong address needs correcting, a complaint does not.
+    return res.status(409).json({
+      error:
+        result.reason === 'complained'
+          ? 'This address reported an earlier email as spam, so we no longer send to it. Use a different address.'
+          : 'Email to this address bounced before, so we no longer send to it. Check the address and try another.',
+    })
+  }
+
+  if (result.status !== 'sent') {
     // T-03-15: never forward the raw provider error to the client — only the
     // exact UI-SPEC copy contract string.
     return res.status(502).json({

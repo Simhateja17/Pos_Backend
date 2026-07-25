@@ -151,10 +151,25 @@ router.get('/', async (req, res) => {
       ? { status: 'open', shiftId: openShift.id, openingCash: new Prisma.Decimal(openShift.starting_cash).toFixed(2), openedAt: openShift.opened_at.toISOString() }
       : { status: 'no_open_shift' },
     lowStock: { count: lowStock.length, items: lowStock },
-    settlement: { status: 'unavailable', reason: 'Settlement status is not persisted.' },
+    // PAY2-*: V1 has no payment-gateway integration by design — tender is
+    // collected outside the POS and recorded by the cashier — so there is no
+    // settlement state to report. This is a permanent V1 answer, not a gap.
+    settlement: {
+      status: 'unavailable',
+      reason: 'Payments are collected on your own card machine or UPI app, so we cannot see when they settle.',
+    },
     trend: {
       revenue: [...revenueByDate.entries()].map(([date, amount]) => ({ date, amount: amount.toFixed(2) })),
-      profit: { status: 'unavailable', reason: 'Canonical product cost data is not persisted.' },
+      // The old reason here claimed no cost data existed. Phase 5 made that
+      // false — variants carry a moving-average cost. It is still the wrong
+      // input for a historical series: the average is CURRENT, updated on each
+      // receipt, so applying it to a sale from three weeks ago would report a
+      // profit that never happened. Gross margin for the period is available on
+      // the KPI row, where today's cost basis is the right one to use.
+      profit: {
+        status: 'unavailable',
+        reason: 'We record what stock costs you today, which is the wrong figure to apply to past days — so a daily profit line would be misleading.',
+      },
     },
     actionable: { items: actionable },
   })

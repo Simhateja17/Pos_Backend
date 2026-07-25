@@ -3776,6 +3776,244 @@
           "key",
           "label"
         ]
+      },
+      "EmailLog": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailLogEntry"
+            }
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "sent": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "delivered": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "failed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "bounced": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "suppressed": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "sent",
+              "delivered",
+              "failed",
+              "bounced",
+              "suppressed"
+            ]
+          },
+          "providerConfigured": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "entries",
+          "counts",
+          "providerConfigured"
+        ]
+      },
+      "EmailLogEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EmailKind"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "sent",
+              "delivered",
+              "bounced",
+              "complained",
+              "failed",
+              "suppressed"
+            ]
+          },
+          "errorMessage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "saleId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "recipient",
+          "subject",
+          "status",
+          "errorMessage",
+          "saleId",
+          "attempts",
+          "createdAt",
+          "lastAttemptAt"
+        ]
+      },
+      "EmailKind": {
+        "type": "string",
+        "enum": [
+          "receipt",
+          "invoice",
+          "offer"
+        ]
+      },
+      "EmailSuppressionList": {
+        "type": "object",
+        "properties": {
+          "suppressions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailSuppression"
+            }
+          }
+        },
+        "required": [
+          "suppressions"
+        ]
+      },
+      "EmailSuppression": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "unsubscribed",
+              "bounced",
+              "complained"
+            ]
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "reason",
+          "detail",
+          "createdAt"
+        ]
+      },
+      "CreateEmailSuppressionRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "unsubscribed",
+              "bounced",
+              "complained"
+            ]
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "email",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "EmailDeliveryEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "delivered",
+              "bounced",
+              "complained"
+            ]
+          },
+          "recipient": {
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
+          },
+          "providerMessageId": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "logId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "type",
+          "recipient"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -5562,6 +5800,137 @@
           },
           "403": {
             "description": "Manager or owner role required"
+          }
+        }
+      }
+    },
+    "/email/log": {
+      "get": {
+        "description": "COMMS-01: every email send attempt and its outcome. Manager or owner.",
+        "responses": {
+          "200": {
+            "description": "Email send log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailLog"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Manager or owner role required"
+          }
+        }
+      }
+    },
+    "/email/suppressions": {
+      "get": {
+        "description": "Addresses this store no longer emails, and why. Manager or owner.",
+        "responses": {
+          "200": {
+            "description": "Suppression list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailSuppressionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Manager or owner role required"
+          }
+        }
+      },
+      "post": {
+        "description": "Stop emailing an address. An unsubscribe suppresses offers only; a bounce or complaint suppresses everything. Owner-only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEmailSuppressionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Address suppressed"
+          },
+          "400": {
+            "description": "Invalid address or reason"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          }
+        }
+      },
+      "delete": {
+        "description": "Allow a suppressed address again. Owner-only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "required": true,
+            "name": "email",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Address allowed again"
+          },
+          "400": {
+            "description": "No address given"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "404": {
+            "description": "That address is not suppressed"
+          }
+        }
+      }
+    },
+    "/email/events": {
+      "post": {
+        "description": "Record a delivery, bounce or complaint from the email provider. A bounce or complaint also suppresses the address. Owner-only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailDeliveryEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event applied"
+          },
+          "400": {
+            "description": "Unreadable event"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
           }
         }
       }

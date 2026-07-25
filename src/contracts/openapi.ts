@@ -30,6 +30,12 @@ import {
   UploadImportSchema,
 } from './schemas/import'
 import { ReportCatalogSchema, ReportQuerySchema, ReportTableSchema } from './schemas/reports'
+import {
+  CreateSuppressionSchema,
+  DeliveryEventSchema,
+  EmailLogSchema,
+  SuppressionListSchema,
+} from './schemas/email'
 import { SupplierSchema, SupplierListSchema, CreateSupplierInputSchema, UpdateSupplierInputSchema } from './schemas/supplier'
 import { ReorderSuggestionListSchema } from './schemas/reorder'
 import {
@@ -666,6 +672,68 @@ registry.registerPath({
     400: { description: 'Unknown report or invalid range' },
     401: { description: 'Unauthenticated' },
     403: { description: 'Manager or owner role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/email/log',
+  description: 'COMMS-01: every email send attempt and its outcome. Manager or owner.',
+  responses: {
+    200: { description: 'Email send log', content: { 'application/json': { schema: EmailLogSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Manager or owner role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/email/suppressions',
+  description: 'Addresses this store no longer emails, and why. Manager or owner.',
+  responses: {
+    200: { description: 'Suppression list', content: { 'application/json': { schema: SuppressionListSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Manager or owner role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/email/suppressions',
+  description: 'Stop emailing an address. An unsubscribe suppresses offers only; a bounce or complaint suppresses everything. Owner-only.',
+  request: { body: { content: { 'application/json': { schema: CreateSuppressionSchema } } } },
+  responses: {
+    201: { description: 'Address suppressed' },
+    400: { description: 'Invalid address or reason' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'delete',
+  path: '/email/suppressions',
+  description: 'Allow a suppressed address again. Owner-only.',
+  request: { query: z.object({ email: z.string().email() }) },
+  responses: {
+    200: { description: 'Address allowed again' },
+    400: { description: 'No address given' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    404: { description: 'That address is not suppressed' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/email/events',
+  description: 'Record a delivery, bounce or complaint from the email provider. A bounce or complaint also suppresses the address. Owner-only.',
+  request: { body: { content: { 'application/json': { schema: DeliveryEventSchema } } } },
+  responses: {
+    200: { description: 'Event applied' },
+    400: { description: 'Unreadable event' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
   },
 })
 
