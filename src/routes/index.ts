@@ -12,6 +12,7 @@ import customersRouter from './customers'
 import shiftsRouter from './shifts'
 import onboardingRouter from './onboarding'
 import contextRouter from './context'
+import dashboardRouter from './dashboard'
 
 const router = Router()
 
@@ -39,5 +40,6 @@ router.use('/onboarding', authMiddleware, operatorContext, onboardingRouter)
 // Context precedes read-model routers so the authenticated app shell can
 // establish its server-owned identity before record pages request data.
 router.use('/context', authMiddleware, operatorContext, contextRouter)
+router.use('/dashboard', authMiddleware, operatorContext, dashboardRouter)
 
 export default router

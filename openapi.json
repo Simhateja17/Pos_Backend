@@ -87,6 +87,306 @@
           "onboarding"
         ]
       },
+      "Dashboard": {
+        "type": "object",
+        "properties": {
+          "range": {
+            "type": "string",
+            "enum": [
+              "7d",
+              "14d",
+              "30d"
+            ]
+          },
+          "period": {
+            "type": "object",
+            "properties": {
+              "startsAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "endsAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "startsAt",
+              "endsAt"
+            ]
+          },
+          "sales": {
+            "type": "object",
+            "properties": {
+              "totalAmount": {
+                "type": "string"
+              },
+              "billCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "averageBillAmount": {
+                "type": "string"
+              },
+              "grossMargin": {
+                "$ref": "#/components/schemas/UnavailableDashboardMetric"
+              }
+            },
+            "required": [
+              "totalAmount",
+              "billCount",
+              "averageBillAmount",
+              "grossMargin"
+            ]
+          },
+          "cashDrawer": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open"
+                    ]
+                  },
+                  "shiftId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "openingCash": {
+                    "type": "string"
+                  },
+                  "openedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "status",
+                  "shiftId",
+                  "openingCash",
+                  "openedAt"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "no_open_shift"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            ]
+          },
+          "lowStock": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DashboardLowStockItem"
+                }
+              }
+            },
+            "required": [
+              "count",
+              "items"
+            ]
+          },
+          "settlement": {
+            "$ref": "#/components/schemas/UnavailableDashboardMetric"
+          },
+          "trend": {
+            "type": "object",
+            "properties": {
+              "revenue": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "amount": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "date",
+                    "amount"
+                  ]
+                }
+              },
+              "profit": {
+                "$ref": "#/components/schemas/UnavailableDashboardMetric"
+              }
+            },
+            "required": [
+              "revenue",
+              "profit"
+            ]
+          },
+          "actionable": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DashboardActionableItem"
+                }
+              }
+            },
+            "required": [
+              "items"
+            ]
+          }
+        },
+        "required": [
+          "range",
+          "period",
+          "sales",
+          "cashDrawer",
+          "lowStock",
+          "settlement",
+          "trend",
+          "actionable"
+        ]
+      },
+      "UnavailableDashboardMetric": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason"
+        ]
+      },
+      "DashboardLowStockItem": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "reorderThreshold": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "variantId",
+          "productId",
+          "productName",
+          "sku",
+          "quantity",
+          "reorderThreshold"
+        ]
+      },
+      "DashboardActionableItem": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "low_stock"
+                ]
+              },
+              "variantId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "productName": {
+                "type": "string"
+              },
+              "sku": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "integer"
+              },
+              "reorderThreshold": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "type",
+              "variantId",
+              "productName",
+              "sku",
+              "quantity",
+              "reorderThreshold"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "open_shift"
+                ]
+              },
+              "shiftId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "openedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "type",
+              "shiftId",
+              "openedAt"
+            ]
+          }
+        ]
+      },
+      "DashboardRange": {
+        "type": "string",
+        "enum": [
+          "7d",
+          "14d",
+          "30d"
+        ],
+        "default": "7d"
+      },
       "OnboardingState": {
         "type": "object",
         "properties": {
@@ -2217,6 +2517,39 @@
           },
           "404": {
             "description": "Tenant not found"
+          }
+        }
+      }
+    },
+    "/dashboard": {
+      "get": {
+        "description": "Read bounded, authenticated tenant dashboard facts. Metrics without persisted source data are explicitly unavailable.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/DashboardRange"
+            },
+            "required": false,
+            "name": "range",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant dashboard read model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Dashboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid dashboard range"
+          },
+          "401": {
+            "description": "Unauthenticated"
           }
         }
       }

@@ -12,6 +12,7 @@ import { CreateReturnSchema } from './schemas/return'
 import { CustomerListQuerySchema, CustomerListSchema, CustomerSchema } from './schemas/customer'
 import { PaymentReadQuerySchema, PaymentReadSchema } from './schemas/payment'
 import { AppContextSchema } from './schemas/context'
+import { DashboardQuerySchema, DashboardSchema } from './schemas/dashboard'
 import { OpenShiftSchema, CloseShiftSchema, ShiftSchema, XReportSchema, ZReportSchema } from './schemas/shift'
 import {
   CompleteOnboardingSchema,
@@ -37,6 +38,18 @@ registry.registerPath({
     200: { description: 'Authenticated application context', content: { 'application/json': { schema: AppContextSchema } } },
     401: { description: 'Unauthenticated' },
     404: { description: 'Tenant not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/dashboard',
+  description: 'Read bounded, authenticated tenant dashboard facts. Metrics without persisted source data are explicitly unavailable.',
+  request: { query: DashboardQuerySchema },
+  responses: {
+    200: { description: 'Tenant dashboard read model', content: { 'application/json': { schema: DashboardSchema } } },
+    400: { description: 'Invalid dashboard range' },
+    401: { description: 'Unauthenticated' },
   },
 })
 
