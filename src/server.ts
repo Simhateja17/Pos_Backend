@@ -32,7 +32,11 @@ app.use(
     credentials: true,
   }),
 )
-app.use(express.json())
+// 8 MB accommodates a base64-encoded CSV at the import service's 5 MB file cap
+// (base64 inflates by ~4/3). The real limit that matters is enforced in
+// csv-parse.ts, which reports an over-sized file as such instead of the
+// body parser rejecting it as malformed JSON.
+app.use(express.json({ limit: '8mb' }))
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' })

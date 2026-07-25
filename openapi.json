@@ -3208,6 +3208,390 @@
           "kind",
           "historyDays"
         ]
+      },
+      "ImportBatch": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ImportKind"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "fileHash": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "committed",
+              "failed"
+            ]
+          },
+          "rowCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportColumnPreview"
+            }
+          },
+          "sampleRows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "encoding": {
+            "type": "string"
+          },
+          "blankRowsSkipped": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "raggedRows": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "targetFields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportTargetField"
+            }
+          },
+          "committedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "summary": {}
+        },
+        "required": [
+          "id",
+          "kind",
+          "fileName",
+          "fileHash",
+          "status",
+          "rowCount",
+          "columns",
+          "sampleRows",
+          "delimiter",
+          "encoding",
+          "blankRowsSkipped",
+          "raggedRows",
+          "targetFields",
+          "committedAt",
+          "createdAt"
+        ]
+      },
+      "ImportKind": {
+        "type": "string",
+        "enum": [
+          "catalog",
+          "sales"
+        ]
+      },
+      "ImportColumnPreview": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "nonEmptyCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "name",
+          "samples",
+          "nonEmptyCount"
+        ]
+      },
+      "ImportTargetField": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "number",
+              "date"
+            ]
+          },
+          "hint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "label",
+          "required",
+          "type",
+          "hint"
+        ]
+      },
+      "UploadImportRequest": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ImportKind"
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "contentBase64": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "kind",
+          "fileName",
+          "contentBase64"
+        ],
+        "additionalProperties": false
+      },
+      "ImportBatchList": {
+        "type": "object",
+        "properties": {
+          "batches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportBatch"
+            }
+          }
+        },
+        "required": [
+          "batches"
+        ]
+      },
+      "ImportMappingSuggestion": {
+        "type": "object",
+        "properties": {
+          "mappings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportColumnMapping"
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "heuristic"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "mappings",
+          "source",
+          "note"
+        ]
+      },
+      "ImportColumnMapping": {
+        "type": "object",
+        "properties": {
+          "column": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ImportMappingConfidence"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "column",
+          "target",
+          "confidence",
+          "reason"
+        ]
+      },
+      "ImportMappingConfidence": {
+        "type": "string",
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ]
+      },
+      "ImportCommitResult": {
+        "type": "object",
+        "properties": {
+          "batch": {
+            "$ref": "#/components/schemas/ImportBatch"
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "rowsRead": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "rowsSkipped": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "productsCreated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "variantsCreated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "variantsUpdated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "salesCreated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "saleLinesCreated": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "openingStockMovements": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "dateRange": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to"
+                ]
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "row": {
+                      "type": "integer"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "row",
+                    "reason"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "rowsRead",
+              "rowsSkipped",
+              "productsCreated",
+              "variantsCreated",
+              "variantsUpdated",
+              "salesCreated",
+              "saleLinesCreated",
+              "openingStockMovements",
+              "dateRange",
+              "issues"
+            ]
+          }
+        },
+        "required": [
+          "batch",
+          "result"
+        ]
+      },
+      "CommitImportRequest": {
+        "type": "object",
+        "properties": {
+          "mappings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "column": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "column",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "mappings"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -4712,6 +5096,202 @@
           },
           "403": {
             "description": "Insufficient permissions"
+          }
+        }
+      }
+    },
+    "/import/uploads": {
+      "post": {
+        "description": "Parse a catalog or sales CSV server-side and stage it for review. Writes nothing to the ledger. Owner-only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "File parsed and staged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportBatch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The file could not be parsed"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "409": {
+            "description": "This exact file has already been imported"
+          },
+          "413": {
+            "description": "File exceeds the size limit"
+          }
+        }
+      }
+    },
+    "/import/batches": {
+      "get": {
+        "description": "List recent imports for the authenticated tenant. Owner-only.",
+        "responses": {
+          "200": {
+            "description": "Import history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportBatchList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          }
+        }
+      }
+    },
+    "/import/batches/{id}": {
+      "get": {
+        "description": "Read one staged or committed import, including its parsed preview. Owner-only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Import batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportBatch"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "404": {
+            "description": "No such import"
+          }
+        }
+      }
+    },
+    "/import/batches/{id}/mapping-suggestion": {
+      "post": {
+        "description": "ONBOARD-03: suggest source-column to target-field mappings. The suggestion is never persisted and never applied without owner confirmation. Owner-only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Suggested mapping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportMappingSuggestion"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "404": {
+            "description": "No such import"
+          },
+          "409": {
+            "description": "That import has already been applied"
+          },
+          "422": {
+            "description": "The stored file can no longer be parsed"
+          }
+        }
+      }
+    },
+    "/import/batches/{id}/commit": {
+      "post": {
+        "description": "Apply the owner-confirmed mapping in one transaction. Imported sales are marked source=import and populate daily_sales_rollup. Owner-only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Import applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportCommitResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The confirmed mapping is not usable"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "404": {
+            "description": "No such import"
+          },
+          "409": {
+            "description": "That import has already been applied"
           }
         }
       }

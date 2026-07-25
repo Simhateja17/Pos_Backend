@@ -21,6 +21,14 @@ import {
   OnboardingStepInputSchema,
   OnboardingStepNumberSchema,
 } from './schemas/onboarding'
+import {
+  CommitImportSchema,
+  ImportBatchListSchema,
+  ImportBatchSchema,
+  ImportCommitResultSchema,
+  MappingSuggestionSchema,
+  UploadImportSchema,
+} from './schemas/import'
 import { SupplierSchema, SupplierListSchema, CreateSupplierInputSchema, UpdateSupplierInputSchema } from './schemas/supplier'
 import { ReorderSuggestionListSchema } from './schemas/reorder'
 import {
@@ -562,6 +570,78 @@ registry.registerPath({
   responses: {
     200: { description: 'Suggestions regenerated', content: { 'application/json': { schema: ReorderSuggestionListSchema } } },
     403: { description: 'Insufficient permissions' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/import/uploads',
+  description: 'Parse a catalog or sales CSV server-side and stage it for review. Writes nothing to the ledger. Owner-only.',
+  request: { body: { content: { 'application/json': { schema: UploadImportSchema } } } },
+  responses: {
+    201: { description: 'File parsed and staged', content: { 'application/json': { schema: ImportBatchSchema } } },
+    400: { description: 'The file could not be parsed' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    409: { description: 'This exact file has already been imported' },
+    413: { description: 'File exceeds the size limit' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/import/batches',
+  description: 'List recent imports for the authenticated tenant. Owner-only.',
+  responses: {
+    200: { description: 'Import history', content: { 'application/json': { schema: ImportBatchListSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/import/batches/{id}',
+  description: 'Read one staged or committed import, including its parsed preview. Owner-only.',
+  request: { params: z.object({ id: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Import batch', content: { 'application/json': { schema: ImportBatchSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    404: { description: 'No such import' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/import/batches/{id}/mapping-suggestion',
+  description: 'ONBOARD-03: suggest source-column to target-field mappings. The suggestion is never persisted and never applied without owner confirmation. Owner-only.',
+  request: { params: z.object({ id: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Suggested mapping', content: { 'application/json': { schema: MappingSuggestionSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    404: { description: 'No such import' },
+    409: { description: 'That import has already been applied' },
+    422: { description: 'The stored file can no longer be parsed' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/import/batches/{id}/commit',
+  description: 'Apply the owner-confirmed mapping in one transaction. Imported sales are marked source=import and populate daily_sales_rollup. Owner-only.',
+  request: {
+    params: z.object({ id: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: CommitImportSchema } } },
+  },
+  responses: {
+    200: { description: 'Import applied', content: { 'application/json': { schema: ImportCommitResultSchema } } },
+    400: { description: 'The confirmed mapping is not usable' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    404: { description: 'No such import' },
+    409: { description: 'That import has already been applied' },
   },
 })
 
