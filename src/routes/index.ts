@@ -15,6 +15,7 @@ import contextRouter from './context'
 import dashboardRouter from './dashboard'
 import suppliersRouter from './suppliers'
 import purchaseOrdersRouter from './purchase-orders'
+import reorderRouter from './reorder'
 
 const router = Router()
 
@@ -45,5 +46,6 @@ router.use('/context', authMiddleware, operatorContext, contextRouter)
 router.use('/dashboard', authMiddleware, operatorContext, dashboardRouter)
 router.use('/suppliers', authMiddleware, operatorContext, suppliersRouter)
 router.use('/purchase-orders', authMiddleware, operatorContext, purchaseOrdersRouter)
+router.use('/reorder', authMiddleware, operatorContext, reorderRouter)
 
 export default router

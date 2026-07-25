@@ -22,6 +22,7 @@ import {
   OnboardingStepNumberSchema,
 } from './schemas/onboarding'
 import { SupplierSchema, SupplierListSchema, CreateSupplierInputSchema, UpdateSupplierInputSchema } from './schemas/supplier'
+import { ReorderSuggestionListSchema } from './schemas/reorder'
 import {
   PurchaseOrderSchema,
   PurchaseOrderListSchema,
@@ -540,6 +541,27 @@ registry.registerPath({
     400: { description: 'Invalid request or lines not on this purchase order' },
     404: { description: 'Purchase order not found' },
     409: { description: 'Purchase order is draft or cancelled, or this receipt was already recorded' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/reorder/suggestions',
+  description:
+    'Current rule-based reorder suggestions (ML-01). Does not generate on read — refreshing shows the same numbers. Each suggestion carries the structured data basis that produced it (ML-03).',
+  responses: {
+    200: { description: 'Reorder suggestions', content: { 'application/json': { schema: ReorderSuggestionListSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/reorder/generate',
+  description:
+    'Recompute rule-based reorder suggestions for this tenant, replacing the previous run. Manager or owner only. This is velocity x lead time arithmetic, not a forecast.',
+  responses: {
+    200: { description: 'Suggestions regenerated', content: { 'application/json': { schema: ReorderSuggestionListSchema } } },
+    403: { description: 'Insufficient permissions' },
   },
 })
 

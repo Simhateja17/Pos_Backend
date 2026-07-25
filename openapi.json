@@ -2927,6 +2927,222 @@
           "clientReceiptId",
           "lines"
         ]
+      },
+      "ReorderSuggestionList": {
+        "type": "object",
+        "properties": {
+          "generatedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReorderSuggestion"
+            }
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReorderSkipped"
+            }
+          }
+        },
+        "required": [
+          "generatedAt",
+          "items",
+          "skipped"
+        ]
+      },
+      "ReorderSuggestion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "supplierId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "supplierName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "suggestedQuantity": {
+            "type": "integer"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "heuristic",
+              "forecast"
+            ]
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "reason": {
+            "$ref": "#/components/schemas/ReorderReason"
+          },
+          "generatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "variantId",
+          "sku",
+          "productName",
+          "supplierId",
+          "supplierName",
+          "suggestedQuantity",
+          "method",
+          "confidence",
+          "reason",
+          "generatedAt"
+        ]
+      },
+      "ReorderReason": {
+        "type": "object",
+        "properties": {
+          "formula": {
+            "type": "string"
+          },
+          "windowDays": {
+            "type": "integer"
+          },
+          "historyDays": {
+            "type": "integer"
+          },
+          "unitsSoldInWindow": {
+            "type": "integer"
+          },
+          "returnsInWindow": {
+            "type": "integer"
+          },
+          "netUnitsInWindow": {
+            "type": "integer"
+          },
+          "dailyVelocity": {
+            "type": "number"
+          },
+          "leadTimeDays": {
+            "type": "integer"
+          },
+          "leadTimeDemand": {
+            "type": "number"
+          },
+          "safetyDays": {
+            "type": "integer"
+          },
+          "safetyStock": {
+            "type": "number"
+          },
+          "reorderPoint": {
+            "type": "number"
+          },
+          "reviewPeriodDays": {
+            "type": "integer"
+          },
+          "reviewPeriodDemand": {
+            "type": "number"
+          },
+          "currentStock": {
+            "type": "integer"
+          },
+          "onOrder": {
+            "type": "integer"
+          },
+          "rawSuggestion": {
+            "type": "number"
+          },
+          "supplierName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "formula",
+          "windowDays",
+          "historyDays",
+          "unitsSoldInWindow",
+          "returnsInWindow",
+          "netUnitsInWindow",
+          "dailyVelocity",
+          "leadTimeDays",
+          "leadTimeDemand",
+          "safetyDays",
+          "safetyStock",
+          "reorderPoint",
+          "reviewPeriodDays",
+          "reviewPeriodDemand",
+          "currentStock",
+          "onOrder",
+          "rawSuggestion",
+          "supplierName"
+        ]
+      },
+      "ReorderSkipped": {
+        "type": "object",
+        "properties": {
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "insufficient_history",
+              "no_velocity",
+              "sufficient_stock",
+              "no_supplier"
+            ]
+          },
+          "historyDays": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "variantId",
+          "sku",
+          "productName",
+          "kind",
+          "historyDays"
+        ]
       }
     },
     "parameters": {}
@@ -4394,6 +4610,43 @@
           },
           "409": {
             "description": "Purchase order is draft or cancelled, or this receipt was already recorded"
+          }
+        }
+      }
+    },
+    "/reorder/suggestions": {
+      "get": {
+        "description": "Current rule-based reorder suggestions (ML-01). Does not generate on read — refreshing shows the same numbers. Each suggestion carries the structured data basis that produced it (ML-03).",
+        "responses": {
+          "200": {
+            "description": "Reorder suggestions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReorderSuggestionList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reorder/generate": {
+      "post": {
+        "description": "Recompute rule-based reorder suggestions for this tenant, replacing the previous run. Manager or owner only. This is velocity x lead time arithmetic, not a forecast.",
+        "responses": {
+          "200": {
+            "description": "Suggestions regenerated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReorderSuggestionList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions"
           }
         }
       }
