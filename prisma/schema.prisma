@@ -545,6 +545,7 @@ model tenants {
   onboarding_data            Json                   @default("{}")
   onboarding_step            Int                    @default(0) @db.SmallInt
   onboarding_completed_at    DateTime?              @db.Timestamptz(6)
+  timezone                   String                 @default("UTC")
   customers                  customers[]
   payments                   payments[]
   products                   products[]
@@ -560,7 +561,25 @@ model tenants {
   purchase_order_lines       purchase_order_lines[]
   purchase_order_receipts    purchase_order_receipts[]
   purchase_order_receipt_lines purchase_order_receipt_lines[]
+  daily_sales_rollup         daily_sales_rollup[]
 
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model daily_sales_rollup {
+  tenant_id     String   @db.Uuid
+  variant_id    String   @db.Uuid
+  date          DateTime @db.Date
+  units_sold    Int      @default(0)
+  revenue       Decimal  @default(0) @db.Decimal(12, 2)
+  returns_units Int      @default(0)
+  tenants       tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  variants      variants @relation(fields: [variant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([tenant_id, variant_id, date])
+  @@index([tenant_id, date], map: "idx_daily_sales_rollup_tenant_date")
+  @@index([variant_id, date], map: "idx_daily_sales_rollup_variant")
   @@schema("public")
 }
 
@@ -716,6 +735,7 @@ model variants {
   variant_stock_levels variant_stock_levels?
   purchase_order_lines purchase_order_lines[]
   purchase_order_receipt_lines purchase_order_receipt_lines[]
+  daily_sales_rollup   daily_sales_rollup[]
   products             products              @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants              tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
