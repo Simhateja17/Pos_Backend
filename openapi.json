@@ -2655,6 +2655,278 @@
             "type": "boolean"
           }
         }
+      },
+      "PurchaseOrderList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/PurchaseOrder"
+        }
+      },
+      "PurchaseOrder": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "poNumber": {
+            "type": "string"
+          },
+          "supplierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "supplierName": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PurchaseOrderStatus"
+          },
+          "expectedDate": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalCost": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseOrderLine"
+            }
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "poNumber",
+          "supplierId",
+          "supplierName",
+          "status",
+          "expectedDate",
+          "notes",
+          "totalCost",
+          "lines",
+          "createdAt"
+        ]
+      },
+      "PurchaseOrderStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "sent",
+          "partial",
+          "received",
+          "cancelled"
+        ]
+      },
+      "PurchaseOrderLine": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "quantityOrdered": {
+            "type": "integer"
+          },
+          "quantityReceived": {
+            "type": "integer"
+          },
+          "unitCost": {
+            "type": "string"
+          },
+          "lineTotal": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "variantId",
+          "sku",
+          "productName",
+          "quantityOrdered",
+          "quantityReceived",
+          "unitCost",
+          "lineTotal"
+        ]
+      },
+      "CreatePurchaseOrderRequest": {
+        "type": "object",
+        "properties": {
+          "supplierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "variantId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantityOrdered": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "unitCost": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "variantId",
+                "quantityOrdered",
+                "unitCost"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "supplierId",
+          "lines"
+        ]
+      },
+      "UpdatePurchaseOrderRequest": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "sent",
+              "cancelled"
+            ]
+          },
+          "expectedDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      },
+      "ReceiptResult": {
+        "type": "object",
+        "properties": {
+          "receiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "overReceived": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "purchaseOrderLineId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sku": {
+                  "type": "string"
+                },
+                "quantityOrdered": {
+                  "type": "integer"
+                },
+                "quantityReceived": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "purchaseOrderLineId",
+                "sku",
+                "quantityOrdered",
+                "quantityReceived"
+              ]
+            }
+          },
+          "purchaseOrder": {
+            "$ref": "#/components/schemas/PurchaseOrder"
+          }
+        },
+        "required": [
+          "receiptId",
+          "replayed",
+          "overReceived",
+          "purchaseOrder"
+        ]
+      },
+      "ReceivePurchaseOrderRequest": {
+        "type": "object",
+        "properties": {
+          "clientReceiptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "purchaseOrderLineId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantityReceived": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "unitCost": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "purchaseOrderLineId",
+                "quantityReceived"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "clientReceiptId",
+          "lines"
+        ]
       }
     },
     "parameters": {}
@@ -3937,6 +4209,191 @@
           },
           "404": {
             "description": "Supplier not found"
+          }
+        }
+      }
+    },
+    "/purchase-orders": {
+      "get": {
+        "description": "List the caller's tenant's purchase orders, newest first. Optional `status` filter.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Purchase orders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Raise a draft purchase order against a supplier (PUR-02).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePurchaseOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Purchase order created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unknown variant"
+          },
+          "404": {
+            "description": "Supplier not found"
+          }
+        }
+      }
+    },
+    "/purchase-orders/{poId}": {
+      "get": {
+        "description": "Get a single purchase order with its lines.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "poId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Purchase order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrder"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Purchase order not found"
+          }
+        }
+      },
+      "patch": {
+        "description": "Send or cancel a purchase order, or edit expected date/notes. partial/received are derived by the receipt trigger and cannot be set here.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "poId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePurchaseOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Purchase order updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrder"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Purchase order not found"
+          },
+          "409": {
+            "description": "Purchase order is already received or cancelled"
+          }
+        }
+      }
+    },
+    "/purchase-orders/{poId}/receive": {
+      "post": {
+        "description": "Record a goods receipt. Partial receipt is the normal case. Idempotent on (tenant, clientReceiptId) — a replay returns the original receipt and changes nothing. Over-receipt is allowed but reported in overReceived.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "poId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceivePurchaseOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Receipt was already recorded (replay)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Receipt recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or lines not on this purchase order"
+          },
+          "404": {
+            "description": "Purchase order not found"
+          },
+          "409": {
+            "description": "Purchase order is draft or cancelled, or this receipt was already recorded"
           }
         }
       }

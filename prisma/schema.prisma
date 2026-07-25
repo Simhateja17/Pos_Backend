@@ -516,6 +516,8 @@ model staff_members {
   tenants          tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users            users?            @relation(fields: [user_id], references: [id], onUpdate: NoAction)
   stock_movements  stock_movements[]
+  purchase_orders  purchase_orders[]
+  purchase_order_receipts purchase_order_receipts[]
 
   @@index([tenant_id], map: "idx_staff_members_tenant_id")
   @@index([user_id], map: "idx_staff_members_user_id")
@@ -554,7 +556,107 @@ model tenants {
   variant_stock_levels       variant_stock_levels[]
   variants                   variants[]
   suppliers                  suppliers[]
+  purchase_orders            purchase_orders[]
+  purchase_order_lines       purchase_order_lines[]
+  purchase_order_receipts    purchase_order_receipts[]
+  purchase_order_receipt_lines purchase_order_receipt_lines[]
 
+  @@schema("public")
+}
+
+enum purchase_order_status {
+  draft
+  sent
+  partial
+  received
+  cancelled
+
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model purchase_orders {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id     String                @db.Uuid
+  supplier_id   String                @db.Uuid
+  po_number     String
+  status        purchase_order_status @default(draft)
+  expected_date DateTime?             @db.Date
+  notes         String?
+  created_by    String?               @db.Uuid
+  created_at    DateTime              @default(now()) @db.Timestamptz(6)
+  tenants       tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  suppliers     suppliers             @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  staff_members staff_members?        @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  purchase_order_lines    purchase_order_lines[]
+  purchase_order_receipts purchase_order_receipts[]
+
+  @@unique([tenant_id, po_number])
+  @@index([tenant_id], map: "idx_purchase_orders_tenant_id")
+  @@index([supplier_id], map: "idx_purchase_orders_supplier_id")
+  @@index([tenant_id, status], map: "idx_purchase_orders_status")
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model purchase_order_lines {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id         String          @db.Uuid
+  purchase_order_id String          @db.Uuid
+  variant_id        String          @db.Uuid
+  quantity_ordered  Int
+  quantity_received Int             @default(0)
+  unit_cost         Decimal         @db.Decimal(10, 2)
+  created_at        DateTime        @default(now()) @db.Timestamptz(6)
+  tenants           tenants         @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  purchase_orders   purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  variants          variants        @relation(fields: [variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  purchase_order_receipt_lines purchase_order_receipt_lines[]
+
+  @@unique([purchase_order_id, variant_id])
+  @@index([purchase_order_id], map: "idx_purchase_order_lines_po_id")
+  @@index([tenant_id], map: "idx_purchase_order_lines_tenant_id")
+  @@index([variant_id], map: "idx_purchase_order_lines_variant_id")
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model purchase_order_receipts {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id         String          @db.Uuid
+  purchase_order_id String          @db.Uuid
+  client_receipt_id String          @db.Uuid
+  received_at       DateTime        @default(now()) @db.Timestamptz(6)
+  created_by        String?         @db.Uuid
+  note              String?
+  tenants           tenants         @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  purchase_orders   purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  staff_members     staff_members?  @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  purchase_order_receipt_lines purchase_order_receipt_lines[]
+
+  @@unique([tenant_id, client_receipt_id], map: "idx_po_receipts_tenant_client_receipt_id")
+  @@index([purchase_order_id], map: "idx_po_receipts_po_id")
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model purchase_order_receipt_lines {
+  id                     String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id              String                  @db.Uuid
+  receipt_id             String                  @db.Uuid
+  purchase_order_line_id String                  @db.Uuid
+  variant_id             String                  @db.Uuid
+  quantity_received      Int
+  unit_cost              Decimal                 @db.Decimal(10, 2)
+  created_at             DateTime                @default(now()) @db.Timestamptz(6)
+  tenants                tenants                 @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  purchase_order_receipts purchase_order_receipts @relation(fields: [receipt_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  purchase_order_lines   purchase_order_lines    @relation(fields: [purchase_order_line_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  variants               variants                @relation(fields: [variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([receipt_id, purchase_order_line_id])
+  @@index([receipt_id], map: "idx_po_receipt_lines_receipt_id")
+  @@index([tenant_id], map: "idx_po_receipt_lines_tenant_id")
   @@schema("public")
 }
 
@@ -573,6 +675,7 @@ model suppliers {
   is_active       Boolean  @default(true)
   created_at      DateTime @default(now()) @db.Timestamptz(6)
   tenants         tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  purchase_orders purchase_orders[]
 
   @@index([tenant_id], map: "idx_suppliers_tenant_id")
   @@schema("public")
@@ -607,9 +710,12 @@ model variants {
   identity_locked      Boolean               @default(false)
   created_at           DateTime              @default(now()) @db.Timestamptz(6)
   is_taxable           Boolean               @default(true)
+  moving_average_cost  Decimal?              @db.Decimal(10, 2)
   sale_line_items      sale_line_items[]
   stock_movements      stock_movements[]
   variant_stock_levels variant_stock_levels?
+  purchase_order_lines purchase_order_lines[]
+  purchase_order_receipt_lines purchase_order_receipt_lines[]
   products             products              @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants              tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 

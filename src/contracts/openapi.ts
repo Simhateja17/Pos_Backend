@@ -22,6 +22,14 @@ import {
   OnboardingStepNumberSchema,
 } from './schemas/onboarding'
 import { SupplierSchema, SupplierListSchema, CreateSupplierInputSchema, UpdateSupplierInputSchema } from './schemas/supplier'
+import {
+  PurchaseOrderSchema,
+  PurchaseOrderListSchema,
+  CreatePurchaseOrderSchema,
+  UpdatePurchaseOrderSchema,
+  ReceivePurchaseOrderSchema,
+  ReceiptResultSchema,
+} from './schemas/purchaseOrder'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -466,6 +474,72 @@ registry.registerPath({
   responses: {
     200: { description: 'Supplier updated', content: { 'application/json': { schema: SupplierSchema } } },
     404: { description: 'Supplier not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/purchase-orders',
+  description: "List the caller's tenant's purchase orders, newest first. Optional `status` filter.",
+  request: { query: z.object({ status: z.string().optional() }) },
+  responses: {
+    200: { description: 'Purchase orders', content: { 'application/json': { schema: PurchaseOrderListSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/purchase-orders',
+  description: 'Raise a draft purchase order against a supplier (PUR-02).',
+  request: { body: { content: { 'application/json': { schema: CreatePurchaseOrderSchema } } } },
+  responses: {
+    201: { description: 'Purchase order created', content: { 'application/json': { schema: PurchaseOrderSchema } } },
+    400: { description: 'Invalid request or unknown variant' },
+    404: { description: 'Supplier not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/purchase-orders/{poId}',
+  description: 'Get a single purchase order with its lines.',
+  request: { params: z.object({ poId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Purchase order', content: { 'application/json': { schema: PurchaseOrderSchema } } },
+    404: { description: 'Purchase order not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/purchase-orders/{poId}',
+  description: 'Send or cancel a purchase order, or edit expected date/notes. partial/received are derived by the receipt trigger and cannot be set here.',
+  request: {
+    params: z.object({ poId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdatePurchaseOrderSchema } } },
+  },
+  responses: {
+    200: { description: 'Purchase order updated', content: { 'application/json': { schema: PurchaseOrderSchema } } },
+    404: { description: 'Purchase order not found' },
+    409: { description: 'Purchase order is already received or cancelled' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/purchase-orders/{poId}/receive',
+  description:
+    'Record a goods receipt. Partial receipt is the normal case. Idempotent on (tenant, clientReceiptId) — a replay returns the original receipt and changes nothing. Over-receipt is allowed but reported in overReceived.',
+  request: {
+    params: z.object({ poId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: ReceivePurchaseOrderSchema } } },
+  },
+  responses: {
+    201: { description: 'Receipt recorded', content: { 'application/json': { schema: ReceiptResultSchema } } },
+    200: { description: 'Receipt was already recorded (replay)', content: { 'application/json': { schema: ReceiptResultSchema } } },
+    400: { description: 'Invalid request or lines not on this purchase order' },
+    404: { description: 'Purchase order not found' },
+    409: { description: 'Purchase order is draft or cancelled, or this receipt was already recorded' },
   },
 })
 
