@@ -93,7 +93,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/onboarding/complete',
-  description: 'Complete onboarding only after all eight persisted steps pass server validation. Owner-only.',
+  description: 'Complete onboarding once the required steps (business identity, tax profile) pass server validation. Owner-only.',
   request: {
     body: { content: { 'application/json': { schema: CompleteOnboardingSchema } } },
   },

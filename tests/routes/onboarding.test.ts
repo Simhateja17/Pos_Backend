@@ -274,7 +274,65 @@ describe('onboarding routes', () => {
       .send({})
 
     expect(response.status).toBe(409)
-    expect(response.body.missingSteps).toEqual([2, 3, 4, 5, 6, 7, 8])
+    expect(response.body.missingSteps).toEqual([2])
+    expect(tenantsUpdateMock).not.toHaveBeenCalled()
+  })
+
+  it('completes the trimmed required setup alone and reports the deferred steps as pending', async () => {
+    const trimmed = { '1': stepFixtures['1'], '2': stepFixtures['2'] }
+    tenantsFindFirstMock.mockResolvedValue(tenantRow(trimmed, 2))
+    tenantsUpdateMock.mockImplementation(async ({ data }: { data: any }) =>
+      tenantRow(trimmed, data.onboarding_step, data.onboarding_completed_at),
+    )
+    const app = await buildApp()
+
+    const response = await request(app)
+      .post('/onboarding/complete')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send({})
+
+    expect(response.status).toBe(200)
+    expect(response.body.completed).toBe(true)
+    expect(response.body.requiredSteps).toEqual([1, 2])
+    expect(response.body.requiredStepsComplete).toBe(true)
+    expect(response.body.pendingSteps).toEqual([3, 4, 5, 6, 7, 8])
+    expect(response.body.summary.storeName).toBeNull()
+    expect(response.body.summary.billingCounters).toBeNull()
+  })
+
+  it('accepts a deferred step after completion but refuses to reopen a required one', async () => {
+    const trimmed = { '1': stepFixtures['1'], '2': stepFixtures['2'] }
+    tenantsFindFirstMock.mockResolvedValue(tenantRow(trimmed, 2, new Date('2026-01-01T00:00:00Z')))
+    tenantsUpdateMock.mockImplementation(async ({ data }: { data: any }) =>
+      tenantRow(data.onboarding_data, data.onboarding_step, new Date('2026-01-01T00:00:00Z')),
+    )
+    const app = await buildApp()
+
+    const deferred = await request(app)
+      .put('/onboarding/steps/7')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send(stepFixtures['7'])
+    const required = await request(app)
+      .put('/onboarding/steps/1')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send(stepFixtures['1'])
+
+    expect(deferred.status).toBe(200)
+    expect(deferred.body.pendingSteps).toEqual([3, 4, 5, 6, 8])
+    expect(required.status).toBe(409)
+  })
+
+  it('refuses a deferred step while a required step is still missing', async () => {
+    tenantsFindFirstMock.mockResolvedValue(tenantRow({ '1': stepFixtures['1'] }, 1))
+    const app = await buildApp()
+
+    const response = await request(app)
+      .put('/onboarding/steps/7')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send(stepFixtures['7'])
+
+    expect(response.status).toBe(409)
+    expect(response.body.nextStep).toBe(2)
     expect(tenantsUpdateMock).not.toHaveBeenCalled()
   })
 

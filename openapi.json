@@ -448,13 +448,35 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "requiredSteps": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            }
+          },
+          "requiredStepsComplete": {
+            "type": "boolean"
+          },
+          "pendingSteps": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            }
           }
         },
         "required": [
           "data",
           "currentStep",
           "completed",
-          "completedAt"
+          "completedAt",
+          "requiredSteps",
+          "requiredStepsComplete",
+          "pendingSteps"
         ]
       },
       "OnboardingData": {
@@ -579,11 +601,7 @@
           "storeCategory",
           "trialPlan",
           "billingCycle",
-          "legalName",
-          "businessStructure",
-          "yearEstablished",
-          "natureOfBusiness",
-          "storeCount"
+          "legalName"
         ],
         "additionalProperties": false
       },
@@ -634,17 +652,17 @@
             "maxLength": 50
           },
           "eInvoiceEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "eWayBillEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           }
         },
         "required": [
           "gstStatus",
-          "placeOfSupply",
-          "eInvoiceEnabled",
-          "eWayBillEnabled"
+          "placeOfSupply"
         ],
         "additionalProperties": false
       },
@@ -1226,7 +1244,10 @@
                     "type": "string"
                   },
                   "storeName": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "storeCategory": {
                     "type": "string"
@@ -1235,7 +1256,10 @@
                     "type": "string"
                   },
                   "billingCounters": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "gstStatus": {
                     "type": "string"
@@ -3315,7 +3339,7 @@
     },
     "/onboarding/complete": {
       "post": {
-        "description": "Complete onboarding only after all eight persisted steps pass server validation. Owner-only.",
+        "description": "Complete onboarding once the required steps (business identity, tax profile) pass server validation. Owner-only.",
         "requestBody": {
           "content": {
             "application/json": {

@@ -24,19 +24,15 @@ export const BusinessIdentityStepSchema = z
     billingCycle: z.enum(['monthly', 'annual']),
     legalName: requiredText(200),
     tradeName: optionalText(200),
-    businessStructure: z.enum([
-      'pvtltd',
-      'llp',
-      'partnership',
-      'proprietorship',
-      'public',
-      'huf',
-      'trust',
-    ]),
-    yearEstablished: z.number().int().min(1800).max(new Date().getUTCFullYear()),
+    businessStructure: z
+      .enum(['pvtltd', 'llp', 'partnership', 'proprietorship', 'public', 'huf', 'trust'])
+      .optional(),
+    yearEstablished: z.number().int().min(1800).max(new Date().getUTCFullYear()).optional(),
     registrationNumber: optionalText(32),
-    natureOfBusiness: z.enum(['retailer', 'wholesaler', 'both', 'mfr_retail', 'service']),
-    storeCount: z.enum(['1', '2', '3', '4', '5', '6-10', '11-20', '20+']),
+    natureOfBusiness: z
+      .enum(['retailer', 'wholesaler', 'both', 'mfr_retail', 'service'])
+      .optional(),
+    storeCount: z.enum(['1', '2', '3', '4', '5', '6-10', '11-20', '20+']).optional(),
   })
   .strict()
   .openapi('OnboardingBusinessIdentityStep')
@@ -51,8 +47,8 @@ export const GstComplianceStepSchema = z
     drugLicense: optionalText(50),
     msmeRegistration: optionalText(50),
     shopEstablishmentLicense: optionalText(50),
-    eInvoiceEnabled: z.boolean(),
-    eWayBillEnabled: z.boolean(),
+    eInvoiceEnabled: z.boolean().optional().default(false),
+    eWayBillEnabled: z.boolean().optional().default(false),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -208,6 +204,18 @@ export const OnboardingStepSchemas = {
   8: TeamAccessStepSchema,
 } as const
 
+/**
+ * ONBOARD-01 — trimmed setup. Only business identity (1) and the tax profile (2)
+ * block a new owner from reaching a working till. Everything else is collected
+ * later through "finish setup" prompts inside the app.
+ */
+export const REQUIRED_ONBOARDING_STEPS = [1, 2] as const
+export const DEFERRED_ONBOARDING_STEPS = [3, 4, 5, 6, 7, 8] as const
+
+export function isRequiredOnboardingStep(step: number): boolean {
+  return (REQUIRED_ONBOARDING_STEPS as readonly number[]).includes(step)
+}
+
 export const OnboardingStepNumberSchema = z.coerce
   .number()
   .int()
@@ -248,6 +256,10 @@ export const OnboardingStateSchema = z
     currentStep: z.number().int().min(0).max(8),
     completed: z.boolean(),
     completedAt: z.string().datetime().nullable(),
+    requiredSteps: z.array(z.number().int().min(1).max(8)),
+    requiredStepsComplete: z.boolean(),
+    /** Deferred steps not yet saved — drives the in-app "finish setup" prompts. */
+    pendingSteps: z.array(z.number().int().min(1).max(8)),
   })
   .openapi('OnboardingState')
 
@@ -256,10 +268,12 @@ export const CompleteOnboardingSchema = z.object({}).strict().openapi('CompleteO
 export const OnboardingCompletionResponseSchema = OnboardingStateSchema.extend({
   summary: z.object({
     businessName: z.string(),
-    storeName: z.string(),
+    /** Null until the deferred store-setup step is finished. */
+    storeName: z.string().nullable(),
     storeCategory: z.string(),
     trialPlan: z.string(),
-    billingCounters: z.string(),
+    /** Null until the deferred hardware step is finished. */
+    billingCounters: z.string().nullable(),
     gstStatus: z.string(),
   }),
 }).openapi('OnboardingCompletionResponse')
