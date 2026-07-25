@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: pos-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node dist/server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 24.18.0
