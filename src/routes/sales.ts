@@ -1,7 +1,8 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
-import { CreateSaleSchema, ResendReceiptInputSchema } from '../contracts/schemas/sale'
+import { CreateSaleSchema, ResendReceiptInputSchema, SaleListQuerySchema } from '../contracts/schemas/sale'
+import { PaymentReadQuerySchema } from '../contracts/schemas/payment'
 import { ROLE_RANK } from '../middleware/requireRole'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { computeCheckout } from '../lib/money'
@@ -353,14 +354,105 @@ router.post('/', async (req, res) => {
  * payments, matching SaleSchema — 03-04's returns route and 03-08's returns
  * page both need this shape.
  */
+router.get('/payments', async (req, res) => {
+  const parsed = PaymentReadQuerySchema.safeParse(req.query)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid payment query' })
+
+  const client = forTenant(req.user!.tenantId) as any
+  const where: any = {}
+  if (parsed.data.method) where.method = parsed.data.method
+  if (parsed.data.status) where.direction = parsed.data.status === 'completed' ? 'payment' : 'refund'
+  if (parsed.data.from || parsed.data.to || parsed.data.cursor) {
+    where.created_at = {
+      ...(parsed.data.from ? { gte: new Date(parsed.data.from) } : {}),
+      ...(parsed.data.to ? { lte: new Date(parsed.data.to) } : {}),
+      ...(parsed.data.cursor ? { lt: new Date(parsed.data.cursor) } : {}),
+    }
+  }
+
+  // groupBy keeps payment totals authoritative: the browser receives the
+  // persisted aggregate rather than recomputing collected/refunded money.
+  const [rows, total, grouped] = await Promise.all([
+    client.payments.findMany({
+      where,
+      include: { sales: { select: { status: true } } },
+      orderBy: { created_at: 'desc' },
+      take: parsed.data.limit + 1,
+    }),
+    client.payments.count({ where }),
+    client.payments.groupBy({ by: ['direction'], where, _sum: { amount: true } }),
+  ])
+  const hasMore = rows.length > parsed.data.limit
+  const page = rows.slice(0, parsed.data.limit)
+  const collected = grouped.find((entry: any) => entry.direction === 'payment')?._sum.amount ?? ZERO
+  const refunded = grouped.find((entry: any) => entry.direction === 'refund')?._sum.amount ?? ZERO
+  const collectedAmount = new Prisma.Decimal(collected).toFixed(2)
+  const refundedAmount = new Prisma.Decimal(refunded).toFixed(2)
+
+  return res.json({
+    items: page.map((payment: any) => ({ ...toPaymentJson(payment), saleStatus: payment.sales.status })),
+    total,
+    nextCursor: hasMore ? page[page.length - 1].created_at.toISOString() : null,
+    summary: {
+      collectedAmount,
+      refundedAmount,
+      netAmount: new Prisma.Decimal(collectedAmount).minus(refundedAmount).toFixed(2),
+    },
+  })
+})
+
+router.get('/records', async (req, res) => {
+  const client = forTenant(req.user!.tenantId) as any
+  const parsed = SaleListQuerySchema.safeParse(req.query)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid sale query' })
+  const where: any = {}
+  if (parsed.data.status) where.status = parsed.data.status
+  if (parsed.data.from || parsed.data.to || parsed.data.cursor) {
+    where.created_at = {
+      ...(parsed.data.from ? { gte: new Date(parsed.data.from) } : {}),
+      ...(parsed.data.to ? { lte: new Date(parsed.data.to) } : {}),
+      ...(parsed.data.cursor ? { lt: new Date(parsed.data.cursor) } : {}),
+    }
+  }
+  if (parsed.data.search) {
+    const customers = await searchCustomers(client, parsed.data.search)
+    const customerIds = customers.map((customer) => customer.id)
+    where.OR = [
+      ...(z.string().uuid().safeParse(parsed.data.search).success ? [{ id: parsed.data.search }] : []),
+      ...(customerIds.length ? [{ customer_id: { in: customerIds } }] : []),
+    ]
+    if (where.OR.length === 0) return res.json({ items: [], total: 0, nextCursor: null })
+  }
+
+  const [rows, total] = await Promise.all([
+    client.sales.findMany({ where, orderBy: { created_at: 'desc' }, take: parsed.data.limit + 1 }),
+    client.sales.count({ where }),
+  ])
+  const hasMore = rows.length > parsed.data.limit
+  const page = rows.slice(0, parsed.data.limit)
+  const items = []
+  for (const sale of page) {
+    const [lines, payments] = await Promise.all([
+      client.sale_line_items.findMany({ where: { sale_id: sale.id } }),
+      client.payments.findMany({ where: { sale_id: sale.id } }),
+    ])
+    items.push(toSaleJson(sale, lines, payments))
+  }
+  return res.json({
+    items,
+    total,
+    nextCursor: hasMore ? page[page.length - 1].created_at.toISOString() : null,
+  })
+})
+
 router.get('/', async (req, res) => {
   const receiptNumber = req.query.receiptNumber as string | undefined
   const customerSearch = req.query.customerSearch as string | undefined
-
+  if (!receiptNumber && !customerSearch) {
+    return res.status(400).json({ error: 'receiptNumber or customerSearch query parameter is required' })
+  }
   const client = forTenant(req.user!.tenantId) as any
-
   let sales: any[] = []
-
   if (receiptNumber) {
     if (!z.string().uuid().safeParse(receiptNumber).success) {
       return res.status(400).json({ error: 'Invalid receiptNumber' })
@@ -371,17 +463,14 @@ router.get('/', async (req, res) => {
     const customers = await searchCustomers(client, customerSearch)
     const customerIds = customers.map((c) => c.id)
     sales = customerIds.length > 0 ? await client.sales.findMany({ where: { customer_id: { in: customerIds } }, orderBy: { created_at: 'desc' } }) : []
-  } else {
-    return res.status(400).json({ error: 'receiptNumber or customerSearch query parameter is required' })
   }
-
   const result = []
   for (const sale of sales) {
     const lines = await client.sale_line_items.findMany({ where: { sale_id: sale.id } })
     const payments = await client.payments.findMany({ where: { sale_id: sale.id } })
     result.push(toSaleJson(sale, lines, payments))
   }
-  res.json(result)
+  return res.json(result)
 })
 
 /**

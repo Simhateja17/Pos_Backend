@@ -28,5 +28,37 @@ export const PaymentSchema = z
   })
   .openapi('Payment')
 
+export const PaymentReadQuerySchema = z
+  .object({
+    method: z.enum(['cash', 'card', 'check']).optional(),
+    status: z.enum(['completed', 'refunded']).optional(),
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    cursor: z.string().datetime({ offset: true }).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+  })
+  .refine((query) => !query.from || !query.to || new Date(query.from) <= new Date(query.to), {
+    message: 'from must be before to',
+    path: ['from'],
+  })
+  .openapi('PaymentReadQuery')
+
+export const PaymentReadItemSchema = PaymentSchema.extend({
+  saleStatus: z.string(),
+}).openapi('PaymentReadItem')
+
+export const PaymentReadSchema = z
+  .object({
+    items: z.array(PaymentReadItemSchema),
+    total: z.number().int().nonnegative(),
+    nextCursor: z.string().nullable(),
+    summary: z.object({
+      collectedAmount: z.string(),
+      refundedAmount: z.string(),
+      netAmount: z.string(),
+    }),
+  })
+  .openapi('PaymentRead')
+
 export type PaymentInput = z.infer<typeof PaymentInputSchema>
 export type Payment = z.infer<typeof PaymentSchema>

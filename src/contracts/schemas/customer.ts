@@ -13,6 +13,22 @@ export const CustomerSchema = z
   })
   .openapi('Customer')
 
+export const CustomerListQuerySchema = z
+  .object({
+    search: z.string().trim().max(100).optional(),
+    cursor: z.string().datetime({ offset: true }).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+  })
+  .openapi('CustomerListQuery')
+
+export const CustomerListSchema = z
+  .object({
+    items: z.array(CustomerSchema),
+    total: z.number().int().nonnegative(),
+    nextCursor: z.string().nullable(),
+  })
+  .openapi('CustomerList')
+
 // CUST-01: a fully anonymous walk-in sale is allowed (per UI-SPEC copy contract),
 // but if a customer profile IS being created, at least one of phone/email must
 // be present so findOrCreateCustomer (lib/customers.ts) has something to dedup on.

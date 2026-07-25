@@ -90,6 +90,29 @@ export const SaleSchema = z
   })
   .openapi('Sale')
 
+export const SaleListQuerySchema = z
+  .object({
+    search: z.string().trim().max(100).optional(),
+    status: z.string().trim().max(50).optional(),
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    cursor: z.string().datetime({ offset: true }).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+  })
+  .refine((query) => !query.from || !query.to || new Date(query.from) <= new Date(query.to), {
+    message: 'from must be before to',
+    path: ['from'],
+  })
+  .openapi('SaleListQuery')
+
+export const SaleListSchema = z
+  .object({
+    items: z.array(SaleSchema),
+    total: z.number().int().nonnegative(),
+    nextCursor: z.string().nullable(),
+  })
+  .openapi('SaleList')
+
 // CHECK-06: real resend-receipt request/response contract. `email` is
 // optional — when omitted, the resend endpoint resolves the sale's own
 // on-file customer email instead (never a client-guessed cross-tenant
