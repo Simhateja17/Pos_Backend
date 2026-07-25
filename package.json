@@ -26,6 +26,9 @@
     "url": "https://github.com/Simhateja17/Pos_Backend/issues"
   },
   "homepage": "https://github.com/Simhateja17/Pos_Backend#readme",
+  "engines": {
+    "node": "24.x"
+  },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^9.1.0",
     "@prisma/adapter-pg": "^7.9.0",
