@@ -1,5 +1,13 @@
 import type { NextFunction, Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
+import WebSocket from 'ws'
+
+// supabase-js 2.110 initialises a Realtime client even though this API only
+// uses Auth's `getUser()`. Node 20 has no native WebSocket, so provide the
+// server-compatible implementation before constructing the Supabase client.
+// This keeps the API usable until the local runtime moves to Node 22.
+const runtimeGlobal = globalThis as Omit<typeof globalThis, 'WebSocket'> & { WebSocket?: unknown }
+runtimeGlobal.WebSocket ??= WebSocket
 
 const supabase = createClient(
   process.env.SUPABASE_URL as string,
