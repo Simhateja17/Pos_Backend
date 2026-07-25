@@ -129,7 +129,7 @@
                 "type": "string"
               },
               "grossMargin": {
-                "$ref": "#/components/schemas/UnavailableDashboardMetric"
+                "$ref": "#/components/schemas/DashboardGrossMargin"
               }
             },
             "required": [
@@ -262,6 +262,47 @@
           "settlement",
           "trend",
           "actionable"
+        ]
+      },
+      "DashboardGrossMargin": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "amount": {
+                "type": "string"
+              },
+              "percent": {
+                "type": "string"
+              },
+              "costOfGoodsSold": {
+                "type": "string"
+              },
+              "costedRevenue": {
+                "type": "string"
+              },
+              "uncostedRevenue": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "amount",
+              "percent",
+              "costOfGoodsSold",
+              "costedRevenue",
+              "uncostedRevenue"
+            ]
+          },
+          {
+            "$ref": "#/components/schemas/UnavailableDashboardMetric"
+          }
         ]
       },
       "UnavailableDashboardMetric": {

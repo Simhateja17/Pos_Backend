@@ -37,11 +37,17 @@ router.get('/', async (req, res) => {
   const startsAt = indiaDayBoundary(now, RANGE_DAYS[parsed.data.range])
   const client = forTenant(req.user!.tenantId) as any
 
-  const [sales, openShift, variants, stockLevels] = await Promise.all([
+  const [sales, saleLines, openShift, variants, stockLevels] = await Promise.all([
     client.sales.findMany({
       where: { status: 'completed', created_at: { gte: startsAt, lte: now } },
       select: { total_amount: true, created_at: true },
       orderBy: { created_at: 'asc' },
+    }),
+    // Line-level detail is what makes margin computable: cost lives per
+    // variant, so revenue has to be attributed per variant too.
+    client.sale_line_items.findMany({
+      where: { sales: { status: 'completed', created_at: { gte: startsAt, lte: now } } },
+      select: { variant_id: true, quantity: true, line_total: true },
     }),
     client.shifts.findFirst({ where: { closed_at: null }, orderBy: { opened_at: 'desc' } }),
     client.variants.findMany({}),
@@ -67,6 +73,53 @@ router.get('/', async (req, res) => {
     }))
 
   const totalAmount = sumAmounts(sales)
+
+  /**
+   * Gross margin (Phase 5). Cost basis is the per-variant moving average
+   * written at goods receipt — see docs/reference/decision-cost-basis.md.
+   *
+   * Lines whose variant has no cost yet are EXCLUDED from both sides rather
+   * than treated as zero-cost, because a zero cost would silently report 100%
+   * margin on that revenue. Their revenue is reported separately as
+   * uncostedRevenue so the coverage of the figure is visible.
+   */
+  const costByVariant = new Map<string, Prisma.Decimal>(
+    variants
+      // Loose != null on purpose: catches both a null column and a variant row
+      // selected without the column at all. Either way there is no cost basis.
+      .filter((variant: any) => variant.moving_average_cost != null)
+      .map((variant: any) => [variant.id, new Prisma.Decimal(variant.moving_average_cost)]),
+  )
+
+  let costedRevenue = new Prisma.Decimal(0)
+  let uncostedRevenue = new Prisma.Decimal(0)
+  let costOfGoodsSold = new Prisma.Decimal(0)
+  for (const line of saleLines) {
+    const unitCost = costByVariant.get(line.variant_id)
+    if (unitCost === undefined) {
+      uncostedRevenue = uncostedRevenue.plus(line.line_total)
+      continue
+    }
+    costedRevenue = costedRevenue.plus(line.line_total)
+    costOfGoodsSold = costOfGoodsSold.plus(unitCost.times(line.quantity))
+  }
+
+  const grossMargin = costedRevenue.isZero()
+    ? {
+        status: 'unavailable' as const,
+        reason:
+          saleLines.length === 0
+            ? 'No sales in this period.'
+            : 'None of the items sold in this period have a recorded cost yet. Receive them against a purchase order to record what they cost.',
+      }
+    : {
+        status: 'available' as const,
+        amount: costedRevenue.minus(costOfGoodsSold).toFixed(2),
+        percent: costedRevenue.minus(costOfGoodsSold).dividedBy(costedRevenue).times(100).toFixed(1),
+        costOfGoodsSold: costOfGoodsSold.toFixed(2),
+        costedRevenue: costedRevenue.toFixed(2),
+        uncostedRevenue: uncostedRevenue.toFixed(2),
+      }
   const revenueByDate = new Map<string, Prisma.Decimal>()
   for (const sale of sales) {
     const date = formatIndiaDate(sale.created_at)
@@ -92,7 +145,7 @@ router.get('/', async (req, res) => {
       totalAmount: totalAmount.toFixed(2),
       billCount: sales.length,
       averageBillAmount: sales.length === 0 ? '0.00' : totalAmount.dividedBy(sales.length).toFixed(2),
-      grossMargin: { status: 'unavailable', reason: 'Canonical product cost data is not persisted.' },
+      grossMargin,
     },
     cashDrawer: openShift
       ? { status: 'open', shiftId: openShift.id, openingCash: new Prisma.Decimal(openShift.starting_cash).toFixed(2), openedAt: openShift.opened_at.toISOString() }

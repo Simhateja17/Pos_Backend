@@ -14,6 +14,29 @@ const UnavailableMetricSchema = z.object({
   reason: z.string(),
 }).openapi('UnavailableDashboardMetric')
 
+/**
+ * Gross margin became computable in Phase 5 once goods receipt began
+ * persisting a moving-average cost per variant. It stays a union: a tenant
+ * whose sold variants have never been received through a purchase order still
+ * has no cost basis, and must be told so rather than shown a margin computed
+ * against an assumed zero cost (which would report 100% margin).
+ *
+ * `costedRevenue` / `uncostedRevenue` make the coverage explicit — a margin
+ * derived from 60% of revenue is a different claim from one derived from all
+ * of it, and the owner is entitled to see which.
+ */
+const GrossMarginSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('available'),
+    amount: z.string(),
+    percent: z.string(),
+    costOfGoodsSold: z.string(),
+    costedRevenue: z.string(),
+    uncostedRevenue: z.string(),
+  }),
+  UnavailableMetricSchema,
+]).openapi('DashboardGrossMargin')
+
 const LowStockItemSchema = z.object({
   variantId: z.string().uuid(),
   productId: z.string().uuid(),
@@ -49,7 +72,7 @@ export const DashboardSchema = z.object({
     totalAmount: z.string(),
     billCount: z.number().int().nonnegative(),
     averageBillAmount: z.string(),
-    grossMargin: UnavailableMetricSchema,
+    grossMargin: GrossMarginSchema,
   }),
   cashDrawer: z.discriminatedUnion('status', [
     z.object({
