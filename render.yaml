@@ -3,7 +3,10 @@ services:
     name: pos-backend
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    # Render sets NODE_ENV=production, so a bare `npm install` skips
+    # devDependencies — but the build needs them (typescript, @types/*).
+    # Only the runtime (node dist/server.js) can do without them.
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/server.js
     envVars:
       - key: NODE_VERSION
