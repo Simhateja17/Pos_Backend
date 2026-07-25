@@ -6,6 +6,87 @@
   },
   "components": {
     "schemas": {
+      "AppContext": {
+        "type": "object",
+        "properties": {
+          "staff": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "owner",
+                  "manager",
+                  "cashier"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "role"
+            ]
+          },
+          "tenant": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "businessName": {
+                "type": "string"
+              },
+              "locality": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "businessName",
+              "locality"
+            ]
+          },
+          "onboarding": {
+            "type": "object",
+            "properties": {
+              "step": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8
+              },
+              "completed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "step",
+              "completed"
+            ]
+          }
+        },
+        "required": [
+          "staff",
+          "tenant",
+          "onboarding"
+        ]
+      },
       "OnboardingState": {
         "type": "object",
         "properties": {
@@ -1734,6 +1815,96 @@
           "amount"
         ]
       },
+      "SaleList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sale"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "nextCursor"
+        ]
+      },
+      "PaymentRead": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentReadItem"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "collectedAmount": {
+                "type": "string"
+              },
+              "refundedAmount": {
+                "type": "string"
+              },
+              "netAmount": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "collectedAmount",
+              "refundedAmount",
+              "netAmount"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "nextCursor",
+          "summary"
+        ]
+      },
+      "PaymentReadItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Payment"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "saleStatus": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "saleStatus"
+            ]
+          }
+        ]
+      },
       "CreateReturnRequest": {
         "type": "object",
         "properties": {
@@ -1801,6 +1972,32 @@
           "shiftId",
           "lines",
           "refundPayments"
+        ]
+      },
+      "CustomerList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Customer"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "nextCursor"
         ]
       },
       "Customer": {
@@ -2001,6 +2198,29 @@
     "parameters": {}
   },
   "paths": {
+    "/context": {
+      "get": {
+        "description": "Read the authenticated caller and tenant display context for the application shell.",
+        "responses": {
+          "200": {
+            "description": "Authenticated application context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "404": {
+            "description": "Tenant not found"
+          }
+        }
+      }
+    },
     "/onboarding": {
       "get": {
         "description": "Read the authenticated tenant's server-owned onboarding draft and completion state.",
@@ -2625,7 +2845,7 @@
         }
       },
       "get": {
-        "description": "Look up prior sales by receipt number or customer search (D-09). Each returned sale includes its lines and payments.",
+        "description": "Look up prior sales by receipt number or customer search for returns compatibility.",
         "parameters": [
           {
             "schema": {
@@ -2638,7 +2858,8 @@
           },
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 100
             },
             "required": false,
             "name": "customerSearch",
@@ -2658,6 +2879,169 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "A receipt number or customer search is required"
+          }
+        }
+      }
+    },
+    "/sales/records": {
+      "get": {
+        "description": "List tenant-scoped sales with bounded pagination and optional safe filters.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 50
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated sales",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaleList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sales/payments": {
+      "get": {
+        "description": "Read tenant-scoped payment records and server-calculated collected/refunded totals.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "cash",
+                "card",
+                "check"
+              ]
+            },
+            "required": false,
+            "name": "method",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "completed",
+                "refunded"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated payment records and authoritative totals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentRead"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payment filters"
           }
         }
       }
@@ -2721,13 +3105,65 @@
         }
       }
     },
-    "/customers": {
+    "/customers/records": {
       "get": {
-        "description": "Search customers by phone, email, or name (CUST-01, D-09).",
+        "description": "List tenant-scoped customers with bounded pagination and optional safe search.",
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 100
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated customers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid customer filters"
+          }
+        }
+      }
+    },
+    "/customers": {
+      "get": {
+        "description": "Search customers by phone, email, or name for checkout compatibility.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100
             },
             "required": false,
             "name": "search",

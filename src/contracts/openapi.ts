@@ -7,9 +7,11 @@ import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './sche
 import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
 import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
-import { CreateSaleSchema, SaleSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema } from './schemas/sale'
+import { CreateSaleSchema, SaleSchema, SaleListQuerySchema, SaleListSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema } from './schemas/sale'
 import { CreateReturnSchema } from './schemas/return'
-import { CustomerSchema } from './schemas/customer'
+import { CustomerListQuerySchema, CustomerListSchema, CustomerSchema } from './schemas/customer'
+import { PaymentReadQuerySchema, PaymentReadSchema } from './schemas/payment'
+import { AppContextSchema } from './schemas/context'
 import { OpenShiftSchema, CloseShiftSchema, ShiftSchema, XReportSchema, ZReportSchema } from './schemas/shift'
 import {
   CompleteOnboardingSchema,
@@ -26,6 +28,17 @@ import {
 // comment for the authoritative single-call-site note.
 
 const registry = new OpenAPIRegistry()
+
+registry.registerPath({
+  method: 'get',
+  path: '/context',
+  description: 'Read the authenticated caller and tenant display context for the application shell.',
+  responses: {
+    200: { description: 'Authenticated application context', content: { 'application/json': { schema: AppContextSchema } } },
+    401: { description: 'Unauthenticated' },
+    404: { description: 'Tenant not found' },
+  },
+})
 
 registry.registerPath({
   method: 'get',
@@ -270,11 +283,33 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/sales/records',
+  description: 'List tenant-scoped sales with bounded pagination and optional safe filters.',
+  request: { query: SaleListQuerySchema },
+  responses: {
+    200: { description: 'Paginated sales', content: { 'application/json': { schema: SaleListSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
   path: '/sales',
-  description: 'Look up prior sales by receipt number or customer search (D-09). Each returned sale includes its lines and payments.',
-  request: { query: z.object({ receiptNumber: z.string().uuid().optional(), customerSearch: z.string().optional() }) },
+  description: 'Look up prior sales by receipt number or customer search for returns compatibility.',
+  request: { query: z.object({ receiptNumber: z.string().uuid().optional(), customerSearch: z.string().max(100).optional() }) },
   responses: {
     200: { description: 'Matching sales', content: { 'application/json': { schema: z.array(SaleSchema) } } },
+    400: { description: 'A receipt number or customer search is required' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/sales/payments',
+  description: 'Read tenant-scoped payment records and server-calculated collected/refunded totals.',
+  request: { query: PaymentReadQuerySchema },
+  responses: {
+    200: { description: 'Paginated payment records and authoritative totals', content: { 'application/json': { schema: PaymentReadSchema } } },
+    400: { description: 'Invalid payment filters' },
   },
 })
 
@@ -304,9 +339,20 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/customers/records',
+  description: 'List tenant-scoped customers with bounded pagination and optional safe search.',
+  request: { query: CustomerListQuerySchema },
+  responses: {
+    200: { description: 'Paginated customers', content: { 'application/json': { schema: CustomerListSchema } } },
+    400: { description: 'Invalid customer filters' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
   path: '/customers',
-  description: 'Search customers by phone, email, or name (CUST-01, D-09).',
-  request: { query: z.object({ search: z.string().optional() }) },
+  description: 'Search customers by phone, email, or name for checkout compatibility.',
+  request: { query: z.object({ search: z.string().max(100).optional() }) },
   responses: {
     200: { description: 'Matching customers', content: { 'application/json': { schema: z.array(CustomerSchema) } } },
   },
