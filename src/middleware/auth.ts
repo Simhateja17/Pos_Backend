@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
+import { getAuthCookies, setAuthCookies } from '../lib/authCookies'
 
 // supabase-js 2.110 initialises a Realtime client even though this API only
 // uses Auth's `getUser()`. Node 20 has no native WebSocket, so provide the
@@ -46,16 +47,24 @@ export function decodeJwtPayload(token: string): Record<string, unknown> {
  */
 export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization
-  if (!header || !header.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized' })
-  }
+  const cookies = getAuthCookies(req)
+  const bearerToken = header?.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : undefined
+  let token = bearerToken ?? cookies.accessToken
 
-  const token = header.slice('Bearer '.length).trim()
   if (!token) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
-  const { data, error } = await supabase.auth.getUser(token)
+  let { data, error } = await supabase.auth.getUser(token)
+  if ((error || !data?.user) && !bearerToken && cookies.refreshToken) {
+    const refreshed = await supabase.auth.setSession({ access_token: token, refresh_token: cookies.refreshToken })
+    if (refreshed.data.session) {
+      token = refreshed.data.session.access_token
+      setAuthCookies(res, token, refreshed.data.session.refresh_token)
+      data = await supabase.auth.getUser(token).then((result) => result.data)
+      error = null
+    }
+  }
   if (error || !data?.user) {
     return res.status(401).json({ error: 'Unauthorized' })
   }

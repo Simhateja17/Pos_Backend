@@ -5,6 +5,7 @@ import bcrypt from 'bcrypt'
 import { SignupSchema, LoginSchema, SetPinSchema } from '../contracts/schemas/auth'
 import { authMiddleware, decodeJwtPayload } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
+import { clearAuthCookies, getAuthCookies, setAuthCookies } from '../lib/authCookies'
 
 const router = Router()
 
@@ -135,6 +136,8 @@ router.post('/signup', async (req, res) => {
       return res.status(500).json({ error: 'Account created but failed to start a session. Please log in.' })
     }
 
+    setAuthCookies(res, signInData.session.access_token, signInData.session.refresh_token)
+
     return res.status(201).json({
       user: {
         id: newUser.id,
@@ -205,6 +208,8 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
 
+  setAuthCookies(res, data.session.access_token, data.session.refresh_token)
+
   return res.status(200).json({
     user: {
       id: data.user.id,
@@ -217,6 +222,25 @@ router.post('/login', async (req, res) => {
       refreshToken: data.session.refresh_token,
     },
   })
+})
+
+router.post('/logout', (_req, res) => {
+  clearAuthCookies(res)
+  return res.status(204).send()
+})
+
+router.get('/session', async (req, res) => {
+  const { accessToken, refreshToken } = getAuthCookies(req)
+  if (!accessToken && !refreshToken) return res.json({ authenticated: false })
+  const session = accessToken && refreshToken
+    ? await supabaseAnon.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+    : null
+  if (!session?.data.session) {
+    clearAuthCookies(res)
+    return res.json({ authenticated: false })
+  }
+  setAuthCookies(res, session.data.session.access_token, session.data.session.refresh_token)
+  return res.json({ authenticated: true })
 })
 
 /**
