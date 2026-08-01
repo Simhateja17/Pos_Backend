@@ -60,7 +60,23 @@ jobs:
           git pull --ff-only origin main
           npm install
           npm run build
-          pm2 reload couture-backend
+          pm2 reload couture-backend --update-env
           pm2 save
-          curl --fail --silent --show-error http://127.0.0.1:4000/health
+          if ! curl --fail --silent --show-error \
+            --retry 15 \
+            --retry-delay 2 \
+            --retry-connrefused \
+            http://127.0.0.1:4000/health; then
+            pm2 status
+            pm2 logs couture-backend --lines 60 --nostream
+            exit 1
+          fi
           REMOTE
+
+      - name: Verify public HTTPS endpoint
+        run: |
+          curl --fail --silent --show-error \
+            --retry 15 \
+            --retry-delay 2 \
+            --retry-connrefused \
+            https://posbackend.withcouture.me/health
