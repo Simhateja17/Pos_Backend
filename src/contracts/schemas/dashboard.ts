@@ -42,7 +42,7 @@ const LowStockItemSchema = z.object({
   productId: z.string().uuid(),
   productName: z.string(),
   sku: z.string(),
-  quantity: z.number().int(),
+  quantity: z.number(),
   reorderThreshold: z.number().int(),
 }).openapi('DashboardLowStockItem')
 
@@ -52,7 +52,7 @@ const ActionableItemSchema = z.discriminatedUnion('type', [
     variantId: z.string().uuid(),
     productName: z.string(),
     sku: z.string(),
-    quantity: z.number().int(),
+    quantity: z.number(),
     reorderThreshold: z.number().int(),
   }),
   z.object({

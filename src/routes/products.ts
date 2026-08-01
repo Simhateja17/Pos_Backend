@@ -11,11 +11,13 @@ type VariantRow = {
   id: string
   product_id: string
   sku: string
+  barcode: string | null
+  unit_of_measure: string
   size: string | null
   color: string | null
   material: string | null
   price: unknown // Prisma Decimal
-  reorder_threshold: number
+  reorder_threshold: unknown // Prisma Decimal since 0031
   identity_locked: boolean
   created_at: Date
 }
@@ -25,11 +27,13 @@ function toVariantJson(row: VariantRow, currentStock: number) {
     id: row.id,
     productId: row.product_id,
     sku: row.sku,
+    barcode: row.barcode,
+    unitOfMeasure: row.unit_of_measure,
     size: row.size,
     color: row.color,
     material: row.material,
     price: row.price!.toString(),
-    reorderThreshold: row.reorder_threshold,
+    reorderThreshold: Number(row.reorder_threshold),
     identityLocked: row.identity_locked,
     currentStock,
     createdAt: row.created_at.toISOString(),
@@ -81,7 +85,14 @@ router.get('/', async (req, res) => {
   const stockByVariant = new Map(stockLevels.map((s: any) => [s.variant_id, s.quantity]))
 
   const filteredVariants = search
-    ? variants.filter((v: any) => v.sku.toLowerCase() === search || v.sku.toLowerCase().includes(search))
+    ? variants.filter(
+        (v: any) =>
+          // Exact barcode match first: a scanned EAN is unambiguous and must not
+          // be diluted by substring SKU hits.
+          v.barcode === search ||
+          v.sku.toLowerCase() === search ||
+          v.sku.toLowerCase().includes(search),
+      )
     : variants
   const relevantProductIds = search
     ? new Set([
@@ -142,6 +153,13 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Duplicate SKU within request' })
   }
 
+  // Same reasoning for barcodes, which 0031 makes unique per tenant where
+  // present. Two variants of one product cannot share a manufacturer code.
+  const barcodes = parsed.data.variants.map((v) => v.barcode).filter((b): b is string => !!b)
+  if (new Set(barcodes).size !== barcodes.length) {
+    return res.status(400).json({ error: 'Duplicate barcode within request' })
+  }
+
   const tenantId = req.user!.tenantId
 
   try {
@@ -164,6 +182,8 @@ router.post('/', async (req, res) => {
             tenant_id: tenantId,
             product_id: product.id,
             sku,
+            barcode: input.barcode ?? null,
+            unit_of_measure: input.unitOfMeasure,
             size: input.size ?? null,
             color: input.color ?? null,
             material: input.material ?? null,
@@ -181,7 +201,14 @@ router.post('/', async (req, res) => {
     return res.status(201).json(toProductJson(product, variantJson))
   } catch (err: any) {
     if (err.code === 'P2002') {
-      return res.status(409).json({ error: 'A variant with that SKU already exists' })
+      // 0031 added a second unique constraint (tenant_id, barcode), so P2002 is
+      // no longer necessarily about the SKU — say which one actually clashed.
+      const target = String(err.meta?.target ?? '')
+      return res.status(409).json({
+        error: target.includes('barcode')
+          ? 'A variant with that barcode already exists'
+          : 'A variant with that SKU already exists',
+      })
     }
     return res.status(err.status ?? 500).json({ error: err.message ?? 'Could not create product' })
   }
@@ -225,6 +252,8 @@ router.patch('/:productId/variants/:variantId', async (req, res) => {
         ...(parsed.data.size !== undefined ? { size: parsed.data.size } : {}),
         ...(parsed.data.color !== undefined ? { color: parsed.data.color } : {}),
         ...(parsed.data.material !== undefined ? { material: parsed.data.material } : {}),
+        ...(parsed.data.barcode !== undefined ? { barcode: parsed.data.barcode } : {}),
+        ...(parsed.data.unitOfMeasure !== undefined ? { unit_of_measure: parsed.data.unitOfMeasure } : {}),
         ...(parsed.data.price !== undefined ? { price: parsed.data.price } : {}),
         ...(parsed.data.reorderThreshold !== undefined ? { reorder_threshold: parsed.data.reorderThreshold } : {}),
       },

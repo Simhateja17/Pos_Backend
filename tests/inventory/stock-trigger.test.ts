@@ -46,7 +46,8 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
         where: { variant_id: vId },
         _sum: { quantity_delta: true },
       })
-      return { derived: level?.quantity ?? 0, ledger: agg._sum.quantity_delta ?? 0 }
+      // Both are Prisma Decimals since 0031's numeric(12,3) widening.
+      return { derived: Number(level?.quantity ?? 0), ledger: Number(agg._sum.quantity_delta ?? 0) }
     })
   }
 

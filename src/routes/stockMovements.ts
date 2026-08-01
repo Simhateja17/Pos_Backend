@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { CreateStockMovementSchema } from '../contracts/schemas/stockMovement'
+import { allowsFractionalQuantity } from '../contracts/schemas/product'
 import { ROLE_RANK } from '../middleware/requireRole'
 import { forTenant } from '../db/tenantClient'
 
@@ -10,7 +11,7 @@ type MovementRow = {
   id: string
   variant_id: string
   movement_type: string
-  quantity_delta: number
+  quantity_delta: unknown // Prisma Decimal since 0031
   reason_code: string | null
   reason_note: string | null
   created_by: string | null
@@ -22,7 +23,7 @@ function toMovementJson(row: MovementRow) {
     id: row.id,
     variantId: row.variant_id,
     movementType: row.movement_type,
-    quantityDelta: row.quantity_delta,
+    quantityDelta: Number(row.quantity_delta),
     reasonCode: row.reason_code,
     reasonNote: row.reason_note,
     createdBy: row.created_by,
@@ -74,6 +75,18 @@ router.post('/', async (req, res) => {
   const variant = await client.variants.findFirst({ where: { id: parsed.data.variantId } })
   if (!variant) {
     return res.status(404).json({ error: 'Variant not found' })
+  }
+
+  // Whether a fraction is meaningful depends on the variant's unit, which the
+  // request schema cannot see. Rice sold loose (kg) moves 2.5; a shirt (piece)
+  // never does, and a fractional piece is a typo the ledger should refuse.
+  if (
+    !allowsFractionalQuantity(variant.unit_of_measure) &&
+    !Number.isInteger(parsed.data.quantityDelta)
+  ) {
+    return res.status(400).json({
+      error: `Quantity must be a whole number for a variant measured in ${variant.unit_of_measure}`,
+    })
   }
 
   const createdBy = await resolveActingStaffId(client, req)
@@ -134,7 +147,7 @@ router.get('/low-stock', async (req, res) => {
 
   const lowStock = variants
     .map((v: any) => ({ v, quantity: Number(stockByVariant.get(v.id) ?? 0) }))
-    .filter(({ v, quantity }: any) => quantity <= v.reorder_threshold)
+    .filter(({ v, quantity }: any) => quantity <= Number(v.reorder_threshold))
     .map(({ v, quantity }: any) => ({
       variantId: v.id,
       productId: v.product_id,
@@ -144,7 +157,8 @@ router.get('/low-stock', async (req, res) => {
       color: v.color,
       material: v.material,
       quantity,
-      reorderThreshold: v.reorder_threshold,
+      reorderThreshold: Number(v.reorder_threshold),
+      unitOfMeasure: v.unit_of_measure,
     }))
 
   res.json(lowStock)

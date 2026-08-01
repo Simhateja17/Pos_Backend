@@ -10,7 +10,8 @@ export const StockMovementSchema = z
     id: z.string().uuid(),
     variantId: z.string().uuid(),
     movementType: z.enum(['sale', 'receive', 'adjustment', 'return', 'transfer']),
-    quantityDelta: z.number().int(),
+    // numeric(12,3) since 0031 — a kg variant moves 2.5, not 2.
+    quantityDelta: z.number(),
     reasonCode: z.enum(['damage', 'shrinkage_theft', 'count_correction', 'other']).nullable(),
     reasonNote: z.string().nullable(),
     createdBy: z.string().uuid().nullable(),
@@ -25,7 +26,9 @@ export const CreateStockMovementSchema = z
   .object({
     variantId: z.string().uuid(),
     movementType: z.enum(['receive', 'adjustment', 'transfer']),
-    quantityDelta: z.number().int().refine((n) => n !== 0, 'quantityDelta must not be zero'),
+    // Whole-vs-fractional is decided by the VARIANT's unit, which this schema
+    // cannot see, so the route re-checks it against the loaded variant.
+    quantityDelta: z.number().refine((n) => n !== 0, 'quantityDelta must not be zero'),
     reasonCode: z.enum(['damage', 'shrinkage_theft', 'count_correction', 'other']).optional(),
     reasonNote: z.string().max(500).optional(),
   })
@@ -48,8 +51,9 @@ export const LowStockVariantSchema = z
     size: z.string().nullable(),
     color: z.string().nullable(),
     material: z.string().nullable(),
-    quantity: z.number().int(),
-    reorderThreshold: z.number().int(),
+    quantity: z.number(),
+    reorderThreshold: z.number(),
+    unitOfMeasure: z.string(),
   })
   .openapi('LowStockVariant')
 

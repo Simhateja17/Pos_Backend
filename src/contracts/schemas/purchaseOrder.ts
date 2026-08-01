@@ -13,8 +13,8 @@ export const PurchaseOrderLineSchema = z
     variantId: z.string().uuid(),
     sku: z.string(),
     productName: z.string(),
-    quantityOrdered: z.number().int(),
-    quantityReceived: z.number().int(),
+    quantityOrdered: z.number(),
+    quantityReceived: z.number(),
     unitCost: z.string(),
     lineTotal: z.string(),
   })
@@ -44,7 +44,7 @@ export const CreatePurchaseOrderSchema = z
       .array(
         z.object({
           variantId: z.string().uuid(),
-          quantityOrdered: z.number().int().positive(),
+          quantityOrdered: z.number().positive(),
           unitCost: z.number().nonnegative(),
         }),
       )
@@ -76,7 +76,7 @@ export const ReceivePurchaseOrderSchema = z
       .array(
         z.object({
           purchaseOrderLineId: z.string().uuid(),
-          quantityReceived: z.number().int().positive(),
+          quantityReceived: z.number().positive(),
           // Optional: falls back to the line's ordered unit cost when the
           // delivery charged the price the PO expected.
           unitCost: z.number().nonnegative().optional(),
@@ -96,8 +96,8 @@ export const ReceiptResultSchema = z
       z.object({
         purchaseOrderLineId: z.string().uuid(),
         sku: z.string(),
-        quantityOrdered: z.number().int(),
-        quantityReceived: z.number().int(),
+        quantityOrdered: z.number(),
+        quantityReceived: z.number(),
       }),
     ),
     purchaseOrder: PurchaseOrderSchema,

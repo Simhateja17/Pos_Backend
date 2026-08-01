@@ -192,14 +192,14 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
     const existing = byVariant.get(row.variant_id)
     if (!existing) {
       byVariant.set(row.variant_id, {
-        units: row.units_sold,
-        returns: row.returns_units,
+        units: Number(row.units_sold),
+        returns: Number(row.returns_units),
         firstDate: row.date,
         lastDate: row.date,
       })
     } else {
-      existing.units += row.units_sold
-      existing.returns += row.returns_units
+      existing.units += Number(row.units_sold)
+      existing.returns += Number(row.returns_units)
       if (row.date < existing.firstDate) existing.firstDate = row.date
       if (row.date > existing.lastDate) existing.lastDate = row.date
     }
@@ -216,7 +216,7 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
   const supplierByVariant = new Map<string, { id: string; name: string; leadTimeDays: number }>()
   for (const po of openOrders) {
     for (const line of po.purchase_order_lines ?? []) {
-      const outstanding = Math.max(0, line.quantity_ordered - line.quantity_received)
+      const outstanding = Math.max(0, Number(line.quantity_ordered) - Number(line.quantity_received))
       onOrderByVariant.set(line.variant_id, (onOrderByVariant.get(line.variant_id) ?? 0) + outstanding)
       if (po.suppliers) {
         supplierByVariant.set(line.variant_id, {
@@ -265,7 +265,7 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
       unitsSoldInWindow: sales?.units ?? 0,
       returnsInWindow: sales?.returns ?? 0,
       historyDays,
-      currentStock: variant.variant_stock_levels?.quantity ?? 0,
+      currentStock: Number(variant.variant_stock_levels?.quantity ?? 0),
       onOrder: onOrderByVariant.get(variant.id) ?? 0,
       leadTimeDays: supplier.leadTimeDays,
       supplierName: supplier.name,

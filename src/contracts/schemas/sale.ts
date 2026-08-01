@@ -10,7 +10,8 @@ extendZodWithOpenApi(z)
 export const SaleLineInputSchema = z
   .object({
     variantId: z.string().uuid(),
-    quantity: z.number().int().positive(),
+    // numeric(12,3) since 0031 — the route rejects a fraction for a discrete unit.
+    quantity: z.number().positive(),
     discountPercent: z.string().regex(/^\d{1,2}(\.\d{1,2})?$/).optional(),
     discountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
   })
@@ -52,7 +53,7 @@ export const SaleLineItemSchema = z
   .object({
     id: z.string().uuid(),
     variantId: z.string().uuid(),
-    quantity: z.number().int(),
+    quantity: z.number(),
     unitPrice: z.string(),
     discountPercent: z.string().nullable(),
     discountAmount: z.string(),

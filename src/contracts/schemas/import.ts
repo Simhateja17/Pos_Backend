@@ -15,6 +15,8 @@ export const CATALOG_TARGET_FIELDS = [
   { field: 'sku', label: 'SKU', required: true, type: 'text', hint: 'Unique product code. Rows without one cannot be imported.' },
   { field: 'productName', label: 'Product name', required: true, type: 'text', hint: 'Shown on the till and on receipts.' },
   { field: 'category', label: 'Category', required: false, type: 'text', hint: 'Groups products in reports.' },
+  { field: 'barcode', label: 'Barcode (EAN/UPC)', required: false, type: 'text', hint: "The manufacturer's printed barcode. Lets the till find this item by scanning it." },
+  { field: 'unitOfMeasure', label: 'Unit', required: false, type: 'text', hint: 'How this item is sold — piece, kg, litre, pack. Defaults to piece.' },
   { field: 'size', label: 'Size', required: false, type: 'text', hint: '' },
   { field: 'color', label: 'Colour', required: false, type: 'text', hint: '' },
   { field: 'material', label: 'Material', required: false, type: 'text', hint: '' },

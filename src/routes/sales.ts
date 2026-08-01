@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { CreateSaleSchema, ResendReceiptInputSchema, SaleListQuerySchema } from '../contracts/schemas/sale'
 import { PaymentReadQuerySchema } from '../contracts/schemas/payment'
+import { allowsFractionalQuantity } from '../contracts/schemas/product'
 import { ROLE_RANK } from '../middleware/requireRole'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { computeCheckout } from '../lib/money'
@@ -67,7 +68,7 @@ function toLineJson(row: any) {
   return {
     id: row.id,
     variantId: row.variant_id,
-    quantity: row.quantity,
+    quantity: Number(row.quantity),
     unitPrice: row.unit_price.toString(),
     discountPercent: row.discount_percent ? row.discount_percent.toString() : null,
     discountAmount: row.discount_amount.toString(),
@@ -177,6 +178,25 @@ router.post('/', async (req, res) => {
       }
       if (missingVariantIds.length > 0) {
         return { status: 404, body: { error: 'Variant not found', variantIds: missingVariantIds } }
+      }
+
+      // A fractional quantity is only meaningful for a variant sold by weight
+      // or volume. Selling 2.5 of a `piece` variant is a typo, and the sale is
+      // the one place it would silently become money.
+      const fractionalErrors = parsed.data.lines
+        .map((line, i) => ({ line, variant: variants[i] }))
+        .filter(
+          ({ line, variant }) =>
+            !allowsFractionalQuantity(variant.unit_of_measure) && !Number.isInteger(line.quantity),
+        )
+      if (fractionalErrors.length > 0) {
+        return {
+          status: 400,
+          body: {
+            error: 'Quantity must be a whole number for variants sold by piece',
+            variantIds: fractionalErrors.map(({ line }) => line.variantId),
+          },
+        }
       }
 
       const tenant = await tx.tenants.findFirst({ where: { id: tenantId } })

@@ -74,6 +74,40 @@ function deterministicSaleId(fileHash: string, receiptKey: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+/**
+ * Supplier price lists spell units every possible way ("KG", "Kgs", "Ltr",
+ * "pcs"). Map what we recognise onto the enum 0031 allows and fall back to
+ * 'piece' — the same default an unspecified variant already gets — rather than
+ * failing the whole import over a unit column.
+ */
+const UNIT_ALIASES: Record<string, string> = {
+  piece: 'piece', pieces: 'piece', pc: 'piece', pcs: 'piece', nos: 'piece', unit: 'piece', ea: 'piece', each: 'piece',
+  kg: 'kg', kgs: 'kg', kilo: 'kg', kilos: 'kg', kilogram: 'kg', kilograms: 'kg',
+  g: 'gram', gm: 'gram', gms: 'gram', gram: 'gram', grams: 'gram',
+  l: 'litre', ltr: 'litre', ltrs: 'litre', litre: 'litre', litres: 'litre', liter: 'litre', liters: 'litre',
+  ml: 'ml', mls: 'ml', millilitre: 'ml', milliliter: 'ml',
+  m: 'metre', mtr: 'metre', metre: 'metre', metres: 'metre', meter: 'metre', meters: 'metre',
+  box: 'box', boxes: 'box', ctn: 'box', carton: 'box',
+  pack: 'pack', packs: 'pack', pkt: 'pack', packet: 'pack',
+  set: 'set', sets: 'set',
+  pair: 'pair', pairs: 'pair',
+}
+
+function normaliseUnit(raw: string | undefined): string {
+  const key = (raw ?? '').trim().toLowerCase()
+  return UNIT_ALIASES[key] ?? 'piece'
+}
+
+/**
+ * Keeps only a structurally plausible EAN/UPC. Strips separators a spreadsheet
+ * may have introduced; anything else becomes null rather than poisoning the
+ * per-tenant unique barcode index with junk.
+ */
+function normaliseBarcode(raw: string | undefined): string | null {
+  const digits = (raw ?? '').trim().replace(/[\s-]/g, '')
+  return /^\d{8,14}$/.test(digits) ? digits : null
+}
+
 /** Columns the mapping did not consume, kept verbatim so nothing is lost. */
 function sourceMetadata(row: Record<string, string>, mapped: Set<string>): Record<string, string> | null {
   const extras: Record<string, string> = {}
@@ -218,14 +252,22 @@ async function commitCatalog(
 
     const cost = parseNumber(value(row, 'cost'))
     const reorderThreshold = parseNumber(value(row, 'reorderThreshold'))
+    // A distributor price list carries the maker's EAN and the pack unit, which
+    // is exactly how a supermarket loads Nestlé/ITC/Unilever stock in bulk
+    // rather than typing each product in by hand.
+    const unitOfMeasure = normaliseUnit(value(row, 'unitOfMeasure'))
+    const barcode = normaliseBarcode(value(row, 'barcode'))
     const variantData = {
       product_id: productId!,
+      barcode,
+      unit_of_measure: unitOfMeasure,
       size: value(row, 'size') || null,
       color: value(row, 'color') || null,
       material: value(row, 'material') || null,
       price: price.toFixed(2),
       moving_average_cost: cost === null ? null : cost.toFixed(2),
-      reorder_threshold: reorderThreshold === null ? undefined : Math.max(0, Math.round(reorderThreshold)),
+      // No longer rounded: a kg variant legitimately reorders at 5.5 (0031).
+      reorder_threshold: reorderThreshold === null ? undefined : Math.max(0, reorderThreshold),
       source_metadata: sourceMetadata(row, mappedColumns) as any,
     }
 
@@ -252,13 +294,14 @@ async function commitCatalog(
     // current stock is trigger-derived from the append-only ledger and is never
     // mutated directly (migration 0008).
     const quantity = parseNumber(value(row, 'quantityOnHand'))
-    if (quantity !== null && Math.round(quantity) > 0) {
+    if (quantity !== null && quantity > 0) {
       await tx.stock_movements.create({
         data: {
           tenant_id: input.tenantId,
           variant_id: variantId,
           movement_type: 'receive',
-          quantity_delta: Math.round(quantity),
+          // Not rounded: 12.5 kg of opening stock must land as 12.5 (0031).
+          quantity_delta: quantity,
           reason_note: `Opening stock from import ${input.batchId}`,
           created_by: input.createdBy,
         },

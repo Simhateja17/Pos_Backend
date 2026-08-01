@@ -66,8 +66,10 @@ router.post('/', async (req, res) => {
         const priorReturns = await tx.stock_movements.findMany({
           where: { movement_type: 'return', reference_id: sale.id, variant_id: saleLineItem.variant_id },
         })
-        const alreadyReturned = priorReturns.reduce((sum: number, m: any) => sum + m.quantity_delta, 0)
-        const remainingReturnable = saleLineItem.quantity - alreadyReturned
+        // quantity_delta is a Prisma Decimal since 0031; `sum + m.quantity_delta`
+        // would concatenate strings, silently inflating the returned total.
+        const alreadyReturned = priorReturns.reduce((sum: number, m: any) => sum + Number(m.quantity_delta), 0)
+        const remainingReturnable = Number(saleLineItem.quantity) - alreadyReturned
         if (line.quantity > remainingReturnable) {
           return {
             status: 400,
@@ -78,7 +80,7 @@ router.post('/', async (req, res) => {
         }
 
         const refundAmount = saleLineItem.line_total
-          .dividedBy(saleLineItem.quantity)
+          .dividedBy(Number(saleLineItem.quantity))
           .times(line.quantity)
 
         refundLines.push({ saleLineItem, quantity: line.quantity, refundAmount })

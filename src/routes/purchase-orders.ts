@@ -21,10 +21,10 @@ function toPurchaseOrderJson(po: any) {
     variantId: line.variant_id,
     sku: line.variants?.sku ?? '',
     productName: line.variants?.products?.name ?? '',
-    quantityOrdered: line.quantity_ordered,
-    quantityReceived: line.quantity_received,
+    quantityOrdered: Number(line.quantity_ordered),
+    quantityReceived: Number(line.quantity_received),
     unitCost: decimalToString(line.unit_cost),
-    lineTotal: (Number(line.unit_cost) * line.quantity_ordered).toFixed(2),
+    lineTotal: (Number(line.unit_cost) * Number(line.quantity_ordered)).toFixed(2),
   }))
 
   return {
@@ -251,12 +251,14 @@ router.post('/:poId/receive', async (req, res) => {
 
         // Over-receipt is allowed — the goods physically arrived — but is
         // reported back rather than silently accepted.
-        const receivedAfter = poLine.quantity_received + input.quantityReceived
-        if (receivedAfter > poLine.quantity_ordered) {
+        // quantity_received is a Prisma Decimal since 0031 — `+` on it would
+        // concatenate strings rather than add, so coerce before arithmetic.
+        const receivedAfter = Number(poLine.quantity_received) + input.quantityReceived
+        if (receivedAfter > Number(poLine.quantity_ordered)) {
           overReceived.push({
             purchaseOrderLineId: poLine.id,
             sku: poLine.variants?.sku ?? '',
-            quantityOrdered: poLine.quantity_ordered,
+            quantityOrdered: Number(poLine.quantity_ordered),
             quantityReceived: receivedAfter,
           })
         }

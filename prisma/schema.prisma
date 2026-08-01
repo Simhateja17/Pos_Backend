@@ -583,7 +583,7 @@ model reorder_suggestions {
   tenant_id          String             @db.Uuid
   variant_id         String             @db.Uuid
   supplier_id        String?            @db.Uuid
-  suggested_quantity Int
+  suggested_quantity Decimal            @db.Decimal(12, 3)
   reason             Json
   method             reorder_method     @default(heuristic)
   confidence         reorder_confidence
@@ -602,9 +602,9 @@ model daily_sales_rollup {
   tenant_id     String   @db.Uuid
   variant_id    String   @db.Uuid
   date          DateTime @db.Date
-  units_sold    Int      @default(0)
+  units_sold    Decimal  @default(0) @db.Decimal(12, 3)
   revenue       Decimal  @default(0) @db.Decimal(12, 2)
-  returns_units Int      @default(0)
+  returns_units Decimal  @default(0) @db.Decimal(12, 3)
   tenants       tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   variants      variants @relation(fields: [variant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -644,8 +644,8 @@ model purchase_order_lines {
   tenant_id                    String                         @db.Uuid
   purchase_order_id            String                         @db.Uuid
   variant_id                   String                         @db.Uuid
-  quantity_ordered             Int
-  quantity_received            Int                            @default(0)
+  quantity_ordered             Decimal                        @db.Decimal(12, 3)
+  quantity_received            Decimal                        @default(0) @db.Decimal(12, 3)
   unit_cost                    Decimal                        @db.Decimal(10, 2)
   created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
   purchase_orders              purchase_orders                @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -686,7 +686,7 @@ model purchase_order_receipt_lines {
   receipt_id              String                  @db.Uuid
   purchase_order_line_id  String                  @db.Uuid
   variant_id              String                  @db.Uuid
-  quantity_received       Int
+  quantity_received       Decimal                 @db.Decimal(12, 3)
   unit_cost               Decimal                 @db.Decimal(10, 2)
   created_at              DateTime                @default(now()) @db.Timestamptz(6)
   purchase_order_lines    purchase_order_lines    @relation(fields: [purchase_order_line_id], references: [id], onUpdate: NoAction)
@@ -747,12 +747,14 @@ model variants {
   color                        String?
   material                     String?
   price                        Decimal                        @db.Decimal(10, 2)
-  reorder_threshold            Int                            @default(4)
+  reorder_threshold            Decimal                        @default(4) @db.Decimal(12, 3)
   identity_locked              Boolean                        @default(false)
   created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
   is_taxable                   Boolean                        @default(true)
   moving_average_cost          Decimal?                       @db.Decimal(10, 2)
   source_metadata              Json?
+  unit_of_measure              String                         @default("piece")
+  barcode                      String?
   daily_sales_rollup           daily_sales_rollup[]
   purchase_order_lines         purchase_order_lines[]
   purchase_order_receipt_lines purchase_order_receipt_lines[]
@@ -764,6 +766,7 @@ model variants {
   tenants                      tenants                        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([tenant_id, sku])
+  @@unique([tenant_id, barcode], map: "idx_variants_tenant_barcode", where: raw("(barcode IS NOT NULL)"))
   @@index([tenant_id], map: "idx_variants_tenant_id")
   @@index([product_id], map: "idx_variants_product_id")
   @@schema("public")
@@ -776,7 +779,7 @@ model stock_movements {
   tenant_id      String                   @db.Uuid
   variant_id     String                   @db.Uuid
   movement_type  stock_movement_type
-  quantity_delta Int
+  quantity_delta Decimal                  @db.Decimal(12, 3)
   reason_code    stock_adjustment_reason?
   reason_note    String?
   reference_id   String?                  @db.Uuid
@@ -796,7 +799,7 @@ model stock_movements {
 model variant_stock_levels {
   variant_id String   @id @db.Uuid
   tenant_id  String   @db.Uuid
-  quantity   Int      @default(0)
+  quantity   Decimal  @default(0) @db.Decimal(12, 3)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
   tenants    tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   variants   variants @relation(fields: [variant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -883,7 +886,7 @@ model sale_line_items {
   tenant_id        String   @db.Uuid
   sale_id          String   @db.Uuid
   variant_id       String   @db.Uuid
-  quantity         Int
+  quantity         Decimal  @db.Decimal(12, 3)
   unit_price       Decimal  @db.Decimal(10, 2)
   discount_percent Decimal? @db.Decimal(5, 2)
   discount_amount  Decimal  @default(0) @db.Decimal(10, 2)

@@ -35,9 +35,14 @@ export type MappingInput = {
  * result is labelled 'heuristic' so the screen can say which produced it.
  */
 const SYNONYMS: Record<string, string[]> = {
-  sku: ['sku', 'itemcode', 'item code', 'productcode', 'product code', 'barcode', 'code', 'article', 'style'],
+  // 'barcode' deliberately NOT listed here: since 0031 it is its own column, and
+  // routing a distributor's EAN into sku would both lose the barcode and make
+  // the till's own printed labels encode a manufacturer code.
+  sku: ['sku', 'itemcode', 'item code', 'productcode', 'product code', 'code', 'article', 'style'],
   productName: ['name', 'product', 'productname', 'product name', 'item', 'itemname', 'description', 'particulars'],
   category: ['category', 'department', 'group', 'productgroup', 'class', 'type'],
+  barcode: ['barcode', 'ean', 'ean13', 'upc', 'gtin', 'barcodeno', 'bar code', 'scancode'],
+  unitOfMeasure: ['unit', 'uom', 'unitofmeasure', 'unit of measure', 'units', 'measure', 'packing'],
   size: ['size'],
   color: ['color', 'colour', 'shade'],
   material: ['material', 'fabric', 'composition'],

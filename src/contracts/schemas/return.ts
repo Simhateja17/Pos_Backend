@@ -8,7 +8,7 @@ extendZodWithOpenApi(z)
 // non-zero refine via a plain positive-int constraint here.
 export const ReturnLineInputSchema = z.object({
   saleLineItemId: z.string().uuid(),
-  quantity: z.number().int().positive(),
+  quantity: z.number().positive(),
 })
 
 export const CreateReturnSchema = z

@@ -132,7 +132,7 @@ router.get('/', async (req, res) => {
       variantId: item.variantId,
       productName: item.productName,
       sku: item.sku,
-      quantity: item.quantity,
+      quantity: Number(item.quantity),
       reorderThreshold: item.reorderThreshold,
     })),
     ...(openShift ? [{ type: 'open_shift' as const, shiftId: openShift.id, openedAt: openShift.opened_at.toISOString() }] : []),

@@ -13,7 +13,7 @@ function toSuggestionJson(row: any) {
     productName: row.variants?.products?.name ?? '',
     supplierId: row.supplier_id,
     supplierName: row.suppliers?.name ?? null,
-    suggestedQuantity: row.suggested_quantity,
+    suggestedQuantity: Number(row.suggested_quantity),
     method: row.method,
     confidence: row.confidence,
     reason: row.reason,
