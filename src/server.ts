@@ -52,7 +52,7 @@ app.use('/api', routes)
 // Error middleware must be registered LAST, after all routes.
 app.use(errorHandler)
 
-const PORT = process.env.PORT ?? 4000
+const PORT = Number.parseInt(process.env.PORT ?? '4000', 10)
 if (require.main === module) {
   app.listen(PORT, '127.0.0.1', () => console.log(`backend listening on 127.0.0.1:${PORT}`))
 }
