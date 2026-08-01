@@ -1,0 +1,66 @@
+name: Deploy backend to Azure VM
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Check out backend
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build backend
+        run: npm run build
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      VM_HOST: ${{ secrets.AZURE_VM_HOST }}
+      VM_USER: ${{ secrets.AZURE_VM_USER }}
+      SSH_KEY: ${{ secrets.AZURE_VM_SSH_KEY }}
+      KNOWN_HOSTS: ${{ secrets.AZURE_VM_KNOWN_HOSTS }}
+    steps:
+      - name: Configure SSH
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/azure_vm_ed25519"
+          chmod 600 "$HOME/.ssh/azure_vm_ed25519"
+          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy and verify backend
+        run: |
+          ssh -i "$HOME/.ssh/azure_vm_ed25519" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$VM_USER@$VM_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export NVM_DIR="$HOME/.nvm"
+          . "$NVM_DIR/nvm.sh"
+          nvm use 24 >/dev/null
+          cd "$HOME/backend"
+          git pull --ff-only origin main
+          npm install
+          npm run build
+          pm2 reload couture-backend
+          pm2 save
+          curl --fail --silent --show-error http://127.0.0.1:4000/health
+          REMOTE
