@@ -6,6 +6,7 @@ import pinRouter from './pin'
 import membersRouter from './members'
 import productsRouter from './products'
 import categoriesRouter from './categories'
+import settingsRouter from './settings'
 import stockMovementsRouter from './stockMovements'
 import salesRouter from './sales'
 import returnsRouter from './returns'
@@ -39,6 +40,7 @@ router.use('/terminal/pin', authMiddleware, operatorContext, pinRouter)
 router.use('/members', authMiddleware, operatorContext, membersRouter)
 router.use('/products', authMiddleware, operatorContext, productsRouter)
 router.use('/categories', authMiddleware, operatorContext, categoriesRouter)
+router.use('/settings', authMiddleware, operatorContext, settingsRouter)
 router.use('/stock-movements', authMiddleware, operatorContext, stockMovementsRouter)
 router.use('/sales', authMiddleware, operatorContext, salesRouter)
 router.use('/returns', authMiddleware, operatorContext, returnsRouter)

@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { StoreSettingsSchema, UpdateStoreSettingsSchema } from './schemas/settings'
 import {
   CategorySchema,
   CreateCategorySchema,
@@ -526,6 +527,27 @@ registry.registerPath({
       },
     },
     400: { description: 'Invalid request' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/settings',
+  description: 'Store settings — business identity, GST fields, tax rate and discount threshold. Readable by any staff role.',
+  responses: {
+    200: { description: 'Store settings', content: { 'application/json': { schema: StoreSettingsSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/settings',
+  description: 'Update store settings. Owner-only. Legal name/GSTIN/PAN are not amended with the government by this call — see UI copy.',
+  request: { body: { content: { 'application/json': { schema: UpdateStoreSettingsSchema } } } },
+  responses: {
+    200: { description: 'Store settings updated', content: { 'application/json': { schema: StoreSettingsSchema } } },
+    400: { description: 'Invalid request' },
+    403: { description: 'Only the owner can change store settings' },
   },
 })
 

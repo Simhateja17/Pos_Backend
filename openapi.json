@@ -2584,6 +2584,194 @@
           "other"
         ]
       },
+      "StoreSettings": {
+        "type": "object",
+        "properties": {
+          "businessName": {
+            "type": "string"
+          },
+          "tradeName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addressLine1": {
+            "type": "string"
+          },
+          "addressLine2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "postalCode": {
+            "type": "string"
+          },
+          "gstStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "regular",
+              "composition",
+              "unregistered",
+              null
+            ]
+          },
+          "gstin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pan": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "placeOfSupply": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "businessType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "supermarket",
+              "grocery",
+              "bakery",
+              "general",
+              "apparel",
+              "electronics",
+              "other",
+              null
+            ]
+          },
+          "combinedTaxRatePercent": {
+            "type": "string"
+          },
+          "discountThresholdPercent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "businessName",
+          "tradeName",
+          "addressLine1",
+          "addressLine2",
+          "city",
+          "state",
+          "postalCode",
+          "gstStatus",
+          "gstin",
+          "pan",
+          "placeOfSupply",
+          "businessType",
+          "combinedTaxRatePercent",
+          "discountThresholdPercent"
+        ]
+      },
+      "UpdateStoreSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "businessName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "tradeName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "addressLine1": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          },
+          "addressLine2": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 250
+          },
+          "city": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "postalCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12
+          },
+          "gstStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "regular",
+              "composition",
+              "unregistered",
+              null
+            ]
+          },
+          "gstin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 15
+          },
+          "pan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 10
+          },
+          "placeOfSupply": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "combinedTaxRatePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "discountThresholdPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
       "SupplierList": {
         "type": "array",
         "items": {
@@ -5386,6 +5574,53 @@
           },
           "400": {
             "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/settings": {
+      "get": {
+        "description": "Store settings — business identity, GST fields, tax rate and discount threshold. Readable by any staff role.",
+        "responses": {
+          "200": {
+            "description": "Store settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "description": "Update store settings. Owner-only. Legal name/GSTIN/PAN are not amended with the government by this call — see UI copy.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoreSettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Store settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Only the owner can change store settings"
           }
         }
       }

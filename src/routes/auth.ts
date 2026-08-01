@@ -3,6 +3,7 @@ import { Router } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcrypt'
 import { SignupSchema, LoginSchema, SetPinSchema } from '../contracts/schemas/auth'
+import { STARTER_CATEGORIES } from '../contracts/schemas/category'
 import { authMiddleware, decodeJwtPayload } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
 import { clearAuthCookies, getAuthCookies, setAuthCookies } from '../lib/authCookies'
@@ -134,6 +135,15 @@ router.post('/signup', async (req, res) => {
         is_active: true,
       },
     })
+
+    // A general starter category list, so a brand-new catalog is never a blank
+    // "no categories yet" prompt. /store-type layers a business-specific list
+    // on top of this later (additive — nothing here is removed by that).
+    for (const [index, name] of STARTER_CATEGORIES.general.entries()) {
+      await tenantScoped.categories.create({
+        data: { tenant_id: tenantId, name, sort_order: index },
+      })
+    }
 
     const { data: signInData, error: signInError } = await supabaseAnon.auth.signInWithPassword({
       email,

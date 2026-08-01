@@ -32,11 +32,14 @@ vi.mock('@supabase/supabase-js', () => ({
 const tenantsCreateMock = vi.fn()
 const staffMembersCreateMock = vi.fn()
 const staffMembersUpdateManyMock = vi.fn()
+// Signup now seeds a starter category list (0032's "no categories yet" fix).
+const categoriesCreateMock = vi.fn(async () => ({ id: 'category-1' }))
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
     tenants: { create: tenantsCreateMock },
     staff_members: { create: staffMembersCreateMock, updateMany: staffMembersUpdateManyMock },
+    categories: { create: categoriesCreateMock },
   })),
 }))
 

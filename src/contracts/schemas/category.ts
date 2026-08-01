@@ -50,11 +50,25 @@ export type BusinessType = z.infer<typeof BusinessTypeSchema>
  * Every one of these is editable and deletable the moment they land.
  */
 export const STARTER_CATEGORIES: Record<BusinessType, readonly string[]> = {
-  supermarket: ['Staples', 'Dairy', 'Beverages', 'Snacks', 'Personal Care', 'Household', 'Frozen'],
-  grocery: ['Staples', 'Pulses & Grains', 'Spices', 'Oils', 'Dairy', 'Beverages', 'Snacks'],
-  bakery: ['Breads', 'Cakes & Pastries', 'Cookies & Biscuits', 'Savouries', 'Beverages'],
-  general: ['Staples', 'Beverages', 'Snacks', 'Household', 'Stationery', 'Personal Care'],
-  apparel: ['Menswear', 'Womenswear', 'Kidswear', 'Footwear', 'Accessories'],
+  supermarket: [
+    'Rice, Atta & Grains', 'Pulses & Dals', 'Spices & Masalas', 'Cooking Oil & Ghee',
+    'Dairy', 'Snacks & Namkeen', 'Beverages', 'Personal Care', 'Household Cleaning',
+    'Kitchen & Utensils', 'Frozen & Ready-to-Eat', 'Baby Care',
+  ],
+  grocery: [
+    'Rice, Atta & Grains', 'Pulses & Dals', 'Spices & Masalas', 'Cooking Oil & Ghee',
+    'Dairy', 'Snacks & Namkeen', 'Beverages', 'Personal Care', 'Household Cleaning',
+    'Kitchen & Utensils',
+  ],
+  bakery: ['Breads & Buns', 'Cakes & Pastries', 'Cookies & Biscuits', 'Savouries & Puffs', 'Sweets', 'Beverages'],
+  general: [
+    'Rice, Atta & Grains', 'Dairy', 'Spices & Masalas', 'Cooking Oil & Ghee', 'Snacks & Namkeen',
+    'Beverages', 'Personal Care', 'Household Cleaning', 'Kitchen & Utensils', 'Stationery',
+  ],
+  apparel: [
+    'Shirts', 'T-Shirts', 'Trousers', 'Jeans', 'Kurtas', 'Kurta Sets', 'Sarees',
+    'Ethnic Wear', 'Footwear', 'Accessories',
+  ],
   electronics: ['Mobiles', 'Accessories', 'Audio', 'Computing', 'Home Appliances'],
   other: [],
 }
