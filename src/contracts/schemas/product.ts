@@ -54,6 +54,8 @@ export const ProductSchema = z
   .object({
     id: z.string().uuid(),
     name: z.string(),
+    categoryId: z.string().uuid().nullable(),
+    /** Resolved name, so the catalog list needs no second lookup. */
     category: z.string().nullable(),
     createdAt: z.string(),
     variants: z.array(VariantSchema),
@@ -95,7 +97,14 @@ export const CreateVariantInputSchema = z
 export const CreateProductSchema = z
   .object({
     name: z.string().min(1),
-    category: z.string().max(100).optional(),
+    /** An existing category. Send categoryName instead to create one inline. */
+    categoryId: z.string().uuid().optional(),
+    /**
+     * A category typed rather than picked. Matched case-insensitively against
+     * the tenant's existing categories and created only if genuinely new, so
+     * typing "dairy" attaches to "Dairy" instead of forking it.
+     */
+    categoryName: z.string().trim().max(80).optional(),
     variants: z.array(CreateVariantInputSchema).min(1),
   })
   .openapi('CreateProductRequest')

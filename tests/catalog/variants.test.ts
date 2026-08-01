@@ -18,6 +18,11 @@ const variantsCreateMock = vi.fn()
 const variantsFindManyMock = vi.fn()
 const variantsFindFirstMock = vi.fn()
 const variantStockLevelsFindManyMock = vi.fn()
+// 0032: products now reference a real categories table, so the route resolves
+// category names on every read and the create path may create one inline.
+const categoriesFindManyMock = vi.fn(async () => [])
+const categoriesFindFirstMock = vi.fn(async () => null)
+const categoriesCreateMock = vi.fn(async () => ({ id: 'category-1' }))
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
@@ -34,6 +39,11 @@ vi.mock('../../src/db/tenantClient', () => ({
     variant_stock_levels: {
       findMany: variantStockLevelsFindManyMock,
     },
+    categories: {
+      findMany: categoriesFindManyMock,
+      findFirst: categoriesFindFirstMock,
+      create: categoriesCreateMock,
+    },
   })),
   // CR-02: POST /products now writes through forTenantTransaction, not
   // forTenant() — the mock callback receives the same tx-shaped client.
@@ -41,6 +51,10 @@ vi.mock('../../src/db/tenantClient', () => ({
     fn({
       products: { create: productsCreateMock },
       variants: { create: variantsCreateMock, findFirst: variantsFindFirstMock },
+      categories: {
+        findFirst: categoriesFindFirstMock,
+        create: categoriesCreateMock,
+      },
     }),
   ),
 }))

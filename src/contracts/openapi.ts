@@ -1,5 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import {
+  CategorySchema,
+  CreateCategorySchema,
+  UpdateCategorySchema,
+  SeedCategoriesSchema,
+} from './schemas/category'
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi'
 import { z } from 'zod'
 import { SignupSchema, LoginSchema, AuthResponseSchema, SetPinSchema } from './schemas/auth'
@@ -445,6 +451,81 @@ registry.registerPath({
     200: { description: 'Shift closed', content: { 'application/json': { schema: ZReportSchema } } },
     404: { description: 'Shift not found' },
     409: { description: 'Shift already closed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/categories',
+  description: "The tenant's category list, with how many products sit in each.",
+  responses: {
+    200: {
+      description: 'Categories',
+      content: { 'application/json': { schema: z.array(CategorySchema) } },
+    },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/categories',
+  description: 'Create a category. Names are unique per tenant case-insensitively, so "Dairy" and "dairy" cannot both exist.',
+  request: { body: { content: { 'application/json': { schema: CreateCategorySchema } } } },
+  responses: {
+    201: { description: 'Category created', content: { 'application/json': { schema: CategorySchema } } },
+    400: { description: 'Invalid request' },
+    409: { description: 'A category with that name already exists' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/categories/{categoryId}',
+  description: 'Rename or reorder a category. A rename applies to every product in it at once.',
+  request: {
+    params: z.object({ categoryId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdateCategorySchema } } },
+  },
+  responses: {
+    200: { description: 'Category updated', content: { 'application/json': { schema: CategorySchema } } },
+    404: { description: 'Category not found' },
+    409: { description: 'A category with that name already exists' },
+  },
+})
+
+registry.registerPath({
+  method: 'delete',
+  path: '/categories/{categoryId}',
+  description: 'Delete a category. Products in it are NOT deleted — they become uncategorised.',
+  request: { params: z.object({ categoryId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: 'Category deleted',
+      content: {
+        'application/json': {
+          schema: z.object({ deleted: z.boolean(), productsUncategorised: z.number().int() }),
+        },
+      },
+    },
+    404: { description: 'Category not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/categories/seed',
+  description: 'Seed a starter category list for a business type. Additive and idempotent — existing names are skipped, never replaced.',
+  request: { body: { content: { 'application/json': { schema: SeedCategoriesSchema } } } },
+  responses: {
+    200: {
+      description: 'Categories seeded',
+      content: {
+        'application/json': {
+          schema: z.object({ created: z.number().int(), categories: z.array(CategorySchema) }),
+        },
+      },
+    },
+    400: { description: 'Invalid request' },
   },
 })
 

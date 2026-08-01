@@ -1380,6 +1380,13 @@
           "name": {
             "type": "string"
           },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
           "category": {
             "type": [
               "string",
@@ -1399,6 +1406,7 @@
         "required": [
           "id",
           "name",
+          "categoryId",
           "category",
           "createdAt",
           "variants"
@@ -1499,9 +1507,13 @@
             "type": "string",
             "minLength": 1
           },
-          "category": {
+          "categoryId": {
             "type": "string",
-            "maxLength": 100
+            "format": "uuid"
+          },
+          "categoryName": {
+            "type": "string",
+            "maxLength": 80
           },
           "variants": {
             "type": "array",
@@ -2485,6 +2497,91 @@
         },
         "required": [
           "countedCash"
+        ]
+      },
+      "Category": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "productCount": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sortOrder",
+          "productCount",
+          "createdAt"
+        ]
+      },
+      "CreateCategoryRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateCategoryRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "SeedCategoriesRequest": {
+        "type": "object",
+        "properties": {
+          "businessType": {
+            "$ref": "#/components/schemas/BusinessType"
+          }
+        },
+        "required": [
+          "businessType"
+        ],
+        "additionalProperties": false
+      },
+      "BusinessType": {
+        "type": "string",
+        "enum": [
+          "supermarket",
+          "grocery",
+          "bakery",
+          "general",
+          "apparel",
+          "electronics",
+          "other"
         ]
       },
       "SupplierList": {
@@ -5111,6 +5208,184 @@
           },
           "409": {
             "description": "Shift already closed"
+          }
+        }
+      }
+    },
+    "/categories": {
+      "get": {
+        "description": "The tenant's category list, with how many products sit in each.",
+        "responses": {
+          "200": {
+            "description": "Categories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Category"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Create a category. Names are unique per tenant case-insensitively, so \"Dairy\" and \"dairy\" cannot both exist.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Category created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "409": {
+            "description": "A category with that name already exists"
+          }
+        }
+      }
+    },
+    "/categories/{categoryId}": {
+      "patch": {
+        "description": "Rename or reorder a category. A rename applies to every product in it at once.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "categoryId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCategoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Category updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Category not found"
+          },
+          "409": {
+            "description": "A category with that name already exists"
+          }
+        }
+      },
+      "delete": {
+        "description": "Delete a category. Products in it are NOT deleted — they become uncategorised.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "categoryId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Category deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "productsUncategorised": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "productsUncategorised"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Category not found"
+          }
+        }
+      }
+    },
+    "/categories/seed": {
+      "post": {
+        "description": "Seed a starter category list for a business type. Additive and idempotent — existing names are skipped, never replaced.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeedCategoriesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Categories seeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "integer"
+                    },
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Category"
+                      }
+                    }
+                  },
+                  "required": [
+                    "created",
+                    "categories"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
           }
         }
       }

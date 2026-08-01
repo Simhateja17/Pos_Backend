@@ -206,6 +206,8 @@ async function commitCatalog(
   }
 
   const productCache = new Map<string, string>()
+  /** Lower-cased category name -> id, so one file resolves each name once. */
+  const categoryCache = new Map<string, string>()
 
   for (const [index, row] of rows.entries()) {
     result.rowsRead += 1
@@ -230,8 +232,33 @@ async function commitCatalog(
       continue
     }
 
-    const category = value(row, 'category') || null
-    let productId = productCache.get(`${productName}::${category ?? ''}`)
+    // A supplier file's category text is matched against the tenant's real
+    // categories case-insensitively, creating one only when genuinely new.
+    // Without this, "DAIRY PRODUCTS" would mint a near-duplicate of "Dairy".
+    const categoryName = (value(row, 'category') || '').trim()
+    let categoryId: string | null = null
+    if (categoryName) {
+      const cached = categoryCache.get(categoryName.toLowerCase())
+      if (cached) {
+        categoryId = cached
+      } else {
+        const existingCategory = await tx.categories.findFirst({
+          where: { name: { equals: categoryName, mode: 'insensitive' } },
+          select: { id: true },
+        })
+        categoryId =
+          existingCategory?.id ??
+          (
+            await tx.categories.create({
+              data: { tenant_id: input.tenantId, name: categoryName },
+              select: { id: true },
+            })
+          ).id
+        categoryCache.set(categoryName.toLowerCase(), categoryId!)
+      }
+    }
+
+    let productId = productCache.get(`${productName}::${categoryId ?? ''}`)
     if (!productId) {
       const existing = await tx.products.findFirst({
         where: { tenant_id: input.tenantId, name: productName },
@@ -241,13 +268,13 @@ async function commitCatalog(
         productId = existing.id
       } else {
         const created = await tx.products.create({
-          data: { tenant_id: input.tenantId, name: productName, category },
+          data: { tenant_id: input.tenantId, name: productName, category_id: categoryId },
           select: { id: true },
         })
         productId = created.id
         result.productsCreated += 1
       }
-      productCache.set(`${productName}::${category ?? ''}`, productId!)
+      productCache.set(`${productName}::${categoryId ?? ''}`, productId!)
     }
 
     const cost = parseNumber(value(row, 'cost'))

@@ -14,6 +14,11 @@ vi.mock('@supabase/supabase-js', () => ({
 const productsCreateMock = vi.fn()
 const variantsCreateMock = vi.fn()
 const variantsFindFirstMock = vi.fn()
+// 0032: the create response resolves category names, so the read client needs
+// the categories table too.
+const categoriesFindManyMock = vi.fn(async () => [])
+const categoriesFindFirstMock = vi.fn(async () => null)
+const categoriesCreateMock = vi.fn(async () => ({ id: 'category-1' }))
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
@@ -24,6 +29,11 @@ vi.mock('../../src/db/tenantClient', () => ({
       create: variantsCreateMock,
       findFirst: variantsFindFirstMock,
     },
+    categories: {
+      findMany: categoriesFindManyMock,
+      findFirst: categoriesFindFirstMock,
+      create: categoriesCreateMock,
+    },
   })),
   // CR-02: POST /products now runs its writes through forTenantTransaction,
   // not forTenant() — the mock callback receives the same tx-shaped client
@@ -32,6 +42,10 @@ vi.mock('../../src/db/tenantClient', () => ({
     fn({
       products: { create: productsCreateMock },
       variants: { create: variantsCreateMock, findFirst: variantsFindFirstMock },
+      categories: {
+        findFirst: categoriesFindFirstMock,
+        create: categoriesCreateMock,
+      },
     }),
   ),
 }))

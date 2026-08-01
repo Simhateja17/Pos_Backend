@@ -40,11 +40,21 @@ function toVariantJson(row: VariantRow, currentStock: number) {
   }
 }
 
-function toProductJson(product: { id: string; name: string; category: string | null; created_at: Date }, variants: ReturnType<typeof toVariantJson>[]) {
+async function categoryNames(client: any): Promise<Map<string, string>> {
+  const rows = await client.categories.findMany({ select: { id: true, name: true } })
+  return new Map(rows.map((row: any) => [row.id, row.name]))
+}
+
+function toProductJson(
+  product: { id: string; name: string; category_id: string | null; created_at: Date },
+  variants: ReturnType<typeof toVariantJson>[],
+  categoryNameById: Map<string, string>,
+) {
   return {
     id: product.id,
     name: product.name,
-    category: product.category,
+    categoryId: product.category_id,
+    category: product.category_id ? (categoryNameById.get(product.category_id) ?? null) : null,
     createdAt: product.created_at.toISOString(),
     variants,
   }
@@ -83,6 +93,7 @@ router.get('/', async (req, res) => {
   const variants = await client.variants.findMany({ orderBy: { created_at: 'asc' } })
   const stockLevels = await client.variant_stock_levels.findMany({})
   const stockByVariant = new Map(stockLevels.map((s: any) => [s.variant_id, s.quantity]))
+  const categoryNameById = await categoryNames(client)
 
   const filteredVariants = search
     ? variants.filter(
@@ -107,7 +118,7 @@ router.get('/', async (req, res) => {
       const productVariants = variants
         .filter((v: any) => v.product_id === product.id)
         .map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0)))
-      return toProductJson(product, productVariants)
+      return toProductJson(product, productVariants, categoryNameById)
     })
   res.json(result)
 })
@@ -130,7 +141,7 @@ router.get('/:productId', async (req, res) => {
   const stockLevels = await client.variant_stock_levels.findMany({ where: { variant_id: { in: variants.map((v: any) => v.id) } } })
   const stockByVariant = new Map(stockLevels.map((s: any) => [s.variant_id, s.quantity]))
   const variantJson = variants.map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0)))
-  res.json(toProductJson(product, variantJson))
+  res.json(toProductJson(product, variantJson, await categoryNames(client)))
 })
 
 /**
@@ -169,8 +180,25 @@ router.post('/', async (req, res) => {
     // product and every variant created so far, instead of leaving a
     // partial product permanently committed.
     const { product, createdVariants } = await forTenantTransaction(tenantId, async (tx) => {
+      // Resolve the category to a real row. A typed name matches an existing
+      // category case-insensitively before creating anything, so "dairy" joins
+      // "Dairy" rather than forking it.
+      let categoryId: string | null = parsed.data.categoryId ?? null
+      if (!categoryId && parsed.data.categoryName) {
+        const wanted = parsed.data.categoryName.trim()
+        if (wanted) {
+          const existing = await tx.categories.findFirst({
+            where: { name: { equals: wanted, mode: 'insensitive' } },
+            select: { id: true },
+          })
+          categoryId =
+            existing?.id ??
+            (await tx.categories.create({ data: { tenant_id: tenantId, name: wanted }, select: { id: true } })).id
+        }
+      }
+
       const product = await tx.products.create({
-        data: { tenant_id: tenantId, name: parsed.data.name, category: parsed.data.category ?? null },
+        data: { tenant_id: tenantId, name: parsed.data.name, category_id: categoryId },
       })
 
       const createdVariants: VariantRow[] = []
@@ -198,7 +226,7 @@ router.post('/', async (req, res) => {
     })
 
     const variantJson = createdVariants.map((v: VariantRow) => toVariantJson(v, 0))
-    return res.status(201).json(toProductJson(product, variantJson))
+    return res.status(201).json(toProductJson(product, variantJson, await categoryNames(forTenant(tenantId) as any)))
   } catch (err: any) {
     if (err.code === 'P2002') {
       // 0031 added a second unique constraint (tenant_id, barcode), so P2002 is
