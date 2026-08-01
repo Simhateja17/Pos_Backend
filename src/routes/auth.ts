@@ -70,6 +70,7 @@ router.post('/signup', async (req, res) => {
     password,
     ownerName,
     businessName,
+    tradeName,
     addressLine1,
     addressLine2,
     city,
@@ -77,6 +78,9 @@ router.post('/signup', async (req, res) => {
     postalCode,
     country,
     taxId,
+    gstStatus,
+    pan,
+    placeOfSupply,
   } = parsed.data
 
   const { data: createData, error: createError } = await supabaseAdmin.auth.admin.createUser({
@@ -107,6 +111,7 @@ router.post('/signup', async (req, res) => {
       data: {
         id: tenantId,
         business_name: businessName,
+        trade_name: tradeName ?? null,
         address_line1: addressLine1,
         address_line2: addressLine2 ?? null,
         city,
@@ -114,6 +119,9 @@ router.post('/signup', async (req, res) => {
         postal_code: postalCode,
         country,
         tax_id: taxId ?? null,
+        gst_status: gstStatus ?? null,
+        pan: pan ?? null,
+        place_of_supply: placeOfSupply ?? null,
       },
     })
 

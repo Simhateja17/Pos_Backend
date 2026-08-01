@@ -5,19 +5,36 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 // file. 01-08's openapi.ts imports these schemas without calling it again.
 extendZodWithOpenApi(z)
 
+/**
+ * Signup is the single capture point for business identity. Onboarding steps 1
+ * ("Business Identity") and 2 ("GST & Legal Compliance") used to re-ask these
+ * details a second time and write them to a separate JSON blob, leaving two
+ * unreconciled names for the same business.
+ *
+ * Every GST field is optional: registration is not mandatory in India below the
+ * ₹40L (goods) / ₹20L (services) turnover threshold, so requiring them would
+ * block legitimate small retailers from reaching a working till.
+ */
 export const SignupSchema = z
   .object({
     email: z.string().email(),
     password: z.string().min(8),
     ownerName: z.string().min(1),
+    /** Legal registered name — appears on invoices and tax records. */
     businessName: z.string().min(1),
+    /** Brand / trading name, when it differs from the registered name. */
+    tradeName: z.string().min(1).max(200).optional(),
     addressLine1: z.string().min(1),
     addressLine2: z.string().optional(),
     city: z.string().min(1),
     state: z.string().min(1),
     postalCode: z.string().min(1),
-    country: z.string().default('US'),
-    taxId: z.string().optional(),
+    country: z.string().default('IN'),
+    /** GSTIN. Stored in tenants.tax_id. */
+    taxId: z.string().max(15).optional(),
+    gstStatus: z.enum(['regular', 'composition', 'unregistered']).optional(),
+    pan: z.string().max(10).optional(),
+    placeOfSupply: z.string().max(100).optional(),
   })
   .openapi('SignupRequest')
 

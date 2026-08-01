@@ -5,6 +5,7 @@ import { requireRole } from '../middleware/requireRole'
 import {
   CompleteOnboardingSchema,
   DEFERRED_ONBOARDING_STEPS,
+  ONBOARDING_STEP_NUMBERS,
   OnboardingDataSchema,
   OnboardingStepNumberSchema,
   OnboardingStepSchemas,
@@ -79,6 +80,10 @@ type TenantOnboardingRow = {
   onboarding_data: unknown
   onboarding_step: number
   onboarding_completed_at: Date | null
+  /** Business identity now lives on the tenant row, captured at signup. */
+  business_name?: string
+  trade_name?: string | null
+  gst_status?: string | null
 }
 
 function parsePersistedData(value: unknown): OnboardingData | null {
@@ -88,7 +93,8 @@ function parsePersistedData(value: unknown): OnboardingData | null {
 
 function deriveCurrentStep(data: OnboardingData): number {
   let currentStep = 0
-  for (let step = 1; step <= 8; step += 1) {
+  // Iterates the live step numbers, not 1..8 — step 2 no longer exists.
+  for (const step of ONBOARDING_STEP_NUMBERS) {
     const schema = OnboardingStepSchemas[step as OnboardingStepNumber]
     if (!schema.safeParse(data[String(step) as keyof OnboardingData]).success) {
       break
@@ -129,6 +135,9 @@ async function findTenantOnboarding(client: any): Promise<TenantOnboardingRow | 
       onboarding_data: true,
       onboarding_step: true,
       onboarding_completed_at: true,
+      business_name: true,
+      trade_name: true,
+      gst_status: true,
     },
   })
 }
@@ -288,21 +297,22 @@ router.post('/complete', requireRole('owner'), async (req, res) => {
           onboarding_data: true,
           onboarding_step: true,
           onboarding_completed_at: true,
+          business_name: true,
+          trade_name: true,
+          gst_status: true,
         },
       })
-
-  const businessIdentity = data['1']!
-  const gstCompliance = data['2']!
 
   return res.json({
     ...toState(completed, data),
     summary: {
-      businessName: businessIdentity.tradeName ?? businessIdentity.legalName,
+      // Read from the tenant row, which signup wrote — not from a second copy
+      // of the same business collected again during onboarding.
+      businessName: tenant.trade_name ?? tenant.business_name ?? '',
       storeName: data['3']?.storeName ?? null,
-      storeCategory: businessIdentity.storeCategory,
-      trialPlan: businessIdentity.trialPlan,
+      trialPlan: data['1']?.trialPlan ?? '',
       billingCounters: data['7']?.billingCounters ?? null,
-      gstStatus: gstCompliance.gstStatus,
+      gstStatus: tenant.gst_status ?? null,
     },
   })
 })

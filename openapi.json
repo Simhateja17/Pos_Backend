@@ -483,10 +483,7 @@
         "type": "object",
         "properties": {
           "1": {
-            "$ref": "#/components/schemas/OnboardingBusinessIdentityStep"
-          },
-          "2": {
-            "$ref": "#/components/schemas/OnboardingGstComplianceStep"
+            "$ref": "#/components/schemas/OnboardingPlanSelectionStep"
           },
           "3": {
             "$ref": "#/components/schemas/OnboardingStoreSetupStep"
@@ -509,23 +506,9 @@
         },
         "additionalProperties": false
       },
-      "OnboardingBusinessIdentityStep": {
+      "OnboardingPlanSelectionStep": {
         "type": "object",
         "properties": {
-          "storeCategory": {
-            "type": "string",
-            "enum": [
-              "fashion",
-              "beauty",
-              "electronics",
-              "footwear",
-              "jewellery",
-              "books",
-              "pharmacy",
-              "grocery",
-              "multi"
-            ]
-          },
           "trialPlan": {
             "type": "string",
             "enum": [
@@ -540,129 +523,11 @@
               "monthly",
               "annual"
             ]
-          },
-          "legalName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "tradeName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "businessStructure": {
-            "type": "string",
-            "enum": [
-              "pvtltd",
-              "llp",
-              "partnership",
-              "proprietorship",
-              "public",
-              "huf",
-              "trust"
-            ]
-          },
-          "yearEstablished": {
-            "type": "integer",
-            "minimum": 1800,
-            "maximum": 2026
-          },
-          "registrationNumber": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 32
-          },
-          "natureOfBusiness": {
-            "type": "string",
-            "enum": [
-              "retailer",
-              "wholesaler",
-              "both",
-              "mfr_retail",
-              "service"
-            ]
-          },
-          "storeCount": {
-            "type": "string",
-            "enum": [
-              "1",
-              "2",
-              "3",
-              "4",
-              "5",
-              "6-10",
-              "11-20",
-              "20+"
-            ]
           }
         },
         "required": [
-          "storeCategory",
           "trialPlan",
-          "billingCycle",
-          "legalName"
-        ],
-        "additionalProperties": false
-      },
-      "OnboardingGstComplianceStep": {
-        "type": "object",
-        "properties": {
-          "gstStatus": {
-            "type": "string",
-            "enum": [
-              "regular",
-              "composition",
-              "unregistered"
-            ]
-          },
-          "gstin": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 15
-          },
-          "pan": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 10
-          },
-          "placeOfSupply": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 100
-          },
-          "fssai": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 30
-          },
-          "drugLicense": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 50
-          },
-          "msmeRegistration": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 50
-          },
-          "shopEstablishmentLicense": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 50
-          },
-          "eInvoiceEnabled": {
-            "type": "boolean",
-            "default": false
-          },
-          "eWayBillEnabled": {
-            "type": "boolean",
-            "default": false
-          }
-        },
-        "required": [
-          "gstStatus",
-          "placeOfSupply"
+          "billingCycle"
         ],
         "additionalProperties": false
       },
@@ -1197,17 +1062,12 @@
         "additionalProperties": false
       },
       "OnboardingStepNumber": {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 8
+        "type": "integer"
       },
       "OnboardingStepRequest": {
         "anyOf": [
           {
-            "$ref": "#/components/schemas/OnboardingBusinessIdentityStep"
-          },
-          {
-            "$ref": "#/components/schemas/OnboardingGstComplianceStep"
+            "$ref": "#/components/schemas/OnboardingPlanSelectionStep"
           },
           {
             "$ref": "#/components/schemas/OnboardingStoreSetupStep"
@@ -1249,9 +1109,6 @@
                       "null"
                     ]
                   },
-                  "storeCategory": {
-                    "type": "string"
-                  },
                   "trialPlan": {
                     "type": "string"
                   },
@@ -1262,13 +1119,15 @@
                     ]
                   },
                   "gstStatus": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
                   "businessName",
                   "storeName",
-                  "storeCategory",
                   "trialPlan",
                   "billingCounters",
                   "gstStatus"
@@ -1360,6 +1219,11 @@
             "type": "string",
             "minLength": 1
           },
+          "tradeName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
           "addressLine1": {
             "type": "string",
             "minLength": 1
@@ -1381,10 +1245,27 @@
           },
           "country": {
             "type": "string",
-            "default": "US"
+            "default": "IN"
           },
           "taxId": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 15
+          },
+          "gstStatus": {
+            "type": "string",
+            "enum": [
+              "regular",
+              "composition",
+              "unregistered"
+            ]
+          },
+          "pan": {
+            "type": "string",
+            "maxLength": 10
+          },
+          "placeOfSupply": {
+            "type": "string",
+            "maxLength": 100
           }
         },
         "required": [

@@ -500,26 +500,26 @@ model webauthn_credentials {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model staff_members {
-  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id        String            @db.Uuid
-  user_id          String?           @db.Uuid
-  name             String
-  role             String
-  pin_hash         String?
-  pin_attempts     Int               @default(0)
-  pin_locked_until DateTime?         @db.Timestamptz(6)
-  is_active        Boolean           @default(true)
-  created_at       DateTime          @default(now()) @db.Timestamptz(6)
-  payments         payments[]
-  sales            sales[]
-  shifts           shifts[]
-  tenants          tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users            users?            @relation(fields: [user_id], references: [id], onUpdate: NoAction)
-  stock_movements  stock_movements[]
-  purchase_orders  purchase_orders[]
-  purchase_order_receipts purchase_order_receipts[]
-  import_batches          import_batches[]
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id               String                    @db.Uuid
+  user_id                 String?                   @db.Uuid
+  name                    String
+  role                    String
+  pin_hash                String?
+  pin_attempts            Int                       @default(0)
+  pin_locked_until        DateTime?                 @db.Timestamptz(6)
+  is_active               Boolean                   @default(true)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
   email_log               email_log[]
+  import_batches          import_batches[]
+  payments                payments[]
+  purchase_order_receipts purchase_order_receipts[]
+  purchase_orders         purchase_orders[]
+  sales                   sales[]
+  shifts                  shifts[]
+  tenants                 tenants                   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                   users?                    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  stock_movements         stock_movements[]
 
   @@index([tenant_id], map: "idx_staff_members_tenant_id")
   @@index([user_id], map: "idx_staff_members_user_id")
@@ -528,66 +528,56 @@ model staff_members {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model tenants {
-  id                         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  business_name              String
-  address_line1              String
-  address_line2              String?
-  city                       String
-  state                      String
-  postal_code                String
-  country                    String                 @default("US")
-  tax_id                     String?
-  discount_threshold_percent Decimal                @default(15.00) @db.Decimal(5, 2)
-  created_at                 DateTime               @default(now()) @db.Timestamptz(6)
-  tax_rate_state             Decimal                @default(0) @db.Decimal(6, 4)
-  tax_rate_county            Decimal                @default(0) @db.Decimal(6, 4)
-  tax_rate_city              Decimal                @default(0) @db.Decimal(6, 4)
-  tax_rate_district          Decimal                @default(0) @db.Decimal(6, 4)
-  tax_rounding_basis         String                 @default("per_invoice")
-  onboarding_data            Json                   @default("{}")
-  onboarding_step            Int                    @default(0) @db.SmallInt
-  onboarding_completed_at    DateTime?              @db.Timestamptz(6)
-  timezone                   String                 @default("UTC")
-  customers                  customers[]
-  payments                   payments[]
-  products                   products[]
-  sale_line_items            sale_line_items[]
-  sales                      sales[]
-  shifts                     shifts[]
-  staff_members              staff_members[]
-  stock_movements            stock_movements[]
-  variant_stock_levels       variant_stock_levels[]
-  variants                   variants[]
-  import_batches             import_batches[]
-  email_log                  email_log[]
-  email_suppressions         email_suppressions[]
-  suppliers                  suppliers[]
-  purchase_orders            purchase_orders[]
-  purchase_order_lines       purchase_order_lines[]
-  purchase_order_receipts    purchase_order_receipts[]
+  id                           String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_name                String
+  address_line1                String
+  address_line2                String?
+  city                         String
+  state                        String
+  postal_code                  String
+  country                      String                         @default("US")
+  tax_id                       String?
+  discount_threshold_percent   Decimal                        @default(15.00) @db.Decimal(5, 2)
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  tax_rate_state               Decimal                        @default(0) @db.Decimal(6, 4)
+  tax_rate_county              Decimal                        @default(0) @db.Decimal(6, 4)
+  tax_rate_city                Decimal                        @default(0) @db.Decimal(6, 4)
+  tax_rate_district            Decimal                        @default(0) @db.Decimal(6, 4)
+  tax_rounding_basis           String                         @default("per_invoice")
+  onboarding_data              Json                           @default("{}")
+  onboarding_step              Int                            @default(0) @db.SmallInt
+  onboarding_completed_at      DateTime?                      @db.Timestamptz(6)
+  timezone                     String                         @default("UTC")
+  trade_name                   String?
+  gst_status                   String?
+  pan                          String?
+  place_of_supply              String?
+  customers                    customers[]
+  daily_sales_rollup           daily_sales_rollup[]
+  email_log                    email_log[]
+  email_suppressions           email_suppressions[]
+  import_batches               import_batches[]
+  payments                     payments[]
+  products                     products[]
+  purchase_order_lines         purchase_order_lines[]
   purchase_order_receipt_lines purchase_order_receipt_lines[]
-  daily_sales_rollup         daily_sales_rollup[]
-  reorder_suggestions        reorder_suggestions[]
-
-  @@schema("public")
-}
-
-enum reorder_method {
-  heuristic
-  forecast
-
-  @@schema("public")
-}
-
-enum reorder_confidence {
-  low
-  medium
-  high
+  purchase_order_receipts      purchase_order_receipts[]
+  purchase_orders              purchase_orders[]
+  reorder_suggestions          reorder_suggestions[]
+  sale_line_items              sale_line_items[]
+  sales                        sales[]
+  shifts                       shifts[]
+  staff_members                staff_members[]
+  stock_movements              stock_movements[]
+  suppliers                    suppliers[]
+  variant_stock_levels         variant_stock_levels[]
+  variants                     variants[]
 
   @@schema("public")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model reorder_suggestions {
   id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id          String             @db.Uuid
@@ -598,11 +588,10 @@ model reorder_suggestions {
   method             reorder_method     @default(heuristic)
   confidence         reorder_confidence
   generated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  suppliers          suppliers?         @relation(fields: [supplier_id], references: [id], onUpdate: NoAction)
   tenants            tenants            @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   variants           variants           @relation(fields: [variant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  suppliers          suppliers?         @relation(fields: [supplier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  @@unique([tenant_id, variant_id, generated_at])
   @@index([tenant_id, generated_at(sort: Desc)], map: "idx_reorder_suggestions_tenant")
   @@index([variant_id], map: "idx_reorder_suggestions_variant")
   @@schema("public")
@@ -625,32 +614,22 @@ model daily_sales_rollup {
   @@schema("public")
 }
 
-enum purchase_order_status {
-  draft
-  sent
-  partial
-  received
-  cancelled
-
-  @@schema("public")
-}
-
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model purchase_orders {
-  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id     String                @db.Uuid
-  supplier_id   String                @db.Uuid
-  po_number     String
-  status        purchase_order_status @default(draft)
-  expected_date DateTime?             @db.Date
-  notes         String?
-  created_by    String?               @db.Uuid
-  created_at    DateTime              @default(now()) @db.Timestamptz(6)
-  tenants       tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  suppliers     suppliers             @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  staff_members staff_members?        @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id               String                    @db.Uuid
+  supplier_id             String                    @db.Uuid
+  po_number               String
+  status                  purchase_order_status     @default(draft)
+  expected_date           DateTime?                 @db.Date
+  notes                   String?
+  created_by              String?                   @db.Uuid
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
   purchase_order_lines    purchase_order_lines[]
   purchase_order_receipts purchase_order_receipts[]
+  staff_members           staff_members?            @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  suppliers               suppliers                 @relation(fields: [supplier_id], references: [id], onUpdate: NoAction)
+  tenants                 tenants                   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([tenant_id, po_number])
   @@index([tenant_id], map: "idx_purchase_orders_tenant_id")
@@ -661,17 +640,17 @@ model purchase_orders {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model purchase_order_lines {
-  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id         String          @db.Uuid
-  purchase_order_id String          @db.Uuid
-  variant_id        String          @db.Uuid
-  quantity_ordered  Int
-  quantity_received Int             @default(0)
-  unit_cost         Decimal         @db.Decimal(10, 2)
-  created_at        DateTime        @default(now()) @db.Timestamptz(6)
-  tenants           tenants         @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  purchase_orders   purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  variants          variants        @relation(fields: [variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                           String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                    String                         @db.Uuid
+  purchase_order_id            String                         @db.Uuid
+  variant_id                   String                         @db.Uuid
+  quantity_ordered             Int
+  quantity_received            Int                            @default(0)
+  unit_cost                    Decimal                        @db.Decimal(10, 2)
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  purchase_orders              purchase_orders                @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                      tenants                        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  variants                     variants                       @relation(fields: [variant_id], references: [id], onUpdate: NoAction)
   purchase_order_receipt_lines purchase_order_receipt_lines[]
 
   @@unique([purchase_order_id, variant_id])
@@ -683,17 +662,17 @@ model purchase_order_lines {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model purchase_order_receipts {
-  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id         String          @db.Uuid
-  purchase_order_id String          @db.Uuid
-  client_receipt_id String          @db.Uuid
-  received_at       DateTime        @default(now()) @db.Timestamptz(6)
-  created_by        String?         @db.Uuid
-  note              String?
-  tenants           tenants         @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  purchase_orders   purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  staff_members     staff_members?  @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                           String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                    String                         @db.Uuid
+  purchase_order_id            String                         @db.Uuid
+  client_receipt_id            String                         @db.Uuid
+  received_at                  DateTime                       @default(now()) @db.Timestamptz(6)
+  created_by                   String?                        @db.Uuid
+  note                         String?
   purchase_order_receipt_lines purchase_order_receipt_lines[]
+  staff_members                staff_members?                 @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  purchase_orders              purchase_orders                @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                      tenants                        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([tenant_id, client_receipt_id], map: "idx_po_receipts_tenant_client_receipt_id")
   @@index([purchase_order_id], map: "idx_po_receipts_po_id")
@@ -702,18 +681,18 @@ model purchase_order_receipts {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model purchase_order_receipt_lines {
-  id                     String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id              String                  @db.Uuid
-  receipt_id             String                  @db.Uuid
-  purchase_order_line_id String                  @db.Uuid
-  variant_id             String                  @db.Uuid
-  quantity_received      Int
-  unit_cost              Decimal                 @db.Decimal(10, 2)
-  created_at             DateTime                @default(now()) @db.Timestamptz(6)
-  tenants                tenants                 @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                      String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id               String                  @db.Uuid
+  receipt_id              String                  @db.Uuid
+  purchase_order_line_id  String                  @db.Uuid
+  variant_id              String                  @db.Uuid
+  quantity_received       Int
+  unit_cost               Decimal                 @db.Decimal(10, 2)
+  created_at              DateTime                @default(now()) @db.Timestamptz(6)
+  purchase_order_lines    purchase_order_lines    @relation(fields: [purchase_order_line_id], references: [id], onUpdate: NoAction)
   purchase_order_receipts purchase_order_receipts @relation(fields: [receipt_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  purchase_order_lines   purchase_order_lines    @relation(fields: [purchase_order_line_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  variants               variants                @relation(fields: [variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  tenants                 tenants                 @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  variants                variants                @relation(fields: [variant_id], references: [id], onUpdate: NoAction)
 
   @@unique([receipt_id, purchase_order_line_id])
   @@index([receipt_id], map: "idx_po_receipt_lines_receipt_id")
@@ -723,21 +702,21 @@ model purchase_order_receipt_lines {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model suppliers {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id       String   @db.Uuid
-  name            String
-  contact_name    String?
-  email           String?
-  phone           String?
-  address         String?
-  lead_time_days  Int      @default(7)
-  min_order_value Decimal? @db.Decimal(12, 2)
-  payment_terms   String?
-  is_active       Boolean  @default(true)
-  created_at      DateTime @default(now()) @db.Timestamptz(6)
-  tenants         tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  purchase_orders purchase_orders[]
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String                @db.Uuid
+  name                String
+  contact_name        String?
+  email               String?
+  phone               String?
+  address             String?
+  lead_time_days      Int                   @default(7)
+  min_order_value     Decimal?              @db.Decimal(12, 2)
+  payment_terms       String?
+  is_active           Boolean               @default(true)
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  purchase_orders     purchase_orders[]
   reorder_suggestions reorder_suggestions[]
+  tenants             tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([tenant_id], map: "idx_suppliers_tenant_id")
   @@schema("public")
@@ -760,29 +739,29 @@ model products {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model variants {
-  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id            String                @db.Uuid
-  product_id           String                @db.Uuid
-  sku                  String
-  size                 String?
-  color                String?
-  material             String?
-  price                Decimal               @db.Decimal(10, 2)
-  reorder_threshold    Int                   @default(4)
-  identity_locked      Boolean               @default(false)
-  created_at           DateTime              @default(now()) @db.Timestamptz(6)
-  is_taxable           Boolean               @default(true)
-  moving_average_cost  Decimal?              @db.Decimal(10, 2)
-  source_metadata      Json?
-  sale_line_items      sale_line_items[]
-  stock_movements      stock_movements[]
-  variant_stock_levels variant_stock_levels?
-  purchase_order_lines purchase_order_lines[]
+  id                           String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                    String                         @db.Uuid
+  product_id                   String                         @db.Uuid
+  sku                          String
+  size                         String?
+  color                        String?
+  material                     String?
+  price                        Decimal                        @db.Decimal(10, 2)
+  reorder_threshold            Int                            @default(4)
+  identity_locked              Boolean                        @default(false)
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  is_taxable                   Boolean                        @default(true)
+  moving_average_cost          Decimal?                       @db.Decimal(10, 2)
+  source_metadata              Json?
+  daily_sales_rollup           daily_sales_rollup[]
+  purchase_order_lines         purchase_order_lines[]
   purchase_order_receipt_lines purchase_order_receipt_lines[]
-  daily_sales_rollup   daily_sales_rollup[]
-  reorder_suggestions  reorder_suggestions[]
-  products             products              @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  tenants              tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  reorder_suggestions          reorder_suggestions[]
+  sale_line_items              sale_line_items[]
+  stock_movements              stock_movements[]
+  variant_stock_levels         variant_stock_levels?
+  products                     products                       @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                      tenants                        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([tenant_id, sku])
   @@index([tenant_id], map: "idx_variants_tenant_id")
@@ -879,12 +858,12 @@ model sales {
   source          String            @default("pos")
   source_metadata Json?
   import_batch_id String?           @db.Uuid
+  email_log       email_log[]
   payments        payments[]
   sale_line_items sale_line_items[]
-  import_batches  import_batches?   @relation(fields: [import_batch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  email_log       email_log[]
   staff_members   staff_members?    @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   customers       customers?        @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  import_batches  import_batches?   @relation(fields: [import_batch_id], references: [id], onUpdate: NoAction)
   shifts          shifts?           @relation(fields: [shift_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tenants         tenants           @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -893,6 +872,7 @@ model sales {
   @@index([tenant_id, source], map: "idx_sales_tenant_source")
   @@index([customer_id], map: "idx_sales_customer_id")
   @@index([shift_id], map: "idx_sales_shift_id")
+  @@index([import_batch_id], map: "idx_sales_import_batch", where: raw("(import_batch_id IS NOT NULL)"))
   @@schema("public")
 }
 
@@ -937,6 +917,103 @@ model payments {
 
   @@index([sale_id], map: "idx_payments_sale_id")
   @@index([tenant_id], map: "idx_payments_tenant_id")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model import_batches {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id       String         @db.Uuid
+  kind            String
+  file_name       String
+  file_hash       String
+  file_size_bytes Int
+  source_text     String
+  source_columns  Json           @default("[]")
+  row_count       Int            @default(0)
+  mapping         Json?
+  status          String         @default("pending")
+  summary         Json?
+  error_message   String?
+  committed_at    DateTime?      @db.Timestamptz(6)
+  created_by      String?        @db.Uuid
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+  staff_members   staff_members? @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+  tenants         tenants        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sales           sales[]
+
+  @@unique([tenant_id, file_hash], map: "idx_import_batches_tenant_hash_committed", where: raw("(status = 'committed'::text)"))
+  @@index([tenant_id, created_at(sort: Desc)], map: "idx_import_batches_tenant_created")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model email_log {
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id           String         @db.Uuid
+  kind                String
+  recipient           String
+  subject             String
+  status              String         @default("queued")
+  provider_message_id String?
+  error_message       String?
+  sale_id             String?        @db.Uuid
+  attempts            Int            @default(0)
+  last_attempt_at     DateTime?      @db.Timestamptz(6)
+  delivered_at        DateTime?      @db.Timestamptz(6)
+  failed_at           DateTime?      @db.Timestamptz(6)
+  created_by          String?        @db.Uuid
+  created_at          DateTime       @default(now()) @db.Timestamptz(6)
+  staff_members       staff_members? @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+  sales               sales?         @relation(fields: [sale_id], references: [id], onUpdate: NoAction)
+  tenants             tenants        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id, created_at(sort: Desc)], map: "idx_email_log_tenant_created")
+  @@index([tenant_id, status], map: "idx_email_log_tenant_status")
+  @@index([sale_id], map: "idx_email_log_sale", where: raw("(sale_id IS NOT NULL)"))
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model email_suppressions {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id  String   @db.Uuid
+  email      String
+  reason     String
+  detail     String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  tenants    tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@schema("public")
+}
+
+enum reorder_method {
+  heuristic
+  forecast
+
+  @@schema("public")
+}
+
+enum reorder_confidence {
+  low
+  medium
+  high
+
+  @@schema("public")
+}
+
+enum purchase_order_status {
+  draft
+  sent
+  partial
+  received
+  cancelled
+
   @@schema("public")
 }
 
@@ -1042,72 +1119,4 @@ enum one_time_token_type {
   phone_change_token
 
   @@schema("auth")
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model import_batches {
-  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id       String         @db.Uuid
-  kind            String
-  file_name       String
-  file_hash       String
-  file_size_bytes Int
-  source_text     String
-  source_columns  Json           @default("[]")
-  row_count       Int            @default(0)
-  mapping         Json?
-  status          String         @default("pending")
-  summary         Json?
-  error_message   String?
-  committed_at    DateTime?      @db.Timestamptz(6)
-  created_by      String?        @db.Uuid
-  created_at      DateTime       @default(now()) @db.Timestamptz(6)
-  sales           sales[]
-  staff_members   staff_members? @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  tenants         tenants        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([tenant_id, created_at], map: "idx_import_batches_tenant_created")
-  @@schema("public")
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model email_log {
-  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id           String         @db.Uuid
-  kind                String
-  recipient           String
-  subject             String
-  status              String         @default("queued")
-  provider_message_id String?
-  error_message       String?
-  sale_id             String?        @db.Uuid
-  attempts            Int            @default(0)
-  last_attempt_at     DateTime?      @db.Timestamptz(6)
-  delivered_at        DateTime?      @db.Timestamptz(6)
-  failed_at           DateTime?      @db.Timestamptz(6)
-  created_by          String?        @db.Uuid
-  created_at          DateTime       @default(now()) @db.Timestamptz(6)
-  sales               sales?         @relation(fields: [sale_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  staff_members       staff_members? @relation(fields: [created_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  tenants             tenants        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([tenant_id, created_at], map: "idx_email_log_tenant_created")
-  @@index([tenant_id, status], map: "idx_email_log_tenant_status")
-  @@schema("public")
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model email_suppressions {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id  String   @db.Uuid
-  email      String
-  reason     String
-  detail     String?
-  created_at DateTime @default(now()) @db.Timestamptz(6)
-  tenants    tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@schema("public")
 }

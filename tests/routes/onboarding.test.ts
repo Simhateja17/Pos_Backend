@@ -33,26 +33,13 @@ function tokenFor(role: 'owner' | 'manager' | 'cashier', tenantId = 'tenant-real
   return fakeJwt({ sub: 'user-123', role, tenant_id: tenantId })
 }
 
+// Step 1 is plan selection only; business identity and GST moved to signup.
+// There is no step 2 — the numbering gap is deliberate so already-persisted
+// onboarding_data keeps its meaning.
 const stepFixtures = {
   '1': {
-    storeCategory: 'fashion',
     trialPlan: 'growth',
     billingCycle: 'monthly',
-    legalName: 'Example Retail Private Limited',
-    tradeName: 'Example Store',
-    businessStructure: 'pvtltd',
-    yearEstablished: 2020,
-    registrationNumber: 'U52100MH2018PTC000001',
-    natureOfBusiness: 'retailer',
-    storeCount: '1',
-  },
-  '2': {
-    gstStatus: 'regular',
-    gstin: '27ABCDE1234F1Z5',
-    pan: 'ABCDE1234F',
-    placeOfSupply: 'Maharashtra',
-    eInvoiceEnabled: false,
-    eWayBillEnabled: false,
   },
   '3': {
     storeName: 'Bandra Flagship',
@@ -143,6 +130,10 @@ function tenantRow(data: unknown, step = 0, completedAt: Date | null = null) {
     onboarding_data: data,
     onboarding_step: step,
     onboarding_completed_at: completedAt,
+    // Business identity is read from the tenant row now, not the JSON blob.
+    business_name: 'Example Retail Private Limited',
+    trade_name: 'Example Store',
+    gst_status: 'regular',
   }
 }
 
@@ -180,7 +171,7 @@ describe('onboarding routes', () => {
     expect(reloaded.body).toEqual(first.body)
     expect(first.body.currentStep).toBe(1)
     expect(first.body.completed).toBe(false)
-    expect(first.body.data['1'].legalName).toBe('Example Retail Private Limited')
+    expect(first.body.data['1'].trialPlan).toBe('growth')
 
     const { forTenant } = await import('../../src/db/tenantClient')
     expect(forTenant).toHaveBeenCalledTimes(2)
@@ -242,20 +233,27 @@ describe('onboarding routes', () => {
     const badBody = await request(app)
       .put('/onboarding/steps/1')
       .set('Authorization', `Bearer ${tokenFor('owner')}`)
-      .send({ legalName: '' })
+      .send({ trialPlan: '' })
     const forgedTenant = await request(app)
       .put('/onboarding/steps/1')
       .set('Authorization', `Bearer ${tokenFor('owner', 'tenant-real')}`)
       .send({ ...stepFixtures['1'], tenantId: 'tenant-other', role: 'owner', adminPin: '1234' })
-    const skipped = await request(app)
+    // Step 2 no longer exists — GST moved to signup.
+    const removedStep = await request(app)
       .put('/onboarding/steps/2')
       .set('Authorization', `Bearer ${tokenFor('owner')}`)
-      .send(stepFixtures['2'])
+      .send({ gstStatus: 'regular' })
+    // A deferred step while the required step is unsaved.
+    const skipped = await request(app)
+      .put('/onboarding/steps/3')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send(stepFixtures['3'])
 
     expect(unauthenticated.status).toBe(401)
     expect(badStep.status).toBe(400)
     expect(badBody.status).toBe(400)
     expect(forgedTenant.status).toBe(400)
+    expect(removedStep.status).toBe(400)
     expect(skipped.status).toBe(409)
     expect(tenantsUpdateMock).not.toHaveBeenCalled()
 
@@ -265,7 +263,7 @@ describe('onboarding routes', () => {
   })
 
   it('rejects incomplete completion without changing the stored completion timestamp', async () => {
-    tenantsFindFirstMock.mockResolvedValue(tenantRow({ '1': stepFixtures['1'] }, 1))
+    tenantsFindFirstMock.mockResolvedValue(tenantRow({}, 0))
     const app = await buildApp()
 
     const response = await request(app)
@@ -274,13 +272,13 @@ describe('onboarding routes', () => {
       .send({})
 
     expect(response.status).toBe(409)
-    expect(response.body.missingSteps).toEqual([2])
+    expect(response.body.missingSteps).toEqual([1])
     expect(tenantsUpdateMock).not.toHaveBeenCalled()
   })
 
   it('completes the trimmed required setup alone and reports the deferred steps as pending', async () => {
-    const trimmed = { '1': stepFixtures['1'], '2': stepFixtures['2'] }
-    tenantsFindFirstMock.mockResolvedValue(tenantRow(trimmed, 2))
+    const trimmed = { '1': stepFixtures['1'] }
+    tenantsFindFirstMock.mockResolvedValue(tenantRow(trimmed, 1))
     tenantsUpdateMock.mockImplementation(async ({ data }: { data: any }) =>
       tenantRow(trimmed, data.onboarding_step, data.onboarding_completed_at),
     )
@@ -293,7 +291,7 @@ describe('onboarding routes', () => {
 
     expect(response.status).toBe(200)
     expect(response.body.completed).toBe(true)
-    expect(response.body.requiredSteps).toEqual([1, 2])
+    expect(response.body.requiredSteps).toEqual([1])
     expect(response.body.requiredStepsComplete).toBe(true)
     expect(response.body.pendingSteps).toEqual([3, 4, 5, 6, 7, 8])
     expect(response.body.summary.storeName).toBeNull()
@@ -301,8 +299,8 @@ describe('onboarding routes', () => {
   })
 
   it('accepts a deferred step after completion but refuses to reopen a required one', async () => {
-    const trimmed = { '1': stepFixtures['1'], '2': stepFixtures['2'] }
-    tenantsFindFirstMock.mockResolvedValue(tenantRow(trimmed, 2, new Date('2026-01-01T00:00:00Z')))
+    const trimmed = { '1': stepFixtures['1'] }
+    tenantsFindFirstMock.mockResolvedValue(tenantRow(trimmed, 1, new Date('2026-01-01T00:00:00Z')))
     tenantsUpdateMock.mockImplementation(async ({ data }: { data: any }) =>
       tenantRow(data.onboarding_data, data.onboarding_step, new Date('2026-01-01T00:00:00Z')),
     )
@@ -323,7 +321,7 @@ describe('onboarding routes', () => {
   })
 
   it('refuses a deferred step while a required step is still missing', async () => {
-    tenantsFindFirstMock.mockResolvedValue(tenantRow({ '1': stepFixtures['1'] }, 1))
+    tenantsFindFirstMock.mockResolvedValue(tenantRow({}, 0))
     const app = await buildApp()
 
     const response = await request(app)
@@ -332,7 +330,7 @@ describe('onboarding routes', () => {
       .send(stepFixtures['7'])
 
     expect(response.status).toBe(409)
-    expect(response.body.nextStep).toBe(2)
+    expect(response.body.nextStep).toBe(1)
     expect(tenantsUpdateMock).not.toHaveBeenCalled()
   })
 
@@ -369,7 +367,6 @@ describe('onboarding routes', () => {
     expect(response.body.summary).toEqual({
       businessName: 'Example Store',
       storeName: 'Bandra Flagship',
-      storeCategory: 'fashion',
       trialPlan: 'growth',
       billingCounters: '2',
       gstStatus: 'regular',

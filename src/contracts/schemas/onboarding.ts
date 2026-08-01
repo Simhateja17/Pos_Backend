@@ -7,67 +7,25 @@ const optionalText = (max: number) => z.string().trim().min(1).max(max).optional
 const requiredText = (max: number) => z.string().trim().min(1).max(max)
 const optionalPhone = z.string().trim().min(7).max(24).optional()
 
-export const BusinessIdentityStepSchema = z
+/**
+ * Step 1 is now plan selection only.
+ *
+ * Business identity and GST/tax registration moved to signup, which already
+ * captured the business name and address — re-asking them here produced two
+ * unreconciled records of the same business. The vertical picker
+ * (`storeCategory`) is gone entirely: the product is general retail, and the
+ * field drove nothing beyond echoing itself back on the completion screen.
+ *
+ * The tier chosen here is not enforced and does not gate access — no billing
+ * gateway is integrated yet. It records intent for the trial only.
+ */
+export const PlanSelectionStepSchema = z
   .object({
-    storeCategory: z.enum([
-      'fashion',
-      'beauty',
-      'electronics',
-      'footwear',
-      'jewellery',
-      'books',
-      'pharmacy',
-      'grocery',
-      'multi',
-    ]),
     trialPlan: z.enum(['starter', 'growth', 'enterprise']),
     billingCycle: z.enum(['monthly', 'annual']),
-    legalName: requiredText(200),
-    tradeName: optionalText(200),
-    businessStructure: z
-      .enum(['pvtltd', 'llp', 'partnership', 'proprietorship', 'public', 'huf', 'trust'])
-      .optional(),
-    yearEstablished: z.number().int().min(1800).max(new Date().getUTCFullYear()).optional(),
-    registrationNumber: optionalText(32),
-    natureOfBusiness: z
-      .enum(['retailer', 'wholesaler', 'both', 'mfr_retail', 'service'])
-      .optional(),
-    storeCount: z.enum(['1', '2', '3', '4', '5', '6-10', '11-20', '20+']).optional(),
   })
   .strict()
-  .openapi('OnboardingBusinessIdentityStep')
-
-export const GstComplianceStepSchema = z
-  .object({
-    gstStatus: z.enum(['regular', 'composition', 'unregistered']),
-    gstin: optionalText(15),
-    pan: optionalText(10),
-    placeOfSupply: requiredText(100),
-    fssai: optionalText(30),
-    drugLicense: optionalText(50),
-    msmeRegistration: optionalText(50),
-    shopEstablishmentLicense: optionalText(50),
-    eInvoiceEnabled: z.boolean().optional().default(false),
-    eWayBillEnabled: z.boolean().optional().default(false),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (value.gstStatus !== 'unregistered' && !value.gstin) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'GSTIN is required for registered businesses',
-        path: ['gstin'],
-      })
-    }
-    if (value.gstStatus !== 'unregistered' && !value.pan) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'PAN is required for registered businesses',
-        path: ['pan'],
-      })
-    }
-  })
-  .openapi('OnboardingGstComplianceStep')
+  .openapi('OnboardingPlanSelectionStep')
 
 export const StoreSetupStepSchema = z
   .object({
@@ -193,9 +151,13 @@ export const TeamAccessStepSchema = z
   .strict()
   .openapi('OnboardingTeamAccessStep')
 
+/**
+ * Step 2 is deliberately absent. It held GST & legal compliance, now captured
+ * at signup. The remaining numbers are left unchanged rather than renumbered so
+ * that onboarding_data already persisted for a tenant keeps its meaning.
+ */
 export const OnboardingStepSchemas = {
-  1: BusinessIdentityStepSchema,
-  2: GstComplianceStepSchema,
+  1: PlanSelectionStepSchema,
   3: StoreSetupStepSchema,
   4: BillingInvoiceStepSchema,
   5: PaymentMethodsStepSchema,
@@ -205,28 +167,32 @@ export const OnboardingStepSchemas = {
 } as const
 
 /**
- * ONBOARD-01 — trimmed setup. Only business identity (1) and the tax profile (2)
- * block a new owner from reaching a working till. Everything else is collected
- * later through "finish setup" prompts inside the app.
+ * ONBOARD-01 — nothing but plan selection stands between signup and a working
+ * till. Steps 3-8 are no longer a wizard at all: each field is asked in-context
+ * by the screen that actually needs it, indexed from the dashboard's setup
+ * prompt. They remain valid save targets so those prompts have somewhere to
+ * write.
  */
-export const REQUIRED_ONBOARDING_STEPS = [1, 2] as const
+export const REQUIRED_ONBOARDING_STEPS = [1] as const
 export const DEFERRED_ONBOARDING_STEPS = [3, 4, 5, 6, 7, 8] as const
 
 export function isRequiredOnboardingStep(step: number): boolean {
   return (REQUIRED_ONBOARDING_STEPS as readonly number[]).includes(step)
 }
 
+export const ONBOARDING_STEP_NUMBERS = [1, 3, 4, 5, 6, 7, 8] as const
+
 export const OnboardingStepNumberSchema = z.coerce
   .number()
   .int()
-  .min(1)
-  .max(8)
+  .refine((step): step is (typeof ONBOARDING_STEP_NUMBERS)[number] =>
+    (ONBOARDING_STEP_NUMBERS as readonly number[]).includes(step),
+  )
   .openapi('OnboardingStepNumber')
 
 export const OnboardingStepInputSchema = z
   .union([
-    BusinessIdentityStepSchema,
-    GstComplianceStepSchema,
+    PlanSelectionStepSchema,
     StoreSetupStepSchema,
     BillingInvoiceStepSchema,
     PaymentMethodsStepSchema,
@@ -238,8 +204,7 @@ export const OnboardingStepInputSchema = z
 
 export const OnboardingDataSchema = z
   .object({
-    '1': BusinessIdentityStepSchema.optional(),
-    '2': GstComplianceStepSchema.optional(),
+    '1': PlanSelectionStepSchema.optional(),
     '3': StoreSetupStepSchema.optional(),
     '4': BillingInvoiceStepSchema.optional(),
     '5': PaymentMethodsStepSchema.optional(),
@@ -270,11 +235,11 @@ export const OnboardingCompletionResponseSchema = OnboardingStateSchema.extend({
     businessName: z.string(),
     /** Null until the deferred store-setup step is finished. */
     storeName: z.string().nullable(),
-    storeCategory: z.string(),
     trialPlan: z.string(),
     /** Null until the deferred hardware step is finished. */
     billingCounters: z.string().nullable(),
-    gstStatus: z.string(),
+    /** Null when the owner has not told us their GST status — not required to trade. */
+    gstStatus: z.string().nullable(),
   }),
 }).openapi('OnboardingCompletionResponse')
 
