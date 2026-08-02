@@ -3,6 +3,40 @@ import { z } from 'zod'
 import { CreateSupplierInputSchema, UpdateSupplierInputSchema } from '../contracts/schemas/supplier'
 import { forTenant } from '../db/tenantClient'
 
+type SupplierProductWithVariantRow = {
+  id: string
+  supplier_id: string
+  variant_id: string
+  is_primary: boolean
+  lead_time_days: number
+  unit_cost: unknown
+  supplier_sku: string | null
+  min_order_qty: number | null
+  created_at: Date
+  suppliers: { name: string }
+  variants: { sku: string; size: string | null; color: string | null; material: string | null; products: { name: string } }
+}
+
+function toSupplierProductWithVariantJson(row: SupplierProductWithVariantRow) {
+  return {
+    id: row.id,
+    supplierId: row.supplier_id,
+    supplierName: row.suppliers.name,
+    variantId: row.variant_id,
+    isPrimary: row.is_primary,
+    leadTimeDays: row.lead_time_days,
+    unitCost: row.unit_cost === null ? null : (row.unit_cost as { toString(): string }).toString(),
+    supplierSku: row.supplier_sku,
+    minOrderQty: row.min_order_qty,
+    createdAt: row.created_at.toISOString(),
+    sku: row.variants.sku,
+    productName: row.variants.products.name,
+    size: row.variants.size,
+    color: row.variants.color,
+    material: row.variants.material,
+  }
+}
+
 const uuidSchema = z.string().uuid()
 
 const router = Router()
@@ -57,6 +91,27 @@ router.get('/:supplierId', async (req, res) => {
     return res.status(404).json({ error: 'Supplier not found' })
   }
   res.json(toSupplierJson(supplier))
+})
+
+/**
+ * GET /:supplierId/products — every product this supplier is linked to, for
+ * the supplier detail page's "Products supplied" tab.
+ */
+router.get('/:supplierId/products', async (req, res) => {
+  if (!uuidSchema.safeParse(req.params.supplierId).success) {
+    return res.status(400).json({ error: 'Invalid supplierId' })
+  }
+  const client = forTenant(req.user!.tenantId) as any
+  const supplier = await client.suppliers.findFirst({ where: { id: req.params.supplierId } })
+  if (!supplier) {
+    return res.status(404).json({ error: 'Supplier not found' })
+  }
+  const rows = await client.supplier_products.findMany({
+    where: { supplier_id: req.params.supplierId },
+    include: { suppliers: true, variants: { include: { products: true } } },
+    orderBy: [{ is_primary: 'desc' }, { created_at: 'asc' }],
+  })
+  res.json(rows.map(toSupplierProductWithVariantJson))
 })
 
 router.post('/', async (req, res) => {

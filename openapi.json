@@ -3064,11 +3064,54 @@
           }
         }
       },
-      "SupplierProductList": {
+      "SupplierProductWithVariantList": {
         "type": "array",
         "items": {
-          "$ref": "#/components/schemas/SupplierProduct"
+          "$ref": "#/components/schemas/SupplierProductWithVariant"
         }
+      },
+      "SupplierProductWithVariant": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SupplierProduct"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              },
+              "productName": {
+                "type": "string"
+              },
+              "size": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "color": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "material": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "sku",
+              "productName",
+              "size",
+              "color",
+              "material"
+            ]
+          }
+        ]
       },
       "SupplierProduct": {
         "type": "object",
@@ -3130,6 +3173,12 @@
           "minOrderQty",
           "createdAt"
         ]
+      },
+      "SupplierProductList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/SupplierProduct"
+        }
       },
       "CreateSupplierProductRequest": {
         "type": "object",
@@ -6180,6 +6229,37 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Supplier"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Supplier not found"
+          }
+        }
+      }
+    },
+    "/suppliers/{supplierId}/products": {
+      "get": {
+        "description": "Every product this supplier is linked to, for the supplier detail page's Products supplied tab.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "supplierId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Products supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierProductWithVariantList"
                 }
               }
             }

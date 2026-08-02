@@ -49,6 +49,7 @@ import { SupplierSchema, SupplierListSchema, CreateSupplierInputSchema, UpdateSu
 import {
   SupplierProductSchema,
   SupplierProductListSchema,
+  SupplierProductWithVariantListSchema,
   CreateSupplierProductInputSchema,
   UpdateSupplierProductInputSchema,
 } from './schemas/supplierProduct'
@@ -683,6 +684,17 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Supplier updated', content: { 'application/json': { schema: SupplierSchema } } },
+    404: { description: 'Supplier not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/suppliers/{supplierId}/products',
+  description: "Every product this supplier is linked to, for the supplier detail page's Products supplied tab.",
+  request: { params: z.object({ supplierId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Products supplied', content: { 'application/json': { schema: SupplierProductWithVariantListSchema } } },
     404: { description: 'Supplier not found' },
   },
 })

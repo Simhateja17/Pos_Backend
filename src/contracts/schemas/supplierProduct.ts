@@ -41,6 +41,22 @@ export const UpdateSupplierProductInputSchema = z
 
 export const SupplierProductListSchema = z.array(SupplierProductSchema).openapi('SupplierProductList')
 
+// Supplier-scoped view (the "Products supplied" tab on a supplier's detail
+// page) — same link row, plus enough of the variant/product to render a row
+// without a second round trip per item.
+export const SupplierProductWithVariantSchema = SupplierProductSchema.extend({
+  sku: z.string(),
+  productName: z.string(),
+  size: z.string().nullable(),
+  color: z.string().nullable(),
+  material: z.string().nullable(),
+}).openapi('SupplierProductWithVariant')
+
+export const SupplierProductWithVariantListSchema = z
+  .array(SupplierProductWithVariantSchema)
+  .openapi('SupplierProductWithVariantList')
+
 export type SupplierProduct = z.infer<typeof SupplierProductSchema>
 export type CreateSupplierProductInput = z.infer<typeof CreateSupplierProductInputSchema>
 export type UpdateSupplierProductInput = z.infer<typeof UpdateSupplierProductInputSchema>
+export type SupplierProductWithVariant = z.infer<typeof SupplierProductWithVariantSchema>
