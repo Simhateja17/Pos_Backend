@@ -6,6 +6,8 @@ extendZodWithOpenApi(z)
 export const OpenShiftSchema = z
   .object({
     startingCash: z.string().regex(/^\d+\.\d{2}$/),
+    /** Which counter this drawer belongs to (0034). */
+    terminalId: z.string().uuid(),
   })
   .openapi('OpenShiftRequest')
 
@@ -19,6 +21,8 @@ export const ShiftSchema = z
   .object({
     id: z.string().uuid(),
     staffId: z.string().uuid(),
+    /** Nullable only for pre-0034 rows the backfill could not attribute. */
+    terminalId: z.string().uuid().nullable(),
     startingCash: z.string(),
     openedAt: z.string(),
     countedCash: z.string().nullable(),
@@ -26,6 +30,16 @@ export const ShiftSchema = z
     closedAt: z.string().nullable(),
   })
   .openapi('Shift')
+
+/**
+ * A shift as it appears in history — the same row plus the human names the
+ * list needs, resolved server-side so the client never has to join staff and
+ * terminal lists itself.
+ */
+export const ShiftHistoryEntrySchema = ShiftSchema.extend({
+  staffName: z.string().nullable(),
+  terminalName: z.string().nullable(),
+}).openapi('ShiftHistoryEntry')
 
 export const XReportSchema = z
   .object({
@@ -48,5 +62,6 @@ export const ZReportSchema = XReportSchema.extend({
 export type OpenShiftInput = z.infer<typeof OpenShiftSchema>
 export type CloseShiftInput = z.infer<typeof CloseShiftSchema>
 export type Shift = z.infer<typeof ShiftSchema>
+export type ShiftHistoryEntry = z.infer<typeof ShiftHistoryEntrySchema>
 export type XReport = z.infer<typeof XReportSchema>
 export type ZReport = z.infer<typeof ZReportSchema>

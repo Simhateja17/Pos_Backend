@@ -208,28 +208,35 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
   // on_order, per variant, across every order actually placed with a supplier.
   const openOrders = await tx.purchase_orders.findMany({
     where: { status: { in: ['sent', 'partial'] } },
-    include: { purchase_order_lines: true, suppliers: true },
+    include: { purchase_order_lines: true },
   })
   const onOrderByVariant = new Map<string, number>()
-  // Most recent supplier to have been ordered from, used to attribute a
-  // suggestion (and its lead time) to a real vendor.
-  const supplierByVariant = new Map<string, { id: string; name: string; leadTimeDays: number }>()
   for (const po of openOrders) {
     for (const line of po.purchase_order_lines ?? []) {
       const outstanding = Math.max(0, Number(line.quantity_ordered) - Number(line.quantity_received))
       onOrderByVariant.set(line.variant_id, (onOrderByVariant.get(line.variant_id) ?? 0) + outstanding)
-      if (po.suppliers) {
-        supplierByVariant.set(line.variant_id, {
-          id: po.suppliers.id,
-          name: po.suppliers.name,
-          leadTimeDays: po.suppliers.lead_time_days,
-        })
-      }
     }
   }
 
-  // Fall back to any active supplier's lead time when a variant has never been
-  // ordered. Without a lead time there is no reorder point at all.
+  // The variant's own primary supplier link is the real, product-specific
+  // lead time (PUR-03) — this replaces "most recent PO's supplier", which
+  // could point at a vendor no longer used for this item.
+  const primaryLinks = await tx.supplier_products.findMany({
+    where: { is_primary: true },
+    include: { suppliers: true },
+  })
+  const supplierByVariant = new Map<string, { id: string; name: string; leadTimeDays: number }>()
+  for (const link of primaryLinks) {
+    supplierByVariant.set(link.variant_id, {
+      id: link.supplier_id,
+      name: link.suppliers.name,
+      leadTimeDays: link.lead_time_days,
+    })
+  }
+
+  // Fall back to any active supplier's tenant-wide lead time when a variant
+  // has no supplier_products link at all. Without a lead time there is no
+  // reorder point at all.
   const activeSuppliers = await tx.suppliers.findMany({ where: { is_active: true }, orderBy: { name: 'asc' } })
   const fallbackSupplier = activeSuppliers[0]
 

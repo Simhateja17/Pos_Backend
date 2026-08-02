@@ -20,6 +20,7 @@ function toShiftJson(row: any) {
   return {
     id: row.id,
     staffId: row.staff_id,
+    terminalId: row.terminal_id ?? null,
     startingCash: row.starting_cash.toString(),
     openedAt: row.opened_at.toISOString(),
     countedCash: row.counted_cash ? row.counted_cash.toString() : null,
@@ -76,13 +77,43 @@ async function computeXReport(client: any, shift: any) {
 }
 
 /**
+ * GET / — shift history for the tenant, newest first. Staff and terminal
+ * names are resolved here so the client renders a list without joining two
+ * more endpoints itself. Includes the currently-open shifts (closedAt null),
+ * which is how a shared till knows what is already running on each counter.
+ */
+router.get('/', async (req, res) => {
+  const client = forTenant(req.user!.tenantId) as any
+
+  const shifts = await client.shifts.findMany({ orderBy: [{ opened_at: 'desc' }], take: 100 })
+  const staff = await client.staff_members.findMany({ select: { id: true, name: true } })
+  const terminals = await client.terminals.findMany({ select: { id: true, name: true } })
+
+  const staffNames = new Map(staff.map((row: any) => [row.id, row.name]))
+  const terminalNames = new Map(terminals.map((row: any) => [row.id, row.name]))
+
+  return res.json(
+    shifts.map((row: any) => ({
+      ...toShiftJson(row),
+      staffName: staffNames.get(row.staff_id) ?? null,
+      terminalName: row.terminal_id ? terminalNames.get(row.terminal_id) ?? null : null,
+    })),
+  )
+})
+
+/**
  * POST / — open a shift with a starting cash count (D-14). The shift row is
  * durable (survives terminal reload), not client-only state (D-13).
+ *
+ * Since 0034 a shift belongs to a named counter, and one counter is one
+ * physical drawer: opening a second shift on a till someone else is already
+ * running is rejected. The DB carries a partial unique index for the same
+ * rule, because two simultaneous requests would both pass the check below.
  */
 router.post('/', async (req, res) => {
   const parsed = OpenShiftSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json({ error: 'Pick which counter this drawer is on.' })
   }
 
   const client = forTenant(req.user!.tenantId) as any
@@ -91,15 +122,47 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Could not resolve the acting staff member' })
   }
 
-  const shift = await client.shifts.create({
-    data: {
-      tenant_id: req.user!.tenantId,
-      staff_id: staffId,
-      starting_cash: parsed.data.startingCash,
-    },
-  })
+  // RLS-scoped, so a terminal id from another tenant simply is not found.
+  const terminal = await client.terminals.findFirst({ where: { id: parsed.data.terminalId } })
+  if (!terminal) {
+    return res.status(404).json({ error: 'Counter not found' })
+  }
+  if (!terminal.is_active) {
+    return res.status(409).json({ error: 'That counter is turned off. Pick another, or turn it back on in Settings.' })
+  }
 
-  return res.status(201).json(toShiftJson(shift))
+  const openOnTerminal = await client.shifts.findFirst({
+    where: { terminal_id: terminal.id, closed_at: null },
+  })
+  if (openOnTerminal) {
+    const holder = await client.staff_members.findFirst({
+      where: { id: openOnTerminal.staff_id },
+      select: { name: true },
+    })
+    return res.status(409).json({
+      error: holder?.name
+        ? `${terminal.name} already has a shift open, run by ${holder.name}. Close it before opening another.`
+        : `${terminal.name} already has a shift open. Close it before opening another.`,
+    })
+  }
+
+  try {
+    const shift = await client.shifts.create({
+      data: {
+        tenant_id: req.user!.tenantId,
+        staff_id: staffId,
+        terminal_id: terminal.id,
+        starting_cash: parsed.data.startingCash,
+      },
+    })
+    return res.status(201).json(toShiftJson(shift))
+  } catch (err: any) {
+    // The partial unique index caught a race the check above could not.
+    if (err.code === 'P2002') {
+      return res.status(409).json({ error: `${terminal.name} already has a shift open. Close it before opening another.` })
+    }
+    throw err
+  }
 })
 
 /**

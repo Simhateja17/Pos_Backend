@@ -2367,6 +2367,34 @@
           }
         }
       },
+      "ShiftHistoryEntry": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Shift"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "staffName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "terminalName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "staffName",
+              "terminalName"
+            ]
+          }
+        ]
+      },
       "Shift": {
         "type": "object",
         "properties": {
@@ -2376,6 +2404,13 @@
           },
           "staffId": {
             "type": "string",
+            "format": "uuid"
+          },
+          "terminalId": {
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid"
           },
           "startingCash": {
@@ -2406,6 +2441,7 @@
         "required": [
           "id",
           "staffId",
+          "terminalId",
           "startingCash",
           "openedAt",
           "countedCash",
@@ -2419,10 +2455,15 @@
           "startingCash": {
             "type": "string",
             "pattern": "^\\d+\\.\\d{2}$"
+          },
+          "terminalId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
-          "startingCash"
+          "startingCash",
+          "terminalId"
         ]
       },
       "XReport": {
@@ -2498,6 +2539,62 @@
         "required": [
           "countedCash"
         ]
+      },
+      "Terminal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "hasOpenShift": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "isActive",
+          "hasOpenShift",
+          "createdAt"
+        ]
+      },
+      "CreateTerminalRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateTerminalRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "Category": {
         "type": "object",
@@ -2869,21 +2966,9 @@
               "null"
             ]
           },
-          "address": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "leadTimeDays": {
             "type": "integer",
             "exclusiveMinimum": 0
-          },
-          "minOrderValue": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "paymentTerms": {
             "type": [
@@ -2904,9 +2989,7 @@
           "contactName",
           "email",
           "phone",
-          "address",
           "leadTimeDays",
-          "minOrderValue",
           "paymentTerms",
           "isActive",
           "createdAt"
@@ -2933,17 +3016,9 @@
             "type": "string",
             "maxLength": 20
           },
-          "address": {
-            "type": "string",
-            "maxLength": 500
-          },
           "leadTimeDays": {
             "type": "integer",
             "exclusiveMinimum": 0
-          },
-          "minOrderValue": {
-            "type": "number",
-            "minimum": 0
           },
           "paymentTerms": {
             "type": "string",
@@ -2976,17 +3051,9 @@
             "type": "string",
             "maxLength": 20
           },
-          "address": {
-            "type": "string",
-            "maxLength": 500
-          },
           "leadTimeDays": {
             "type": "integer",
             "exclusiveMinimum": 0
-          },
-          "minOrderValue": {
-            "type": "number",
-            "minimum": 0
           },
           "paymentTerms": {
             "type": "string",
@@ -2994,6 +3061,129 @@
           },
           "isActive": {
             "type": "boolean"
+          }
+        }
+      },
+      "SupplierProductList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/SupplierProduct"
+        }
+      },
+      "SupplierProduct": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "supplierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "supplierName": {
+            "type": "string"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "unitCost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supplierSku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "minOrderQty": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "supplierId",
+          "supplierName",
+          "variantId",
+          "isPrimary",
+          "leadTimeDays",
+          "unitCost",
+          "supplierSku",
+          "minOrderQty",
+          "createdAt"
+        ]
+      },
+      "CreateSupplierProductRequest": {
+        "type": "object",
+        "properties": {
+          "supplierId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "unitCost": {
+            "type": "number",
+            "minimum": 0
+          },
+          "supplierSku": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "minOrderQty": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "supplierId",
+          "leadTimeDays"
+        ]
+      },
+      "UpdateSupplierProductRequest": {
+        "type": "object",
+        "properties": {
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "leadTimeDays": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "unitCost": {
+            "type": "number",
+            "minimum": 0
+          },
+          "supplierSku": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "minOrderQty": {
+            "type": "integer",
+            "exclusiveMinimum": 0
           }
         }
       },
@@ -5364,8 +5554,26 @@
       }
     },
     "/shifts": {
+      "get": {
+        "description": "Shift history for the tenant, newest first, with staff and counter names resolved.",
+        "responses": {
+          "200": {
+            "description": "Shift history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ShiftHistoryEntry"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
-        "description": "Open a shift with a starting cash count (D-14).",
+        "description": "Open a shift with a starting cash count on a named counter (D-14, 0034). One counter holds at most one open shift.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5385,6 +5593,12 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Counter not found"
+          },
+          "409": {
+            "description": "That counter already has an open shift, or is turned off"
           }
         }
       }
@@ -5459,6 +5673,139 @@
           },
           "409": {
             "description": "Shift already closed"
+          }
+        }
+      }
+    },
+    "/terminals": {
+      "get": {
+        "description": "The tenant's counters/tills. Readable by every role so a cashier can pick one when opening a shift.",
+        "responses": {
+          "200": {
+            "description": "Terminals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Terminal"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Create a counter. Names are unique per tenant case-insensitively. Requires manager or owner role.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTerminalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Terminal created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Terminal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "409": {
+            "description": "A counter with that name already exists"
+          }
+        }
+      }
+    },
+    "/terminals/{terminalId}": {
+      "patch": {
+        "description": "Rename a counter or turn it on/off. A counter with a shift open on it cannot be turned off. Requires manager or owner role.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "terminalId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTerminalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Terminal updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Terminal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Counter not found"
+          },
+          "409": {
+            "description": "Name already taken, or the counter has a shift open on it"
+          }
+        }
+      },
+      "delete": {
+        "description": "Delete a counter that has no shift history. Counters with history must be turned off instead so their Z reports keep naming them. Requires manager or owner role.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "terminalId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Terminal deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Counter not found"
+          },
+          "409": {
+            "description": "Counter has shift history and cannot be deleted"
           }
         }
       }
@@ -5839,6 +6186,158 @@
           },
           "404": {
             "description": "Supplier not found"
+          }
+        }
+      }
+    },
+    "/variants/{variantId}/supplier-products": {
+      "get": {
+        "description": "List the suppliers this variant is bought from, primary first — each with its own lead time, cost, and min order qty.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "variantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supplier products",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierProductList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Link a supplier to this variant with a product-specific lead time.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "variantId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSupplierProductRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Supplier product created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierProduct"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "404": {
+            "description": "Variant or supplier not found"
+          },
+          "409": {
+            "description": "This supplier is already linked to this variant"
+          }
+        }
+      }
+    },
+    "/variants/{variantId}/supplier-products/{supplierProductId}": {
+      "patch": {
+        "description": "Edit a supplier product link, or flip isPrimary.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "variantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "supplierProductId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSupplierProductRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Supplier product updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierProduct"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Supplier product link not found"
+          }
+        }
+      },
+      "delete": {
+        "description": "Unlink a supplier from this variant.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "variantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "supplierProductId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Supplier product removed"
+          },
+          "404": {
+            "description": "Supplier product link not found"
           }
         }
       }

@@ -10,10 +10,9 @@ export const SupplierSchema = z
     contactName: z.string().nullable(),
     email: z.string().nullable(),
     phone: z.string().nullable(),
-    address: z.string().nullable(),
-    // Direct input to the reorder formula (Task 5) — never optional on read.
+    // Tenant-wide fallback only — used when a variant has no supplier_products
+    // link at all. The real, product-specific lead time lives on that link.
     leadTimeDays: z.number().int().positive(),
-    minOrderValue: z.string().nullable(), // numeric(12,2) — string, same convention as Variant.price
     paymentTerms: z.string().nullable(),
     isActive: z.boolean(),
     createdAt: z.string(),
@@ -29,9 +28,7 @@ export const CreateSupplierInputSchema = z
     contactName: z.string().max(200).optional(),
     email: z.string().email().max(200).optional(),
     phone: z.string().max(20).optional(),
-    address: z.string().max(500).optional(),
     leadTimeDays: z.number().int().positive(),
-    minOrderValue: z.number().nonnegative().optional(),
     paymentTerms: z.string().max(100).optional(),
   })
   .openapi('CreateSupplierRequest')
@@ -42,9 +39,7 @@ export const UpdateSupplierInputSchema = z
     contactName: z.string().max(200).optional(),
     email: z.string().email().max(200).optional(),
     phone: z.string().max(20).optional(),
-    address: z.string().max(500).optional(),
     leadTimeDays: z.number().int().positive().optional(),
-    minOrderValue: z.number().nonnegative().optional(),
     paymentTerms: z.string().max(100).optional(),
     isActive: z.boolean().optional(),
   })

@@ -6,6 +6,7 @@ import pinRouter from './pin'
 import membersRouter from './members'
 import productsRouter from './products'
 import categoriesRouter from './categories'
+import terminalsRouter from './terminals'
 import settingsRouter from './settings'
 import notificationsRouter from './notifications'
 import stockMovementsRouter from './stockMovements'
@@ -17,6 +18,7 @@ import onboardingRouter from './onboarding'
 import contextRouter from './context'
 import dashboardRouter from './dashboard'
 import suppliersRouter from './suppliers'
+import supplierProductsRouter from './supplier-products'
 import purchaseOrdersRouter from './purchase-orders'
 import reorderRouter from './reorder'
 import importRouter from './import'
@@ -41,6 +43,7 @@ router.use('/terminal/pin', authMiddleware, operatorContext, pinRouter)
 router.use('/members', authMiddleware, operatorContext, membersRouter)
 router.use('/products', authMiddleware, operatorContext, productsRouter)
 router.use('/categories', authMiddleware, operatorContext, categoriesRouter)
+router.use('/terminals', authMiddleware, operatorContext, terminalsRouter)
 router.use('/settings', authMiddleware, operatorContext, settingsRouter)
 router.use('/notifications', authMiddleware, operatorContext, notificationsRouter)
 router.use('/stock-movements', authMiddleware, operatorContext, stockMovementsRouter)
@@ -54,6 +57,7 @@ router.use('/onboarding', authMiddleware, operatorContext, onboardingRouter)
 router.use('/context', authMiddleware, operatorContext, contextRouter)
 router.use('/dashboard', authMiddleware, operatorContext, dashboardRouter)
 router.use('/suppliers', authMiddleware, operatorContext, suppliersRouter)
+router.use('/variants/:variantId/supplier-products', authMiddleware, operatorContext, supplierProductsRouter)
 router.use('/purchase-orders', authMiddleware, operatorContext, purchaseOrdersRouter)
 router.use('/reorder', authMiddleware, operatorContext, reorderRouter)
 router.use('/import', authMiddleware, operatorContext, importRouter)

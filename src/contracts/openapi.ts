@@ -21,7 +21,8 @@ import { CustomerListQuerySchema, CustomerListSchema, CustomerSchema } from './s
 import { PaymentReadQuerySchema, PaymentReadSchema } from './schemas/payment'
 import { AppContextSchema } from './schemas/context'
 import { DashboardQuerySchema, DashboardSchema } from './schemas/dashboard'
-import { OpenShiftSchema, CloseShiftSchema, ShiftSchema, XReportSchema, ZReportSchema } from './schemas/shift'
+import { OpenShiftSchema, CloseShiftSchema, ShiftSchema, ShiftHistoryEntrySchema, XReportSchema, ZReportSchema } from './schemas/shift'
+import { TerminalSchema, CreateTerminalSchema, UpdateTerminalSchema } from './schemas/terminal'
 import {
   CompleteOnboardingSchema,
   OnboardingCompletionResponseSchema,
@@ -45,6 +46,12 @@ import {
   SuppressionListSchema,
 } from './schemas/email'
 import { SupplierSchema, SupplierListSchema, CreateSupplierInputSchema, UpdateSupplierInputSchema } from './schemas/supplier'
+import {
+  SupplierProductSchema,
+  SupplierProductListSchema,
+  CreateSupplierProductInputSchema,
+  UpdateSupplierProductInputSchema,
+} from './schemas/supplierProduct'
 import { ReorderSuggestionListSchema } from './schemas/reorder'
 import {
   PurchaseOrderSchema,
@@ -421,12 +428,26 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: 'get',
+  path: '/shifts',
+  description: 'Shift history for the tenant, newest first, with staff and counter names resolved.',
+  responses: {
+    200: {
+      description: 'Shift history',
+      content: { 'application/json': { schema: z.array(ShiftHistoryEntrySchema) } },
+    },
+  },
+})
+
+registry.registerPath({
   method: 'post',
   path: '/shifts',
-  description: 'Open a shift with a starting cash count (D-14).',
+  description: 'Open a shift with a starting cash count on a named counter (D-14, 0034). One counter holds at most one open shift.',
   request: { body: { content: { 'application/json': { schema: OpenShiftSchema } } } },
   responses: {
     201: { description: 'Shift opened', content: { 'application/json': { schema: ShiftSchema } } },
+    404: { description: 'Counter not found' },
+    409: { description: 'That counter already has an open shift, or is turned off' },
   },
 })
 
@@ -453,6 +474,57 @@ registry.registerPath({
     200: { description: 'Shift closed', content: { 'application/json': { schema: ZReportSchema } } },
     404: { description: 'Shift not found' },
     409: { description: 'Shift already closed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/terminals',
+  description: "The tenant's counters/tills. Readable by every role so a cashier can pick one when opening a shift.",
+  responses: {
+    200: { description: 'Terminals', content: { 'application/json': { schema: z.array(TerminalSchema) } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/terminals',
+  description: 'Create a counter. Names are unique per tenant case-insensitively. Requires manager or owner role.',
+  request: { body: { content: { 'application/json': { schema: CreateTerminalSchema } } } },
+  responses: {
+    201: { description: 'Terminal created', content: { 'application/json': { schema: TerminalSchema } } },
+    400: { description: 'Invalid request' },
+    409: { description: 'A counter with that name already exists' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/terminals/{terminalId}',
+  description: 'Rename a counter or turn it on/off. A counter with a shift open on it cannot be turned off. Requires manager or owner role.',
+  request: {
+    params: z.object({ terminalId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdateTerminalSchema } } },
+  },
+  responses: {
+    200: { description: 'Terminal updated', content: { 'application/json': { schema: TerminalSchema } } },
+    404: { description: 'Counter not found' },
+    409: { description: 'Name already taken, or the counter has a shift open on it' },
+  },
+})
+
+registry.registerPath({
+  method: 'delete',
+  path: '/terminals/{terminalId}',
+  description: 'Delete a counter that has no shift history. Counters with history must be turned off instead so their Z reports keep naming them. Requires manager or owner role.',
+  request: { params: z.object({ terminalId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: 'Terminal deleted',
+      content: { 'application/json': { schema: z.object({ deleted: z.boolean() }) } },
+    },
+    404: { description: 'Counter not found' },
+    409: { description: 'Counter has shift history and cannot be deleted' },
   },
 })
 
@@ -612,6 +684,57 @@ registry.registerPath({
   responses: {
     200: { description: 'Supplier updated', content: { 'application/json': { schema: SupplierSchema } } },
     404: { description: 'Supplier not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/variants/{variantId}/supplier-products',
+  description: 'List the suppliers this variant is bought from, primary first — each with its own lead time, cost, and min order qty.',
+  request: { params: z.object({ variantId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Supplier products', content: { 'application/json': { schema: SupplierProductListSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/variants/{variantId}/supplier-products',
+  description: 'Link a supplier to this variant with a product-specific lead time.',
+  request: {
+    params: z.object({ variantId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: CreateSupplierProductInputSchema } } },
+  },
+  responses: {
+    201: { description: 'Supplier product created', content: { 'application/json': { schema: SupplierProductSchema } } },
+    400: { description: 'Invalid request' },
+    404: { description: 'Variant or supplier not found' },
+    409: { description: 'This supplier is already linked to this variant' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/variants/{variantId}/supplier-products/{supplierProductId}',
+  description: 'Edit a supplier product link, or flip isPrimary.',
+  request: {
+    params: z.object({ variantId: z.string().uuid(), supplierProductId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdateSupplierProductInputSchema } } },
+  },
+  responses: {
+    200: { description: 'Supplier product updated', content: { 'application/json': { schema: SupplierProductSchema } } },
+    404: { description: 'Supplier product link not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'delete',
+  path: '/variants/{variantId}/supplier-products/{supplierProductId}',
+  description: 'Unlink a supplier from this variant.',
+  request: { params: z.object({ variantId: z.string().uuid(), supplierProductId: z.string().uuid() }) },
+  responses: {
+    204: { description: 'Supplier product removed' },
+    404: { description: 'Supplier product link not found' },
   },
 })
 
