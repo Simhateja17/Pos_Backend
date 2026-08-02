@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { StoreSettingsSchema, UpdateStoreSettingsSchema } from './schemas/settings'
+import { NotificationListSchema } from './schemas/notification'
 import {
   CategorySchema,
   CreateCategorySchema,
@@ -527,6 +528,24 @@ registry.registerPath({
       },
     },
     400: { description: 'Invalid request' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/notifications',
+  description: 'Notifications for this tenant, newest first, with the unread count.',
+  responses: {
+    200: { description: 'Notifications', content: { 'application/json': { schema: NotificationListSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/notifications/read',
+  description: 'Mark every currently-unread notification read. No per-item read state in V1.',
+  responses: {
+    200: { description: 'Marked read', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
   },
 })
 

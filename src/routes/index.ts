@@ -7,6 +7,7 @@ import membersRouter from './members'
 import productsRouter from './products'
 import categoriesRouter from './categories'
 import settingsRouter from './settings'
+import notificationsRouter from './notifications'
 import stockMovementsRouter from './stockMovements'
 import salesRouter from './sales'
 import returnsRouter from './returns'
@@ -41,6 +42,7 @@ router.use('/members', authMiddleware, operatorContext, membersRouter)
 router.use('/products', authMiddleware, operatorContext, productsRouter)
 router.use('/categories', authMiddleware, operatorContext, categoriesRouter)
 router.use('/settings', authMiddleware, operatorContext, settingsRouter)
+router.use('/notifications', authMiddleware, operatorContext, notificationsRouter)
 router.use('/stock-movements', authMiddleware, operatorContext, stockMovementsRouter)
 router.use('/sales', authMiddleware, operatorContext, salesRouter)
 router.use('/returns', authMiddleware, operatorContext, returnsRouter)

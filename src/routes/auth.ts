@@ -145,6 +145,16 @@ router.post('/signup', async (req, res) => {
       })
     }
 
+    await tenantScoped.notifications.create({
+      data: {
+        tenant_id: tenantId,
+        type: 'business_type_unset',
+        title: 'Set your business type',
+        body: 'Pick what kind of shop this is and we will suggest a starting list of categories for your catalog.',
+        link: '/store-type',
+      },
+    })
+
     const { data: signInData, error: signInError } = await supabaseAnon.auth.signInWithPassword({
       email,
       password,
@@ -281,13 +291,20 @@ router.post('/set-pin', authMiddleware, async (req, res) => {
   }
 
   const pinHash = await bcrypt.hash(parsed.data.pin, 10)
+  const client = forTenant(req.user!.tenantId) as any
+
+  // Read first so a repeat PIN reset doesn't re-fire the activation
+  // notification — pin_hash going NULL -> set happens exactly once, the
+  // first time an invited staff member completes account activation.
+  const existing = await client.staff_members.findFirst({ where: { user_id: req.user!.id } })
+  const isFirstActivation = existing !== null && existing.pin_hash === null
 
   // updateMany (not update): the lookup key is user_id, not the primary key
   // id — Prisma's update requires a unique/primary-key where clause, and
   // user_id isn't declared as a DB-level unique constraint in 01-02's
   // schema, so updateMany is the safe choice that doesn't assume a
   // constraint that doesn't exist.
-  const updated = await forTenant(req.user!.tenantId).staff_members.updateMany({
+  const updated = await client.staff_members.updateMany({
     where: { user_id: req.user!.id },
     data: { pin_hash: pinHash, pin_attempts: 0, pin_locked_until: null },
   })
@@ -297,6 +314,19 @@ router.post('/set-pin', authMiddleware, async (req, res) => {
     // a real authenticated staff session, but fail loudly rather than
     // silently succeeding.
     return res.status(404).json({ error: 'No staff record found for this account' })
+  }
+
+  if (isFirstActivation && existing) {
+    await client.notifications.create({
+      data: {
+        tenant_id: req.user!.tenantId,
+        type: 'staff_activated',
+        title: 'A staff member is now active',
+        body: `${existing.name} has set up their account and can now sign in.`,
+        link: '/app/settings/members',
+        metadata: { staffMemberId: existing.id },
+      },
+    })
   }
 
   return res.status(200).json({ ok: true })

@@ -32,14 +32,27 @@ vi.mock('@supabase/supabase-js', () => ({
 const tenantsCreateMock = vi.fn()
 const staffMembersCreateMock = vi.fn()
 const staffMembersUpdateManyMock = vi.fn()
+// 0033: set-pin reads the row first to detect first-time activation.
+// Defaults to an existing staff row with no PIN yet set — the common case
+// these tests exercise — individual tests override when they need to.
+const staffMembersFindFirstTenantScopedMock = vi.fn(async () => ({
+  id: 'staff-1', name: 'Test Staff', pin_hash: null as string | null,
+}))
 // Signup now seeds a starter category list (0032's "no categories yet" fix).
 const categoriesCreateMock = vi.fn(async () => ({ id: 'category-1' }))
+// 0033: signup also creates a "set your business type" notification.
+const notificationsCreateMock = vi.fn(async () => ({ id: 'notification-1' }))
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
     tenants: { create: tenantsCreateMock },
-    staff_members: { create: staffMembersCreateMock, updateMany: staffMembersUpdateManyMock },
+    staff_members: {
+      create: staffMembersCreateMock,
+      updateMany: staffMembersUpdateManyMock,
+      findFirst: staffMembersFindFirstTenantScopedMock,
+    },
     categories: { create: categoriesCreateMock },
+    notifications: { create: notificationsCreateMock },
   })),
 }))
 
@@ -229,6 +242,8 @@ describe('POST /auth/set-pin', () => {
     vi.resetModules()
     getUserMock.mockReset()
     staffMembersUpdateManyMock.mockReset()
+    staffMembersFindFirstTenantScopedMock.mockClear()
+    notificationsCreateMock.mockClear()
   })
 
   function fakeJwt(payload: Record<string, unknown>) {
@@ -293,6 +308,28 @@ describe('POST /auth/set-pin', () => {
 
     expect(res.status).toBe(401)
     expect(staffMembersUpdateManyMock).not.toHaveBeenCalled()
+  })
+
+  it('Test 5: first-time PIN set (pin_hash was NULL) creates a staff_activated notification; a repeat PIN reset does not', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
+    staffMembersUpdateManyMock.mockResolvedValue({ count: 1 })
+    staffMembersFindFirstTenantScopedMock.mockResolvedValueOnce({
+      id: 'staff-1', name: 'Riya', pin_hash: null,
+    })
+
+    const app = await buildApp()
+    await request(app).post('/auth/set-pin').set('Authorization', `Bearer ${validToken}`).send({ pin: '1234' })
+    expect(notificationsCreateMock).toHaveBeenCalledTimes(1)
+    expect(notificationsCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ type: 'staff_activated' }) }),
+    )
+
+    notificationsCreateMock.mockClear()
+    staffMembersFindFirstTenantScopedMock.mockResolvedValueOnce({
+      id: 'staff-1', name: 'Riya', pin_hash: 'already-set-hash',
+    })
+    await request(app).post('/auth/set-pin').set('Authorization', `Bearer ${validToken}`).send({ pin: '5678' })
+    expect(notificationsCreateMock).not.toHaveBeenCalled()
   })
 
   it('Test 4: the route never accepts a staffId/memberId from the request body to decide whose PIN to set — it always resolves via req.user.id, ignoring a client-supplied staffId', async () => {
