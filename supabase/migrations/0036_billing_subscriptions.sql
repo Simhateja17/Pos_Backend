@@ -113,9 +113,9 @@ CREATE POLICY billing_transactions_tenant_isolation
   WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
 GRANT SELECT, INSERT, UPDATE ON public.billing_transactions TO app_runtime;
 
--- Webhook event IDs are provider-global, so this ingress ledger is not
--- tenant-RLS protected. The webhook route is signature-gated and this table
--- is never exposed by an authenticated application route.
+-- Webhook event IDs are provider-global, so this ingress ledger cannot use
+-- tenant_id-based RLS. It is still RLS-protected: only the backend runtime
+-- role may access it, and Supabase anon/authenticated API roles are denied.
 CREATE TABLE IF NOT EXISTS public.billing_webhook_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   provider_event_id TEXT NOT NULL UNIQUE,
@@ -128,6 +128,14 @@ CREATE TABLE IF NOT EXISTS public.billing_webhook_events (
 
 CREATE INDEX IF NOT EXISTS idx_billing_webhook_events_created
   ON public.billing_webhook_events (created_at DESC);
+ALTER TABLE public.billing_webhook_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS billing_webhook_events_runtime_only ON public.billing_webhook_events;
+CREATE POLICY billing_webhook_events_runtime_only
+  ON public.billing_webhook_events
+  FOR ALL TO app_runtime
+  USING (true)
+  WITH CHECK (true);
+REVOKE ALL ON public.billing_webhook_events FROM anon, authenticated, PUBLIC;
 GRANT SELECT, INSERT, UPDATE ON public.billing_webhook_events TO app_runtime;
 
 CREATE OR REPLACE FUNCTION public.touch_billing_updated_at()

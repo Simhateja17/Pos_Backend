@@ -671,8 +671,8 @@ model billing_transactions {
   @@schema("public")
 }
 
-/// Signature-verified provider webhook ledger. This table is intentionally not
-/// tenant-RLS protected because deduplication happens before tenant resolution.
+/// Signature-verified provider webhook ledger. It uses runtime-role RLS rather
+/// than tenant-RLS because deduplication happens before tenant resolution.
 model billing_webhook_events {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   provider_event_id String    @unique
