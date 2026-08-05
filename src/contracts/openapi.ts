@@ -10,7 +10,7 @@ import {
 } from './schemas/category'
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi'
 import { z } from 'zod'
-import { SignupSchema, LoginSchema, AuthResponseSchema, SetPinSchema } from './schemas/auth'
+import { SignupSchema, LoginSchema, OtpRequestSchema, AuthResponseSchema, SetPinSchema } from './schemas/auth'
 import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './schemas/member'
 import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
 import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
@@ -211,13 +211,27 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'post',
+  path: '/auth/otp/request',
+  description: "Send a 6-digit email OTP via Supabase Auth. Always responds 200 regardless of whether the account exists, to avoid leaking account existence. `purpose: 'signup'` lets Supabase create the Auth user on verification; `purpose: 'login'` does not.",
+  request: {
+    body: { content: { 'application/json': { schema: OtpRequestSchema } } },
+  },
+  responses: {
+    200: { description: 'Code sent (if applicable)', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+    400: { description: 'Invalid request' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
   path: '/auth/signup',
-  description: 'Real self-serve signup — creates a Supabase Auth user, a tenants row with the full business/tax profile, and an owner staff_members row.',
+  description: 'Real self-serve signup — verifies the emailed OTP (creating the Supabase Auth user if needed), then creates a tenants row with the full business/tax profile and an owner staff_members row.',
   request: {
     body: { content: { 'application/json': { schema: SignupSchema } } },
   },
   responses: {
     201: { description: 'Signup successful', content: { 'application/json': { schema: AuthResponseSchema } } },
+    401: { description: 'Invalid or expired code' },
     409: { description: 'An account already exists with this email' },
   },
 })
@@ -225,13 +239,13 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/auth/login',
-  description: 'Email+password login via Supabase Auth. Derives role/tenantId from a server-side staff_members lookup.',
+  description: 'Email+OTP login via Supabase Auth. Derives role/tenantId from the custom access token hook claims on the verified session.',
   request: {
     body: { content: { 'application/json': { schema: LoginSchema } } },
   },
   responses: {
     200: { description: 'Login successful', content: { 'application/json': { schema: AuthResponseSchema } } },
-    401: { description: 'Invalid email or password' },
+    401: { description: 'Invalid or expired code' },
   },
 })
 

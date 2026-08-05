@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcrypt'
-import { SignupSchema, LoginSchema, SetPinSchema } from '../contracts/schemas/auth'
+import { SignupSchema, LoginSchema, OtpRequestSchema, SetPinSchema } from '../contracts/schemas/auth'
 import { STARTER_CATEGORIES } from '../contracts/schemas/category'
 import { authMiddleware, decodeJwtPayload } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
@@ -29,15 +29,29 @@ const supabaseAnon = createClient(
   process.env.SUPABASE_ANON_KEY as string,
 )
 
-function isDuplicateEmailError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const err = error as { status?: number; code?: string; message?: string }
-  return (
-    err.code === 'email_exists' ||
-    err.status === 422 ||
-    /already.*(registered|exists)/i.test(err.message ?? '')
-  )
-}
+/**
+ * POST /otp/request — sends a 6-digit email OTP via Supabase Auth. Always
+ * responds 200 regardless of whether the account exists, to avoid leaking
+ * account existence through response timing/shape (same enumeration
+ * concern as /login below). `purpose: 'signup'` allows Supabase to create
+ * the underlying Auth user on verification; `purpose: 'login'` does not,
+ * so an OTP is only actually delivered to already-registered addresses.
+ */
+router.post('/otp/request', async (req, res) => {
+  const parsed = OtpRequestSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request' })
+  }
+
+  const { email, purpose } = parsed.data
+
+  await supabaseAnon.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: purpose === 'signup' },
+  })
+
+  return res.status(200).json({ ok: true })
+})
 
 /**
  * POST /signup — real self-serve signup (D-05/D-06): creates a Supabase Auth
@@ -68,7 +82,7 @@ router.post('/signup', async (req, res) => {
 
   const {
     email,
-    password,
+    otp,
     ownerName,
     businessName,
     tradeName,
@@ -84,24 +98,36 @@ router.post('/signup', async (req, res) => {
     placeOfSupply,
   } = parsed.data
 
-  const { data: createData, error: createError } = await supabaseAdmin.auth.admin.createUser({
+  // Verifying the OTP both confirms the caller owns this email address and
+  // (shouldCreateUser: true was passed at /otp/request time) creates the
+  // Supabase Auth user if it didn't already exist. There is no separate
+  // admin.createUser step — Supabase Auth owns account creation entirely,
+  // same "don't hand-roll" principle as the old password flow.
+  const { data: verifyData, error: verifyError } = await supabaseAnon.auth.verifyOtp({
     email,
-    password,
-    email_confirm: true,
+    token: otp,
+    type: 'email',
   })
 
-  if (createError) {
-    if (isDuplicateEmailError(createError)) {
+  if (verifyError || !verifyData?.user || !verifyData.session) {
+    return res.status(401).json({ error: 'Invalid or expired code' })
+  }
+
+  const newUser = verifyData.user
+
+  // A pre-existing store owner's custom-hook JWT carries tenant_id (same
+  // claim /login relies on). verifyOtp on an already-registered email logs
+  // them in rather than erroring, so this is the only signal that
+  // distinguishes "new email" from "this store already exists" here.
+  try {
+    const existingClaims = decodeJwtPayload(verifyData.session.access_token)
+    if (existingClaims.tenant_id) {
       return res.status(409).json({
         error: 'An account already exists with this email. Log in instead',
       })
     }
-    return res.status(500).json({ error: 'Failed to create account. Please try again.' })
-  }
-
-  const newUser = createData.user
-  if (!newUser) {
-    return res.status(500).json({ error: 'Failed to create account. Please try again.' })
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired code' })
   }
 
   const tenantId = randomUUID()
@@ -155,16 +181,20 @@ router.post('/signup', async (req, res) => {
       },
     })
 
-    const { data: signInData, error: signInError } = await supabaseAnon.auth.signInWithPassword({
-      email,
-      password,
+    // The OTP-verify session above was minted before the staff_members row
+    // existed, so the custom access token hook had nothing to attach —
+    // refreshing re-runs the hook now that this user has a tenant, the same
+    // "mint the session only after the tenant exists" ordering the old
+    // signInWithPassword call gave us.
+    const { data: refreshed, error: refreshError } = await supabaseAnon.auth.refreshSession({
+      refresh_token: verifyData.session.refresh_token,
     })
 
-    if (signInError || !signInData?.session) {
+    if (refreshError || !refreshed?.session) {
       return res.status(500).json({ error: 'Account created but failed to start a session. Please log in.' })
     }
 
-    setAuthCookies(res, signInData.session.access_token, signInData.session.refresh_token)
+    setAuthCookies(res, refreshed.session.access_token, refreshed.session.refresh_token)
 
     return res.status(201).json({
       user: {
@@ -174,8 +204,8 @@ router.post('/signup', async (req, res) => {
         tenantId: tenant.id,
       },
       session: {
-        accessToken: signInData.session.access_token,
-        refreshToken: signInData.session.refresh_token,
+        accessToken: refreshed.session.access_token,
+        refreshToken: refreshed.session.refresh_token,
       },
     })
   } catch {
@@ -192,12 +222,12 @@ router.post('/signup', async (req, res) => {
 })
 
 /**
- * POST /login — email+password via Supabase Auth (D-08). Never reads
- * role/tenantId from the request body — both are derived from a DB lookup
- * keyed on the verified auth user id returned by signInWithPassword.
+ * POST /login — email+OTP via Supabase Auth. Never reads role/tenantId from
+ * the request body — both are derived from the custom access token hook's
+ * claims on the session verifyOtp returns.
  *
  * SECURITY (Information Disclosure, mitigated): both "no such user" and
- * "wrong password" map to the same generic 401 copy, preventing user
+ * "wrong/expired code" map to the same generic 401 copy, preventing user
  * enumeration.
  */
 router.post('/login', async (req, res) => {
@@ -206,12 +236,12 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Invalid request' })
   }
 
-  const { email, password } = parsed.data
+  const { email, otp } = parsed.data
 
-  const { data, error } = await supabaseAnon.auth.signInWithPassword({ email, password })
+  const { data, error } = await supabaseAnon.auth.verifyOtp({ email, token: otp, type: 'email' })
 
   if (error || !data?.session || !data.user) {
-    return res.status(401).json({ error: 'Invalid email or password' })
+    return res.status(401).json({ error: 'Invalid or expired code' })
   }
 
   // Role/tenantId come from the JWT's custom claims (written server-side by
@@ -226,14 +256,14 @@ router.post('/login', async (req, res) => {
   try {
     claims = decodeJwtPayload(data.session.access_token)
   } catch {
-    return res.status(401).json({ error: 'Invalid email or password' })
+    return res.status(401).json({ error: 'Invalid or expired code' })
   }
 
   const role = claims.role as ('owner' | 'manager' | 'cashier' | undefined)
   const tenantId = claims.tenant_id as (string | undefined)
 
   if (!role || !tenantId) {
-    return res.status(401).json({ error: 'Invalid email or password' })
+    return res.status(401).json({ error: 'Invalid or expired code' })
   }
 
   setAuthCookies(res, data.session.access_token, data.session.refresh_token)

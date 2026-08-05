@@ -18,7 +18,8 @@ extendZodWithOpenApi(z)
 export const SignupSchema = z
   .object({
     email: z.string().email(),
-    password: z.string().min(8),
+    /** 6-digit code from POST /auth/otp/request (purpose: 'signup'), verified server-side via Supabase Auth. */
+    otp: z.string().length(6),
     ownerName: z.string().min(1),
     /** Legal registered name — appears on invoices and tax records. */
     businessName: z.string().min(1),
@@ -41,9 +42,17 @@ export const SignupSchema = z
 export const LoginSchema = z
   .object({
     email: z.string().email(),
-    password: z.string().min(1),
+    /** 6-digit code from POST /auth/otp/request (purpose: 'login'), verified server-side via Supabase Auth. */
+    otp: z.string().length(6),
   })
   .openapi('LoginRequest')
+
+export const OtpRequestSchema = z
+  .object({
+    email: z.string().email(),
+    purpose: z.enum(['login', 'signup']),
+  })
+  .openapi('OtpRequestRequest')
 
 export const AuthResponseSchema = z
   .object({
@@ -68,5 +77,6 @@ export const SetPinSchema = z
 
 export type SignupInput = z.infer<typeof SignupSchema>
 export type LoginInput = z.infer<typeof LoginSchema>
+export type OtpRequestInput = z.infer<typeof OtpRequestSchema>
 export type AuthResponse = z.infer<typeof AuthResponseSchema>
 export type SetPinInput = z.infer<typeof SetPinSchema>

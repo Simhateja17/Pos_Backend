@@ -1506,6 +1506,26 @@
         "properties": {},
         "additionalProperties": false
       },
+      "OtpRequestRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "login",
+              "signup"
+            ]
+          }
+        },
+        "required": [
+          "email",
+          "purpose"
+        ]
+      },
       "AuthResponse": {
         "type": "object",
         "properties": {
@@ -1568,9 +1588,10 @@
             "type": "string",
             "format": "email"
           },
-          "password": {
+          "otp": {
             "type": "string",
-            "minLength": 8
+            "minLength": 6,
+            "maxLength": 6
           },
           "ownerName": {
             "type": "string",
@@ -1631,7 +1652,7 @@
         },
         "required": [
           "email",
-          "password",
+          "otp",
           "ownerName",
           "businessName",
           "addressLine1",
@@ -1647,14 +1668,15 @@
             "type": "string",
             "format": "email"
           },
-          "password": {
+          "otp": {
             "type": "string",
-            "minLength": 1
+            "minLength": 6,
+            "maxLength": 6
           }
         },
         "required": [
           "email",
-          "password"
+          "otp"
         ]
       },
       "Member": {
@@ -5228,9 +5250,46 @@
         }
       }
     },
+    "/auth/otp/request": {
+      "post": {
+        "description": "Send a 6-digit email OTP via Supabase Auth. Always responds 200 regardless of whether the account exists, to avoid leaking account existence. `purpose: 'signup'` lets Supabase create the Auth user on verification; `purpose: 'login'` does not.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpRequestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Code sent (if applicable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
     "/auth/signup": {
       "post": {
-        "description": "Real self-serve signup — creates a Supabase Auth user, a tenants row with the full business/tax profile, and an owner staff_members row.",
+        "description": "Real self-serve signup — verifies the emailed OTP (creating the Supabase Auth user if needed), then creates a tenants row with the full business/tax profile and an owner staff_members row.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5251,6 +5310,9 @@
               }
             }
           },
+          "401": {
+            "description": "Invalid or expired code"
+          },
           "409": {
             "description": "An account already exists with this email"
           }
@@ -5259,7 +5321,7 @@
     },
     "/auth/login": {
       "post": {
-        "description": "Email+password login via Supabase Auth. Derives role/tenantId from a server-side staff_members lookup.",
+        "description": "Email+OTP login via Supabase Auth. Derives role/tenantId from the custom access token hook claims on the verified session.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5281,7 +5343,7 @@
             }
           },
           "401": {
-            "description": "Invalid email or password"
+            "description": "Invalid or expired code"
           }
         }
       }
