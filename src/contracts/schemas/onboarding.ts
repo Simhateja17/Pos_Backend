@@ -16,8 +16,9 @@ const optionalPhone = z.string().trim().min(7).max(24).optional()
  * (`storeCategory`) is gone entirely: the product is general retail, and the
  * field drove nothing beyond echoing itself back on the completion screen.
  *
- * The tier chosen here is not enforced and does not gate access — no billing
- * gateway is integrated yet. It records intent for the trial only.
+ * The legacy `trialPlan` key is retained for persisted onboarding-data
+ * compatibility; it records the paid subscription tier selected for the
+ * account. Billing entitlement is verified separately by the billing service.
  */
 export const PlanSelectionStepSchema = z
   .object({

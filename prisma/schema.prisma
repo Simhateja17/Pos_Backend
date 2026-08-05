@@ -576,7 +576,113 @@ model tenants {
   terminals                    terminals[]
   variant_stock_levels         variant_stock_levels[]
   variants                     variants[]
+  billing_subscription_attempts billing_subscription_attempts[]
+  billing_subscriptions         billing_subscriptions[]
+  billing_transactions           billing_transactions[]
 
+  @@schema("public")
+}
+
+/// Tenant-scoped application-side idempotency record for Razorpay subscription creation.
+/// Provider subscription creation does not provide the same documented idempotency
+/// contract as payouts, so this row is the duplicate-prevention boundary.
+model billing_subscription_attempts {
+  id                       String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                String                  @db.Uuid
+  idempotency_key          String
+  region                   String
+  plan_key                 String
+  billing_cycle            String
+  currency                 String
+  base_amount_minor        BigInt
+  tax_amount_minor         BigInt
+  total_amount_minor       BigInt
+  tax_rate_bps             Int                     @default(0)
+  provider_plan_id         String
+  provider_subscription_id String?                 @unique
+  status                   String                  @default("creating")
+  failure_code             String?
+  failure_message          String?
+  provider_payload         Json?
+  created_at               DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                @default(now()) @db.Timestamptz(6)
+  billing_subscriptions    billing_subscriptions[]
+  tenants                  tenants                 @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([tenant_id, idempotency_key], map: "uq_billing_attempts_tenant_key")
+  @@index([tenant_id, created_at(sort: Desc)], map: "idx_billing_attempts_tenant_created")
+  @@schema("public")
+}
+
+/// The server-owned tenant entitlement projection of the Razorpay subscription.
+model billing_subscriptions {
+  id                       String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                String                         @db.Uuid
+  attempt_id               String?                        @db.Uuid
+  provider                 String                         @default("razorpay")
+  provider_subscription_id String                         @unique
+  provider_plan_id         String
+  region                   String
+  plan_key                 String
+  billing_cycle            String
+  currency                 String
+  base_amount_minor        BigInt
+  tax_amount_minor         BigInt
+  total_amount_minor       BigInt
+  tax_rate_bps             Int                            @default(0)
+  status                   String                         @default("created")
+  entitlement_status       String                         @default("blocked")
+  cancel_at_cycle_end      Boolean                        @default(false)
+  current_start_at         DateTime?                      @db.Timestamptz(6)
+  current_end_at           DateTime?                      @db.Timestamptz(6)
+  grace_until_at           DateTime?                      @db.Timestamptz(6)
+  last_payment_id          String?
+  last_invoice_id          String?
+  provider_payload         Json?
+  created_at               DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                       @default(now()) @db.Timestamptz(6)
+  billing_subscription_attempts billing_subscription_attempts? @relation(fields: [attempt_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  billing_transactions     billing_transactions[]
+  tenants                  tenants                        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id, updated_at(sort: Desc)], map: "idx_billing_subscriptions_tenant_updated")
+  @@schema("public")
+}
+
+/// Provider charge/invoice references retained for reconciliation and support.
+model billing_transactions {
+  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id             String                @db.Uuid
+  subscription_id       String                @db.Uuid
+  provider_payment_id   String?               @unique
+  provider_invoice_id   String?               @unique
+  provider_event_id     String?
+  kind                  String
+  status                String
+  amount_minor          BigInt
+  currency              String
+  provider_payload      Json?
+  created_at            DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime              @default(now()) @db.Timestamptz(6)
+  billing_subscriptions billing_subscriptions @relation(fields: [subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants               tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id, created_at(sort: Desc)], map: "idx_billing_transactions_tenant_created")
+  @@schema("public")
+}
+
+/// Signature-verified provider webhook ledger. This table is intentionally not
+/// tenant-RLS protected because deduplication happens before tenant resolution.
+model billing_webhook_events {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider_event_id String    @unique
+  event_name        String
+  tenant_id         String?   @db.Uuid
+  payload           Json
+  processed_at      DateTime? @db.Timestamptz(6)
+  created_at        DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([created_at(sort: Desc)], map: "idx_billing_webhook_events_created")
   @@schema("public")
 }
 

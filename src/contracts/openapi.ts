@@ -62,6 +62,14 @@ import {
   ReceivePurchaseOrderSchema,
   ReceiptResultSchema,
 } from './schemas/purchaseOrder'
+import {
+  BillingPlanCatalogSchema,
+  BillingStatusSchema,
+  CancelSubscriptionSchema,
+  CreateSubscriptionResponseSchema,
+  CreateSubscriptionSchema,
+  VerifySubscriptionSchema,
+} from './schemas/billing'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -70,6 +78,70 @@ import {
 // comment for the authoritative single-call-site note.
 
 const registry = new OpenAPIRegistry()
+
+registry.registerPath({
+  method: 'get',
+  path: '/billing/plans',
+  description: 'Read the backend-owned subscription catalog for the authenticated tenant region. Provider Plan IDs are never sent to the browser.',
+  request: { query: z.object({ region: z.enum(['IN', 'US']).optional() }) },
+  responses: {
+    200: { description: 'Subscription plan catalog', content: { 'application/json': { schema: BillingPlanCatalogSchema } } },
+    400: { description: 'Region does not match the tenant account' },
+    401: { description: 'Unauthenticated' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/billing/status',
+  description: 'Read the server-owned subscription entitlement and provider references for the authenticated tenant.',
+  responses: {
+    200: { description: 'Subscription entitlement', content: { 'application/json': { schema: BillingStatusSchema } } },
+    401: { description: 'Unauthenticated' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/billing/subscription',
+  description: 'Create or recover one Razorpay Subscription using an application idempotency key. Owner-only.',
+  request: { body: { content: { 'application/json': { schema: CreateSubscriptionSchema } } } },
+  responses: {
+    201: { description: 'Razorpay subscription ready for Checkout', content: { 'application/json': { schema: CreateSubscriptionResponseSchema } } },
+    400: { description: 'Invalid plan or request' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    409: { description: 'Existing subscription or ended idempotency attempt' },
+    503: { description: 'Provider or plan configuration is not ready' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/billing/subscription/verify',
+  description: 'Verify the Razorpay Checkout signature and provider subscription state. Owner-only.',
+  request: { body: { content: { 'application/json': { schema: VerifySubscriptionSchema } } } },
+  responses: {
+    200: { description: 'Verified subscription entitlement', content: { 'application/json': { schema: BillingStatusSchema } } },
+    400: { description: 'Signature or subscription mismatch' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    503: { description: 'Provider status is not confirmed yet' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/billing/subscription/cancel',
+  description: 'Schedule cancellation at the end of the current billing cycle. No immediate cancellation or refund is performed. Owner-only.',
+  request: { body: { content: { 'application/json': { schema: CancelSubscriptionSchema } } } },
+  responses: {
+    200: { description: 'Cancellation scheduled', content: { 'application/json': { schema: BillingStatusSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    404: { description: 'No subscription found' },
+  },
+})
 
 registry.registerPath({
   method: 'get',

@@ -6,6 +6,367 @@
   },
   "components": {
     "schemas": {
+      "BillingPlanCatalog": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "test",
+              "live"
+            ]
+          },
+          "region": {
+            "$ref": "#/components/schemas/BillingRegion"
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingPlanOption"
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "region",
+          "plans"
+        ]
+      },
+      "BillingRegion": {
+        "type": "string",
+        "enum": [
+          "IN",
+          "US"
+        ]
+      },
+      "BillingPlanOption": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "region": {
+            "$ref": "#/components/schemas/BillingRegion"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/BillingCurrency"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "popular": {
+            "type": "boolean"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "monthly": {
+            "$ref": "#/components/schemas/BillingQuote"
+          },
+          "annual": {
+            "$ref": "#/components/schemas/BillingQuote"
+          },
+          "monthlyAvailable": {
+            "type": "boolean"
+          },
+          "annualAvailable": {
+            "type": "boolean"
+          },
+          "providerConfigured": {
+            "type": "object",
+            "properties": {
+              "monthly": {
+                "type": "boolean"
+              },
+              "annual": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "monthly",
+              "annual"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "region",
+          "currency",
+          "name",
+          "description",
+          "popular",
+          "features",
+          "monthly",
+          "annual",
+          "monthlyAvailable",
+          "annualAvailable",
+          "providerConfigured"
+        ]
+      },
+      "BillingCurrency": {
+        "type": "string",
+        "enum": [
+          "INR",
+          "USD"
+        ]
+      },
+      "BillingQuote": {
+        "type": "object",
+        "properties": {
+          "baseAmountMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "taxAmountMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "totalAmountMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "taxRateBps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "taxMode": {
+            "type": "string",
+            "enum": [
+              "included",
+              "exclusive"
+            ]
+          },
+          "taxLabel": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "baseAmountMinor",
+          "taxAmountMinor",
+          "totalAmountMinor",
+          "taxRateBps",
+          "taxMode",
+          "taxLabel"
+        ]
+      },
+      "BillingStatus": {
+        "type": "object",
+        "properties": {
+          "hasSubscription": {
+            "type": "boolean"
+          },
+          "entitlement": {
+            "type": "string",
+            "enum": [
+              "active",
+              "grace",
+              "blocked"
+            ]
+          },
+          "accessAllowed": {
+            "type": "boolean"
+          },
+          "graceUntil": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "subscription": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "providerSubscriptionId": {
+                "type": "string"
+              },
+              "planKey": {
+                "type": "string"
+              },
+              "billingCycle": {
+                "$ref": "#/components/schemas/BillingCycle"
+              },
+              "currency": {
+                "$ref": "#/components/schemas/BillingCurrency"
+              },
+              "status": {
+                "type": "string"
+              },
+              "cancelAtCycleEnd": {
+                "type": "boolean"
+              },
+              "currentEndAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "lastPaymentId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "lastInvoiceId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "providerSubscriptionId",
+              "planKey",
+              "billingCycle",
+              "currency",
+              "status",
+              "cancelAtCycleEnd",
+              "currentEndAt",
+              "lastPaymentId",
+              "lastInvoiceId"
+            ]
+          }
+        },
+        "required": [
+          "hasSubscription",
+          "entitlement",
+          "accessAllowed",
+          "graceUntil",
+          "subscription"
+        ]
+      },
+      "BillingCycle": {
+        "type": "string",
+        "enum": [
+          "monthly",
+          "annual"
+        ]
+      },
+      "CreateSubscriptionResponse": {
+        "type": "object",
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "razorpayKeyId": {
+            "type": "string"
+          },
+          "razorpaySubscriptionId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "region": {
+            "$ref": "#/components/schemas/BillingRegion"
+          },
+          "planKey": {
+            "type": "string"
+          },
+          "billingCycle": {
+            "$ref": "#/components/schemas/BillingCycle"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/BillingCurrency"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/BillingQuote"
+          }
+        },
+        "required": [
+          "attemptId",
+          "razorpayKeyId",
+          "razorpaySubscriptionId",
+          "status",
+          "region",
+          "planKey",
+          "billingCycle",
+          "currency",
+          "quote"
+        ]
+      },
+      "CreateSubscriptionRequest": {
+        "type": "object",
+        "properties": {
+          "planKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "billingCycle": {
+            "$ref": "#/components/schemas/BillingCycle"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "planKey",
+          "billingCycle",
+          "idempotencyKey"
+        ],
+        "additionalProperties": false
+      },
+      "VerifySubscriptionRequest": {
+        "type": "object",
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "razorpayPaymentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "razorpaySubscriptionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "razorpaySignature": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "attemptId",
+          "razorpayPaymentId",
+          "razorpaySubscriptionId",
+          "razorpaySignature"
+        ],
+        "additionalProperties": false
+      },
+      "CancelSubscriptionRequest": {
+        "type": "object",
+        "properties": {
+          "cancelAtCycleEnd": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      },
       "AppContext": {
         "type": "object",
         "properties": {
@@ -4534,6 +4895,177 @@
     "parameters": {}
   },
   "paths": {
+    "/billing/plans": {
+      "get": {
+        "description": "Read the backend-owned subscription catalog for the authenticated tenant region. Provider Plan IDs are never sent to the browser.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "IN",
+                "US"
+              ]
+            },
+            "required": false,
+            "name": "region",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscription plan catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingPlanCatalog"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Region does not match the tenant account"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/billing/status": {
+      "get": {
+        "description": "Read the server-owned subscription entitlement and provider references for the authenticated tenant.",
+        "responses": {
+          "200": {
+            "description": "Subscription entitlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          }
+        }
+      }
+    },
+    "/billing/subscription": {
+      "post": {
+        "description": "Create or recover one Razorpay Subscription using an application idempotency key. Owner-only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Razorpay subscription ready for Checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSubscriptionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid plan or request"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "409": {
+            "description": "Existing subscription or ended idempotency attempt"
+          },
+          "503": {
+            "description": "Provider or plan configuration is not ready"
+          }
+        }
+      }
+    },
+    "/billing/subscription/verify": {
+      "post": {
+        "description": "Verify the Razorpay Checkout signature and provider subscription state. Owner-only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifySubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified subscription entitlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Signature or subscription mismatch"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "503": {
+            "description": "Provider status is not confirmed yet"
+          }
+        }
+      }
+    },
+    "/billing/subscription/cancel": {
+      "post": {
+        "description": "Schedule cancellation at the end of the current billing cycle. No immediate cancellation or refund is performed. Owner-only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelSubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancellation scheduled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "404": {
+            "description": "No subscription found"
+          }
+        }
+      }
+    },
     "/context": {
       "get": {
         "description": "Read the authenticated caller and tenant display context for the application shell.",

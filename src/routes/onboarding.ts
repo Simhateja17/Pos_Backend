@@ -14,6 +14,7 @@ import {
   type OnboardingData,
   type OnboardingStepNumber,
 } from '../contracts/schemas/onboarding'
+import { getBillingStatus } from '../services/billing'
 
 const router = Router()
 
@@ -282,6 +283,14 @@ router.post('/complete', requireRole('owner'), async (req, res) => {
 
   if (missingSteps.length > 0) {
     return res.status(409).json({ error: 'Onboarding is incomplete', missingSteps })
+  }
+
+  // The subscription is the access grant for the merchant application. A
+  // successful browser callback alone is not enough; billing status has to be
+  // server-verified before onboarding can be completed.
+  const billing = await getBillingStatus(req.user!.tenantId)
+  if (!billing.hasSubscription || billing.entitlement !== 'active') {
+    return res.status(409).json({ error: 'An active subscription is required before opening the application', code: 'billing_required' })
   }
 
   const completedAt = tenant.onboarding_completed_at ?? new Date()

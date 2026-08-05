@@ -8,6 +8,7 @@ import express from 'express'
 import cors from 'cors'
 import routes from './routes'
 import { errorHandler } from './middleware/errorHandler'
+import { razorpayWebhookHandler } from './routes/razorpayWebhook'
 
 const app = express()
 
@@ -36,6 +37,13 @@ app.use(
 // (base64 inflates by ~4/3). The real limit that matters is enforced in
 // csv-parse.ts, which reports an over-sized file as such instead of the
 // body parser rejecting it as malformed JSON.
+// Razorpay signs the exact request bytes. This route must consume the raw
+// body before the application-wide JSON parser runs.
+app.post(
+  '/api/billing/razorpay/webhook',
+  express.raw({ type: 'application/json', limit: '1mb' }),
+  razorpayWebhookHandler,
+)
 app.use(express.json({ limit: '8mb' }))
 
 app.get('/health', (_req, res) => {

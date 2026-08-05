@@ -24,6 +24,8 @@ import reorderRouter from './reorder'
 import importRouter from './import'
 import reportsRouter from './reports'
 import emailRouter from './email'
+import billingRouter from './billing'
+import { requireSubscription } from '../middleware/requireSubscription'
 
 const router = Router()
 
@@ -39,29 +41,30 @@ router.use('/auth', authRouter)
 // authMiddleware (CR-01 fix): it verifies the operator token's tenant_id
 // claim against req.user.tenantId, so it depends on req.user already being
 // populated from a trusted source.
-router.use('/terminal/pin', authMiddleware, operatorContext, pinRouter)
-router.use('/members', authMiddleware, operatorContext, membersRouter)
-router.use('/products', authMiddleware, operatorContext, productsRouter)
-router.use('/categories', authMiddleware, operatorContext, categoriesRouter)
-router.use('/terminals', authMiddleware, operatorContext, terminalsRouter)
-router.use('/settings', authMiddleware, operatorContext, settingsRouter)
-router.use('/notifications', authMiddleware, operatorContext, notificationsRouter)
-router.use('/stock-movements', authMiddleware, operatorContext, stockMovementsRouter)
-router.use('/sales', authMiddleware, operatorContext, salesRouter)
-router.use('/returns', authMiddleware, operatorContext, returnsRouter)
-router.use('/customers', authMiddleware, operatorContext, customersRouter)
-router.use('/shifts', authMiddleware, operatorContext, shiftsRouter)
+router.use('/terminal/pin', authMiddleware, requireSubscription, operatorContext, pinRouter)
+router.use('/members', authMiddleware, requireSubscription, operatorContext, membersRouter)
+router.use('/products', authMiddleware, requireSubscription, operatorContext, productsRouter)
+router.use('/categories', authMiddleware, requireSubscription, operatorContext, categoriesRouter)
+router.use('/terminals', authMiddleware, requireSubscription, operatorContext, terminalsRouter)
+router.use('/settings', authMiddleware, requireSubscription, operatorContext, settingsRouter)
+router.use('/notifications', authMiddleware, requireSubscription, operatorContext, notificationsRouter)
+router.use('/stock-movements', authMiddleware, requireSubscription, operatorContext, stockMovementsRouter)
+router.use('/sales', authMiddleware, requireSubscription, operatorContext, salesRouter)
+router.use('/returns', authMiddleware, requireSubscription, operatorContext, returnsRouter)
+router.use('/customers', authMiddleware, requireSubscription, operatorContext, customersRouter)
+router.use('/shifts', authMiddleware, requireSubscription, operatorContext, shiftsRouter)
 router.use('/onboarding', authMiddleware, operatorContext, onboardingRouter)
+router.use('/billing', authMiddleware, operatorContext, billingRouter)
 // Context precedes read-model routers so the authenticated app shell can
 // establish its server-owned identity before record pages request data.
 router.use('/context', authMiddleware, operatorContext, contextRouter)
-router.use('/dashboard', authMiddleware, operatorContext, dashboardRouter)
-router.use('/suppliers', authMiddleware, operatorContext, suppliersRouter)
-router.use('/variants/:variantId/supplier-products', authMiddleware, operatorContext, supplierProductsRouter)
-router.use('/purchase-orders', authMiddleware, operatorContext, purchaseOrdersRouter)
-router.use('/reorder', authMiddleware, operatorContext, reorderRouter)
-router.use('/import', authMiddleware, operatorContext, importRouter)
-router.use('/reports', authMiddleware, operatorContext, reportsRouter)
-router.use('/email', authMiddleware, operatorContext, emailRouter)
+router.use('/dashboard', authMiddleware, requireSubscription, operatorContext, dashboardRouter)
+router.use('/suppliers', authMiddleware, requireSubscription, operatorContext, suppliersRouter)
+router.use('/variants/:variantId/supplier-products', authMiddleware, requireSubscription, operatorContext, supplierProductsRouter)
+router.use('/purchase-orders', authMiddleware, requireSubscription, operatorContext, purchaseOrdersRouter)
+router.use('/reorder', authMiddleware, requireSubscription, operatorContext, reorderRouter)
+router.use('/import', authMiddleware, requireSubscription, operatorContext, importRouter)
+router.use('/reports', authMiddleware, requireSubscription, operatorContext, reportsRouter)
+router.use('/email', authMiddleware, requireSubscription, operatorContext, emailRouter)
 
 export default router
