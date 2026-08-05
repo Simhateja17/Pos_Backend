@@ -289,9 +289,9 @@ function shellQuote(value: string): string {
 }
 
 function envCatalogLine(catalogJson: string): string {
-  // JSON.stringify gives dotenv a single double-quoted value while preserving
-  // the JSON text inside it, including any quotes in plan descriptions.
-  return `${ENV_CATALOG_KEY}=${JSON.stringify(catalogJson)}`
+  // Keep the JSON itself as the dotenv value. Wrapping JSON.stringify(catalogJson)
+  // here would leave literal backslashes in process.env, making JSON.parse fail.
+  return `${ENV_CATALOG_KEY}=${catalogJson}`
 }
 
 function updateEnvFile(envFile: string, catalogJson: string): void {

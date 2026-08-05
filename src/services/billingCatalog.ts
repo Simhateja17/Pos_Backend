@@ -115,7 +115,24 @@ function loadCatalog(): BillingPlanDefinition[] {
   try {
     parsed = JSON.parse(raw)
   } catch {
-    throw new Error('BILLING_PLAN_CATALOG_JSON is not valid JSON')
+    // Older versions of the provisioning script wrote JSON with literal
+    // backslashes into dotenv values (for example [{\"key\":\"starter\"}]).
+    // Accept that one legacy representation so a deployment can recover while
+    // the environment variable is replaced with the raw JSON form.
+    const unescaped = raw.replaceAll('\\"', '"')
+    if (unescaped === raw) throw new Error('BILLING_PLAN_CATALOG_JSON is not valid JSON')
+    try {
+      parsed = JSON.parse(unescaped)
+    } catch {
+      throw new Error('BILLING_PLAN_CATALOG_JSON is not valid JSON')
+    }
+  }
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      throw new Error('BILLING_PLAN_CATALOG_JSON is not valid JSON')
+    }
   }
   if (!Array.isArray(parsed) || !parsed.every(isPlan)) {
     throw new Error('BILLING_PLAN_CATALOG_JSON has an invalid plan shape')

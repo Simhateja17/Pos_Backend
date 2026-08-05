@@ -45,4 +45,10 @@ describe('subscription quote calculation', () => {
     expect(quote.totalAmountMinor).toBe(8_552)
     expect(quote.taxMode).toBe('exclusive')
   })
+
+  it('accepts the escaped dotenv representation emitted by the old plan script', () => {
+    process.env.BILLING_PLAN_CATALOG_JSON = '[{\\"key\\":\\"starter\\",\\"region\\":\\"IN\\",\\"currency\\":\\"INR\\",\\"name\\":\\"Starter\\",\\"description\\":\\"Test\\",\\"popular\\":false,\\"features\\":[],\\"monthly\\":{\\"amountMinor\\":99900},\\"annual\\":{\\"amountMinor\\":958800}}]'
+
+    expect(getPlan('IN', 'starter')?.key).toBe('starter')
+  })
 })

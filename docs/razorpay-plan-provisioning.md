@@ -17,6 +17,9 @@ secret. `--write-env` only updates the catalog line in the selected env file;
 when the backend is deployed with platform-managed environment variables, copy
 the printed `BILLING_PLAN_CATALOG_JSON` value into that platform instead.
 
+The environment value must be the raw JSON array beginning with `[` and ending
+with `]`; do not paste a JSON-stringified value containing literal `\\"` sequences.
+
 ## API contract used
 
 Razorpay's Plans API is `POST /v1/plans`. The request uses:
