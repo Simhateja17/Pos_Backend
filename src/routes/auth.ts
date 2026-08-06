@@ -10,6 +10,14 @@ import { clearAuthCookies, getAuthCookies, setAuthCookies } from '../lib/authCoo
 
 const router = Router()
 
+// Logs the local part length instead of the raw address so pm2 logs are
+// traceable ("who hit this route") without putting real emails in plaintext.
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@')
+  if (!domain) return '***'
+  return `${local.slice(0, 2)}***@${domain}`
+}
+
 // ADMIN client — service-role key, the highest-privilege credential in this
 // phase. Confined to exactly this file, and only used for
 // auth.admin.createUser/deleteUser (Supabase Auth account bootstrap during
@@ -44,11 +52,30 @@ router.post('/otp/request', async (req, res) => {
   }
 
   const { email, purpose } = parsed.data
+  console.log(`[auth:otp/request] purpose=${purpose} email=${maskEmail(email)}`)
 
-  await supabaseAnon.auth.signInWithOtp({
+  const { error } = await supabaseAnon.auth.signInWithOtp({
     email,
     options: { shouldCreateUser: purpose === 'signup' },
   })
+
+  if (error) {
+    console.log(`[auth:otp/request] Supabase signInWithOtp error status=${error.status} code=${(error as { code?: string }).code} message=${error.message}`)
+  } else {
+    console.log(`[auth:otp/request] Supabase signInWithOtp ok — code should be in-flight to the provider`)
+  }
+
+  // A 422 here is Supabase's "no account exists and shouldCreateUser is
+  // false" response — the expected, privacy-preserving outcome for a login
+  // attempt against an unregistered email. Masked as success so the
+  // response never reveals whether the address has an account. Anything
+  // else (5xx: SMTP/provider failure, etc.) is a real delivery failure and
+  // must be surfaced — silently reporting "sent" when nothing was sent
+  // just strands the caller waiting for a code that will never arrive.
+  if (error && error.status !== 422) {
+    console.log(`[auth:otp/request] returning 502 — real send failure, not the expected 422`)
+    return res.status(502).json({ error: 'Could not send the code. Please try again shortly.' })
+  }
 
   return res.status(200).json({ ok: true })
 })
@@ -97,6 +124,7 @@ router.post('/signup', async (req, res) => {
     pan,
     placeOfSupply,
   } = parsed.data
+  console.log(`[auth:signup] email=${maskEmail(email)} otpLength=${otp.length}`)
 
   // Verifying the OTP both confirms the caller owns this email address and
   // (shouldCreateUser: true was passed at /otp/request time) creates the
@@ -110,8 +138,10 @@ router.post('/signup', async (req, res) => {
   })
 
   if (verifyError || !verifyData?.user || !verifyData.session) {
+    console.log(`[auth:signup] verifyOtp failed status=${verifyError?.status} code=${(verifyError as { code?: string } | undefined)?.code} message=${verifyError?.message}`)
     return res.status(401).json({ error: 'Invalid or expired code' })
   }
+  console.log(`[auth:signup] verifyOtp ok userId=${verifyData.user.id}`)
 
   const newUser = verifyData.user
 
@@ -122,15 +152,18 @@ router.post('/signup', async (req, res) => {
   try {
     const existingClaims = decodeJwtPayload(verifyData.session.access_token)
     if (existingClaims.tenant_id) {
+      console.log(`[auth:signup] userId=${newUser.id} already has tenant_id claim — duplicate account, 409`)
       return res.status(409).json({
         error: 'An account already exists with this email. Log in instead',
       })
     }
-  } catch {
+  } catch (decodeError) {
+    console.log(`[auth:signup] decodeJwtPayload threw: ${decodeError instanceof Error ? decodeError.message : decodeError}`)
     return res.status(401).json({ error: 'Invalid or expired code' })
   }
 
   const tenantId = randomUUID()
+  console.log(`[auth:signup] userId=${newUser.id} creating tenant=${tenantId}`)
 
   try {
     const tenantScoped = forTenant(tenantId)
@@ -191,9 +224,11 @@ router.post('/signup', async (req, res) => {
     })
 
     if (refreshError || !refreshed?.session) {
+      console.log(`[auth:signup] tenant=${tenantId} created but refreshSession failed status=${refreshError?.status} message=${refreshError?.message}`)
       return res.status(500).json({ error: 'Account created but failed to start a session. Please log in.' })
     }
 
+    console.log(`[auth:signup] tenant=${tenantId} userId=${newUser.id} complete — 201`)
     setAuthCookies(res, refreshed.session.access_token, refreshed.session.refresh_token)
 
     return res.status(201).json({
@@ -208,14 +243,15 @@ router.post('/signup', async (req, res) => {
         refreshToken: refreshed.session.refresh_token,
       },
     })
-  } catch {
+  } catch (writeError) {
+    console.log(`[auth:signup] tenant=${tenantId} userId=${newUser.id} write step threw: ${writeError instanceof Error ? writeError.stack ?? writeError.message : writeError}`)
     // Partial-failure cleanup: an orphaned Supabase Auth user with no
     // tenant/staff row is worse than a failed signup — best-effort delete,
     // never let a cleanup failure mask the original 500.
     try {
       await supabaseAdmin.auth.admin.deleteUser(newUser.id)
-    } catch {
-      // best-effort only
+    } catch (cleanupError) {
+      console.log(`[auth:signup] cleanup deleteUser(${newUser.id}) also failed: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`)
     }
     return res.status(500).json({ error: 'Failed to create account. Please try again.' })
   }
@@ -237,12 +273,15 @@ router.post('/login', async (req, res) => {
   }
 
   const { email, otp } = parsed.data
+  console.log(`[auth:login] email=${maskEmail(email)} otpLength=${otp.length}`)
 
   const { data, error } = await supabaseAnon.auth.verifyOtp({ email, token: otp, type: 'email' })
 
   if (error || !data?.session || !data.user) {
+    console.log(`[auth:login] verifyOtp failed status=${error?.status} code=${(error as { code?: string } | undefined)?.code} message=${error?.message}`)
     return res.status(401).json({ error: 'Invalid or expired code' })
   }
+  console.log(`[auth:login] verifyOtp ok userId=${data.user.id}`)
 
   // Role/tenantId come from the JWT's custom claims (written server-side by
   // the Custom Access Token Hook), NOT a basePrisma DB lookup. A direct
@@ -255,7 +294,8 @@ router.post('/login', async (req, res) => {
   let claims: Record<string, unknown>
   try {
     claims = decodeJwtPayload(data.session.access_token)
-  } catch {
+  } catch (decodeError) {
+    console.log(`[auth:login] decodeJwtPayload threw: ${decodeError instanceof Error ? decodeError.message : decodeError}`)
     return res.status(401).json({ error: 'Invalid or expired code' })
   }
 
@@ -263,8 +303,10 @@ router.post('/login', async (req, res) => {
   const tenantId = claims.tenant_id as (string | undefined)
 
   if (!role || !tenantId) {
+    console.log(`[auth:login] userId=${data.user.id} missing role/tenant_id claim (role=${role} tenantId=${tenantId}) — no staff_members row?`)
     return res.status(401).json({ error: 'Invalid or expired code' })
   }
+  console.log(`[auth:login] userId=${data.user.id} role=${role} tenantId=${tenantId} — 200`)
 
   setAuthCookies(res, data.session.access_token, data.session.refresh_token)
 
