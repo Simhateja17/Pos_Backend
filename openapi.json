@@ -1702,6 +1702,26 @@
           },
           "createdAt": {
             "type": "string"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email"
+          },
+          "accessMode": {
+            "type": "string",
+            "enum": [
+              "account",
+              "pin"
+            ]
+          },
+          "pinConfigured": {
+            "type": "boolean"
+          },
+          "pinMustChange": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1711,6 +1731,33 @@
           "isActive",
           "createdAt"
         ]
+      },
+      "CreateStaffRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "manager",
+              "cashier"
+            ]
+          },
+          "temporaryPin": {
+            "type": "string",
+            "pattern": "^\\d{4}$"
+          }
+        },
+        "required": [
+          "name",
+          "role",
+          "temporaryPin"
+        ],
+        "additionalProperties": false
       },
       "InviteMemberRequest": {
         "type": "object",
@@ -1752,6 +1799,19 @@
         "required": [
           "role"
         ]
+      },
+      "ResetStaffPinRequest": {
+        "type": "object",
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^\\d{4}$"
+          }
+        },
+        "required": [
+          "pin"
+        ],
+        "additionalProperties": false
       },
       "Product": {
         "type": "object",
@@ -2175,11 +2235,15 @@
                   "manager",
                   "cashier"
                 ]
+              },
+              "mustChangePin": {
+                "type": "boolean"
               }
             },
             "required": [
               "id",
-              "role"
+              "role",
+              "mustChangePin"
             ]
           }
         },
@@ -2196,11 +2260,96 @@
           },
           "pin": {
             "type": "string"
+          },
+          "sessionType": {
+            "type": "string",
+            "enum": [
+              "register",
+              "approval"
+            ],
+            "default": "register"
           }
         },
         "required": [
           "staffId",
           "pin"
+        ]
+      },
+      "ChangeOperatorPinRequest": {
+        "type": "object",
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^\\d{4}$"
+          }
+        },
+        "required": [
+          "pin"
+        ]
+      },
+      "StaffSession": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "staffId": {
+            "type": "string"
+          },
+          "staffName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "terminalId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "terminalName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shiftId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "loggedInAt": {
+            "type": "string"
+          },
+          "loggedOutAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "logoutReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastSeenAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "staffId",
+          "staffName",
+          "terminalId",
+          "terminalName",
+          "shiftId",
+          "loggedInAt",
+          "loggedOutAt",
+          "logoutReason",
+          "lastSeenAt"
         ]
       },
       "Sale": {
@@ -2832,6 +2981,106 @@
           "closedAt"
         ]
       },
+      "CurrentShift": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Terminal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shift": {
+            "anyOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Shift"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "staffName": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "staffName"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "terminal",
+          "shift"
+        ]
+      },
+      "Terminal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "hasOpenShift": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "cashMode": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "none"
+            ]
+          },
+          "isPaired": {
+            "type": "boolean"
+          },
+          "isCurrentDevice": {
+            "type": "boolean"
+          },
+          "deviceLastSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "activeCashierName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "isActive",
+          "hasOpenShift",
+          "createdAt"
+        ]
+      },
       "OpenShiftRequest": {
         "type": "object",
         "properties": {
@@ -2843,11 +3092,7 @@
             "type": "string",
             "format": "uuid"
           }
-        },
-        "required": [
-          "startingCash",
-          "terminalId"
-        ]
+        }
       },
       "XReport": {
         "type": "object",
@@ -2923,34 +3168,6 @@
           "countedCash"
         ]
       },
-      "Terminal": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "isActive": {
-            "type": "boolean"
-          },
-          "hasOpenShift": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "isActive",
-          "hasOpenShift",
-          "createdAt"
-        ]
-      },
       "CreateTerminalRequest": {
         "type": "object",
         "properties": {
@@ -2958,6 +3175,14 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 60
+          },
+          "cashMode": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "none"
+            ],
+            "default": "cash"
           }
         },
         "required": [
@@ -2975,6 +3200,13 @@
           },
           "isActive": {
             "type": "boolean"
+          },
+          "cashMode": {
+            "type": "string",
+            "enum": [
+              "cash",
+              "none"
+            ]
           }
         },
         "additionalProperties": false
@@ -5369,6 +5601,36 @@
             "description": "Insufficient permissions"
           }
         }
+      },
+      "post": {
+        "description": "Create a local counter-only staff profile with a temporary four-digit PIN. Managers can create cashiers; owners can also create managers.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStaffRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Staff profile created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid staff details"
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          }
+        }
       }
     },
     "/members/invite": {
@@ -5460,6 +5722,49 @@
         "responses": {
           "200": {
             "description": "Member deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Member"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Member not found"
+          }
+        }
+      }
+    },
+    "/members/{memberId}/reset-pin": {
+      "post": {
+        "description": "Reset a local staff PIN and force a personal PIN change at the next login. Manager+.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "memberId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetStaffPinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PIN reset",
             "content": {
               "application/json": {
                 "schema": {
@@ -5769,6 +6074,91 @@
           },
           "401": {
             "description": "Incorrect PIN, locked out, or unauthenticated"
+          }
+        }
+      }
+    },
+    "/terminal/pin/change": {
+      "post": {
+        "description": "Change the currently PIN-authenticated cashier's personal PIN after a temporary PIN login.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeOperatorPinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PIN changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid PIN or operator session"
+          }
+        }
+      }
+    },
+    "/terminal/pin/logout": {
+      "post": {
+        "description": "End the current cashier session while keeping the organisation/device session connected.",
+        "responses": {
+          "200": {
+            "description": "Operator session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/terminal/pin/sessions": {
+      "get": {
+        "description": "Manager/owner audit list of cashier login/logout sessions.",
+        "responses": {
+          "200": {
+            "description": "Cashier sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StaffSession"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions"
           }
         }
       }
@@ -6246,6 +6636,23 @@
         }
       }
     },
+    "/shifts/current": {
+      "get": {
+        "description": "Read the open shift for this paired counter. The result is counter-scoped, not cashier-scoped, so a cashier handover continues the same drawer shift.",
+        "responses": {
+          "200": {
+            "description": "Current counter shift",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentShift"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/shifts/{shiftId}/x-report": {
       "get": {
         "description": "Live, non-resetting shift snapshot (D-15, CASH-02).",
@@ -6366,6 +6773,72 @@
           },
           "409": {
             "description": "A counter with that name already exists"
+          }
+        }
+      }
+    },
+    "/terminals/device": {
+      "get": {
+        "description": "Resolve the current browser/device pairing to a counter, if one exists.",
+        "responses": {
+          "200": {
+            "description": "Current counter pairing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "terminal": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Terminal"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "terminal"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/terminals/{terminalId}/pair": {
+      "post": {
+        "description": "Pair or reassign this browser/device to a counter. Manager/owner only.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "terminalId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device paired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Terminal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Counter not found"
+          },
+          "409": {
+            "description": "Counter is turned off"
           }
         }
       }

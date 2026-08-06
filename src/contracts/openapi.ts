@@ -11,8 +11,14 @@ import {
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi'
 import { z } from 'zod'
 import { SignupSchema, LoginSchema, OtpRequestSchema, AuthResponseSchema, SetPinSchema } from './schemas/auth'
-import { MemberSchema, InviteMemberSchema, UpdateMemberRoleSchema } from './schemas/member'
-import { PinSwitchSchema, PinSwitchResponseSchema } from './schemas/pin'
+import {
+  CreateStaffSchema,
+  InviteMemberSchema,
+  MemberSchema,
+  ResetStaffPinSchema,
+  UpdateMemberRoleSchema,
+} from './schemas/member'
+import { ChangeOperatorPinSchema, PinSwitchSchema, PinSwitchResponseSchema, StaffSessionSchema } from './schemas/pin'
 import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
 import { CreateSaleSchema, SaleSchema, SaleListQuerySchema, SaleListSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema } from './schemas/sale'
@@ -21,7 +27,15 @@ import { CustomerListQuerySchema, CustomerListSchema, CustomerSchema } from './s
 import { PaymentReadQuerySchema, PaymentReadSchema } from './schemas/payment'
 import { AppContextSchema } from './schemas/context'
 import { DashboardQuerySchema, DashboardSchema } from './schemas/dashboard'
-import { OpenShiftSchema, CloseShiftSchema, ShiftSchema, ShiftHistoryEntrySchema, XReportSchema, ZReportSchema } from './schemas/shift'
+import {
+  CloseShiftSchema,
+  CurrentShiftSchema,
+  OpenShiftSchema,
+  ShiftSchema,
+  ShiftHistoryEntrySchema,
+  XReportSchema,
+  ZReportSchema,
+} from './schemas/shift'
 import { TerminalSchema, CreateTerminalSchema, UpdateTerminalSchema } from './schemas/terminal'
 import {
   CompleteOnboardingSchema,
@@ -261,6 +275,18 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'post',
+  path: '/members',
+  description: 'Create a local counter-only staff profile with a temporary four-digit PIN. Managers can create cashiers; owners can also create managers.',
+  request: { body: { content: { 'application/json': { schema: CreateStaffSchema } } } },
+  responses: {
+    201: { description: 'Staff profile created', content: { 'application/json': { schema: MemberSchema } } },
+    400: { description: 'Invalid staff details' },
+    403: { description: 'Insufficient permissions' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
   path: '/members/invite',
   description: 'Invite a new staff member (manager or cashier) into the caller\'s tenant. Owner-only.',
   request: {
@@ -296,6 +322,21 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Member deactivated', content: { 'application/json': { schema: MemberSchema } } },
+    403: { description: 'Insufficient permissions' },
+    404: { description: 'Member not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/members/{memberId}/reset-pin',
+  description: 'Reset a local staff PIN and force a personal PIN change at the next login. Manager+.',
+  request: {
+    params: z.object({ memberId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: ResetStaffPinSchema } } },
+  },
+  responses: {
+    200: { description: 'PIN reset', content: { 'application/json': { schema: MemberSchema } } },
     403: { description: 'Insufficient permissions' },
     404: { description: 'Member not found' },
   },
@@ -405,6 +446,36 @@ registry.registerPath({
   responses: {
     200: { description: 'PIN-switch successful', content: { 'application/json': { schema: PinSwitchResponseSchema } } },
     401: { description: 'Incorrect PIN, locked out, or unauthenticated' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/terminal/pin/change',
+  description: 'Change the currently PIN-authenticated cashier\'s personal PIN after a temporary PIN login.',
+  request: { body: { content: { 'application/json': { schema: ChangeOperatorPinSchema } } } },
+  responses: {
+    200: { description: 'PIN changed', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+    400: { description: 'Invalid PIN or operator session' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/terminal/pin/logout',
+  description: 'End the current cashier session while keeping the organisation/device session connected.',
+  responses: {
+    200: { description: 'Operator session ended', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/terminal/pin/sessions',
+  description: 'Manager/owner audit list of cashier login/logout sessions.',
+  responses: {
+    200: { description: 'Cashier sessions', content: { 'application/json': { schema: z.array(StaffSessionSchema) } } },
+    403: { description: 'Insufficient permissions' },
   },
 })
 
@@ -527,6 +598,15 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: 'get',
+  path: '/shifts/current',
+  description: 'Read the open shift for this paired counter. The result is counter-scoped, not cashier-scoped, so a cashier handover continues the same drawer shift.',
+  responses: {
+    200: { description: 'Current counter shift', content: { 'application/json': { schema: CurrentShiftSchema } } },
+  },
+})
+
+registry.registerPath({
   method: 'post',
   path: '/shifts',
   description: 'Open a shift with a starting cash count on a named counter (D-14, 0034). One counter holds at most one open shift.',
@@ -574,6 +654,18 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: 'get',
+  path: '/terminals/device',
+  description: 'Resolve the current browser/device pairing to a counter, if one exists.',
+  responses: {
+    200: {
+      description: 'Current counter pairing',
+      content: { 'application/json': { schema: z.object({ terminal: z.union([TerminalSchema, z.null()]) }) } },
+    },
+  },
+})
+
+registry.registerPath({
   method: 'post',
   path: '/terminals',
   description: 'Create a counter. Names are unique per tenant case-insensitively. Requires manager or owner role.',
@@ -582,6 +674,18 @@ registry.registerPath({
     201: { description: 'Terminal created', content: { 'application/json': { schema: TerminalSchema } } },
     400: { description: 'Invalid request' },
     409: { description: 'A counter with that name already exists' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/terminals/{terminalId}/pair',
+  description: 'Pair or reassign this browser/device to a counter. Manager/owner only.',
+  request: { params: z.object({ terminalId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Device paired', content: { 'application/json': { schema: TerminalSchema } } },
+    404: { description: 'Counter not found' },
+    409: { description: 'Counter is turned off' },
   },
 })
 

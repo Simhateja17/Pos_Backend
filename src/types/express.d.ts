@@ -8,6 +8,8 @@ declare namespace Express {
     actingStaff?: {
       id: string
       role: 'owner' | 'manager' | 'cashier'
+      sessionId?: string
+      mustChangePin?: boolean
     }
   }
 }

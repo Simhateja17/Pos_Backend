@@ -9,6 +9,7 @@ import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { computeCheckout } from '../lib/money'
 import { findOrCreateCustomer, searchCustomers } from '../lib/customers'
 import { sendLoggedEmail } from '../services/email'
+import { findPairedTerminal } from '../lib/counterDevice'
 
 const router = Router()
 
@@ -136,6 +137,9 @@ router.post('/', async (req, res) => {
   const tenantId = req.user!.tenantId
 
   try {
+    const deviceClient = forTenant(tenantId) as any
+    const pairedTerminal = await findPairedTerminal(deviceClient, req)
+
     // OFFLINE-01 fast path. A retried or queue-redelivered sale must record
     // exactly once, so a client_sale_id we have already committed short-circuits
     // before any recompute or write. This is an optimisation and a nicety, NOT
@@ -163,6 +167,12 @@ router.post('/', async (req, res) => {
           status: 409,
           body: { error: 'This shift has already been closed and cannot accept new sales.' },
         }
+      }
+      if (req.actingStaff?.role === 'cashier' && !pairedTerminal) {
+        return { status: 409, body: { error: 'This device is not paired to a counter.' } }
+      }
+      if (pairedTerminal && shift.terminal_id && shift.terminal_id !== pairedTerminal.id) {
+        return { status: 409, body: { error: 'This sale belongs to a different counter.' } }
       }
 
       // CR-01 tenant-scoped lookup for every variantId referenced in the cart.

@@ -15,12 +15,18 @@ export const TerminalSchema = z
      */
     hasOpenShift: z.boolean(),
     createdAt: z.string(),
+    cashMode: z.enum(['cash', 'none']).optional(),
+    isPaired: z.boolean().optional(),
+    isCurrentDevice: z.boolean().optional(),
+    deviceLastSeenAt: z.string().nullable().optional(),
+    activeCashierName: z.string().nullable().optional(),
   })
   .openapi('Terminal')
 
 export const CreateTerminalSchema = z
   .object({
     name: z.string().trim().min(1).max(60),
+    cashMode: z.enum(['cash', 'none']).default('cash'),
   })
   .strict()
   .openapi('CreateTerminalRequest')
@@ -29,6 +35,7 @@ export const UpdateTerminalSchema = z
   .object({
     name: z.string().trim().min(1).max(60).optional(),
     isActive: z.boolean().optional(),
+    cashMode: z.enum(['cash', 'none']).optional(),
   })
   .strict()
   .openapi('UpdateTerminalRequest')

@@ -15,6 +15,10 @@ export const MemberSchema = z
     role: z.enum(['owner', 'manager', 'cashier']),
     isActive: z.boolean(),
     createdAt: z.string(),
+    email: z.string().email().nullable().optional(),
+    accessMode: z.enum(['account', 'pin']).optional(),
+    pinConfigured: z.boolean().optional(),
+    pinMustChange: z.boolean().optional(),
   })
   .openapi('Member')
 
@@ -37,6 +41,24 @@ export const UpdateMemberRoleSchema = z
   })
   .openapi('UpdateMemberRoleRequest')
 
+export const CreateStaffSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    role: z.enum(['manager', 'cashier']),
+    temporaryPin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
+  })
+  .strict()
+  .openapi('CreateStaffRequest')
+
+export const ResetStaffPinSchema = z
+  .object({
+    pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
+  })
+  .strict()
+  .openapi('ResetStaffPinRequest')
+
 export type Member = z.infer<typeof MemberSchema>
 export type InviteMemberInput = z.infer<typeof InviteMemberSchema>
 export type UpdateMemberRoleInput = z.infer<typeof UpdateMemberRoleSchema>
+export type CreateStaffInput = z.infer<typeof CreateStaffSchema>
+export type ResetStaffPinInput = z.infer<typeof ResetStaffPinSchema>

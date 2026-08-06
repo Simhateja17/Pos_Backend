@@ -1,6 +1,12 @@
 import { Router } from 'express'
 import { createClient } from '@supabase/supabase-js'
-import { InviteMemberSchema, UpdateMemberRoleSchema } from '../contracts/schemas/member'
+import bcrypt from 'bcrypt'
+import {
+  CreateStaffSchema,
+  InviteMemberSchema,
+  ResetStaffPinSchema,
+  UpdateMemberRoleSchema,
+} from '../contracts/schemas/member'
 import { requireRole } from '../middleware/requireRole'
 import { forTenant } from '../db/tenantClient'
 
@@ -21,18 +27,31 @@ type StaffRow = {
   role: string
   is_active: boolean
   created_at: Date
+  user_id?: string | null
+  email?: string | null
+  pin_hash?: string | null
+  pin_must_change?: boolean
 }
 
 // Maps snake_case DB fields to the camelCase MemberSchema response shape,
 // per this plan's <naming_convention>.
 function toMemberJson(row: StaffRow) {
-  return {
+  const member: Record<string, unknown> = {
     id: row.id,
     name: row.name,
     role: row.role,
     isActive: row.is_active,
     createdAt: row.created_at.toISOString(),
   }
+  if ('email' in row || 'user_id' in row) {
+    member.email = row.email ?? null
+    member.accessMode = row.user_id ? 'account' : 'pin'
+  }
+  if ('pin_hash' in row || 'pin_must_change' in row) {
+    member.pinConfigured = Boolean(row.pin_hash)
+    member.pinMustChange = Boolean(row.pin_must_change)
+  }
+  return member
 }
 
 /**
@@ -46,6 +65,45 @@ router.get('/', requireRole('manager'), async (req, res) => {
     orderBy: { created_at: 'asc' },
   })
   res.json(rows.map(toMemberJson))
+})
+
+/**
+ * POST / — create a counter-only staff profile. Cashiers do not need an
+ * email account: they are selected on the paired counter and authenticate
+ * with this four-digit PIN. A manager may create cashiers; only an owner may
+ * create another manager through this local-PIN path.
+ */
+router.post('/', requireRole('manager'), async (req, res) => {
+  const parsed = CreateStaffSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Enter a name, role, and a four-digit temporary PIN.' })
+  }
+
+  const actingRole = req.actingStaff?.role ?? req.user!.role
+  if (actingRole === 'manager' && parsed.data.role !== 'cashier') {
+    return res.status(403).json({ error: 'Managers can create cashier profiles only.' })
+  }
+
+  const client = forTenant(req.user!.tenantId) as any
+  const pinHash = await bcrypt.hash(parsed.data.temporaryPin, 12)
+
+  try {
+    const staff = await client.staff_members.create({
+      data: {
+        tenant_id: req.user!.tenantId,
+        user_id: null,
+        email: null,
+        name: parsed.data.name,
+        role: parsed.data.role,
+        pin_hash: pinHash,
+        pin_must_change: true,
+        is_active: true,
+      },
+    })
+    return res.status(201).json(toMemberJson(staff))
+  } catch {
+    return res.status(500).json({ error: 'Could not create staff profile' })
+  }
 })
 
 /**
@@ -85,6 +143,7 @@ router.post('/invite', requireRole('owner'), async (req, res) => {
       data: {
         tenant_id: tenantId,
         user_id: data.user.id,
+        email,
         name,
         role,
         is_active: true,
@@ -102,6 +161,43 @@ router.post('/invite', requireRole('owner'), async (req, res) => {
     }
     return res.status(500).json({ error: 'Could not create staff record' })
   }
+})
+
+/** Reset a local staff PIN. Resetting also requires the next login to choose
+ * a new personal PIN, so the temporary value is never a long-term secret. */
+router.post('/:memberId/reset-pin', requireRole('manager'), async (req, res) => {
+  const parsed = ResetStaffPinSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'PIN must be exactly 4 digits.' })
+  }
+
+  const client = forTenant(req.user!.tenantId) as any
+  const target = await client.staff_members.findFirst({ where: { id: req.params.memberId } })
+  if (!target) return res.status(404).json({ error: 'Member not found' })
+
+  const actingRole = req.actingStaff?.role ?? req.user!.role
+  if (actingRole === 'manager' && target.role !== 'cashier') {
+    return res.status(403).json({ error: 'Managers can reset cashier PINs only.' })
+  }
+
+  const updated = await client.staff_members.update({
+    where: { id: target.id },
+    data: {
+      pin_hash: await bcrypt.hash(parsed.data.pin, 12),
+      pin_must_change: true,
+      pin_attempts: 0,
+      pin_locked_until: null,
+    },
+  })
+
+  if (client.staff_sessions) {
+    await client.staff_sessions.updateMany({
+      where: { staff_id: target.id, logged_out_at: null },
+      data: { logged_out_at: new Date(), logout_reason: 'explicit' },
+    })
+  }
+
+  return res.json(toMemberJson(updated))
 })
 
 /**
@@ -184,6 +280,12 @@ router.delete('/:memberId', requireRole('owner'), async (req, res) => {
       where: { id: req.params.memberId },
       data: { is_active: false },
     })
+    if (client.staff_sessions) {
+      await client.staff_sessions.updateMany({
+        where: { staff_id: target.id, logged_out_at: null },
+        data: { logged_out_at: new Date(), logout_reason: 'explicit' },
+      })
+    }
     return res.status(200).json(toMemberJson(staff))
   } catch {
     return res.status(404).json({ error: 'Member not found' })

@@ -378,7 +378,7 @@ router.post('/set-pin', authMiddleware, async (req, res) => {
   // constraint that doesn't exist.
   const updated = await client.staff_members.updateMany({
     where: { user_id: req.user!.id },
-    data: { pin_hash: pinHash, pin_attempts: 0, pin_locked_until: null },
+    data: { pin_hash: pinHash, pin_must_change: false, pin_attempts: 0, pin_locked_until: null },
   })
 
   if (updated.count === 0) {

@@ -1,13 +1,14 @@
 import { z } from 'zod'
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
+import { TerminalSchema } from './terminal'
 
 extendZodWithOpenApi(z)
 
 export const OpenShiftSchema = z
   .object({
-    startingCash: z.string().regex(/^\d+\.\d{2}$/),
+    startingCash: z.string().regex(/^\d+\.\d{2}$/).optional(),
     /** Which counter this drawer belongs to (0034). */
-    terminalId: z.string().uuid(),
+    terminalId: z.string().uuid().optional(),
   })
   .openapi('OpenShiftRequest')
 
@@ -40,6 +41,13 @@ export const ShiftHistoryEntrySchema = ShiftSchema.extend({
   staffName: z.string().nullable(),
   terminalName: z.string().nullable(),
 }).openapi('ShiftHistoryEntry')
+
+export const CurrentShiftSchema = z
+  .object({
+    terminal: z.union([TerminalSchema, z.null()]),
+    shift: z.union([ShiftSchema.extend({ staffName: z.string().nullable() }), z.null()]),
+  })
+  .openapi('CurrentShift')
 
 export const XReportSchema = z
   .object({

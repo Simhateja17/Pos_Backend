@@ -1,28 +1,50 @@
 import { Router } from 'express'
-import { forTenant } from '../db/tenantClient'
+import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
 import { CreateTerminalSchema, UpdateTerminalSchema } from '../contracts/schemas/terminal'
+import {
+  createCounterDeviceToken,
+  findPairedTerminal,
+  getCounterDeviceToken,
+  hashCounterDeviceToken,
+  setCounterDeviceCookie,
+} from '../lib/counterDevice'
 
 const router = Router()
 
-function toTerminalJson(row: any, hasOpenShift: boolean) {
+function toTerminalJson(row: any, hasOpenShift: boolean, currentDeviceHash?: string, activeCashierName?: string | null) {
   return {
     id: row.id,
     name: row.name,
     isActive: row.is_active,
     hasOpenShift,
     createdAt: row.created_at.toISOString(),
+    cashMode: row.cash_mode === 'none' ? 'none' : 'cash',
+    isPaired: Boolean(row.device_token_hash),
+    isCurrentDevice: Boolean(currentDeviceHash && row.device_token_hash === currentDeviceHash),
+    deviceLastSeenAt: row.device_last_seen_at ? row.device_last_seen_at.toISOString() : null,
+    activeCashierName: activeCashierName ?? null,
   }
 }
 
-async function listWithOpenShifts(client: any) {
-  const terminals = await client.terminals.findMany({ orderBy: [{ name: 'asc' }] })
-  const openShifts = await client.shifts.findMany({
-    where: { closed_at: null },
-    select: { terminal_id: true },
-  })
+async function listWithOpenShifts(client: any, currentDeviceHash?: string) {
+  const [terminals, openShifts, activeSessions, staff] = await Promise.all([
+    client.terminals.findMany({ orderBy: [{ name: 'asc' }] }),
+    client.shifts.findMany({ where: { closed_at: null }, select: { terminal_id: true } }),
+    client.staff_sessions.findMany({ where: { logged_out_at: null }, select: { terminal_id: true, staff_id: true } }),
+    client.staff_members.findMany({ select: { id: true, name: true } }),
+  ])
   const busy = new Set(openShifts.map((row: any) => row.terminal_id).filter(Boolean))
-  return terminals.map((row: any) => toTerminalJson(row, busy.has(row.id)))
+  const staffNames = new Map<string, string>(staff.map((row: any) => [row.id, row.name] as [string, string]))
+  const activeCashiers = new Map<string, string>()
+  activeSessions.forEach((row: any) => {
+    if (row.terminal_id && !activeCashiers.has(row.terminal_id)) {
+      activeCashiers.set(row.terminal_id, staffNames.get(row.staff_id) ?? 'Active operator')
+    }
+  })
+  return terminals.map((row: any) =>
+    toTerminalJson(row, busy.has(row.id), currentDeviceHash, activeCashiers.get(row.id) ?? null),
+  )
 }
 
 /**
@@ -32,7 +54,28 @@ async function listWithOpenShifts(client: any) {
  */
 router.get('/', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
-  return res.json(await listWithOpenShifts(client))
+  const token = getCounterDeviceToken(req)
+  return res.json(await listWithOpenShifts(client, token ? hashCounterDeviceToken(token) : undefined))
+})
+
+/** Resolve the counter represented by this browser/device cookie. */
+router.get('/device', async (req, res) => {
+  const client = forTenant(req.user!.tenantId) as any
+  const terminal = await findPairedTerminal(client, req)
+  if (!terminal) return res.json({ terminal: null })
+
+  const openShift = await client.shifts.findFirst({
+    where: { terminal_id: terminal.id, closed_at: null },
+    select: { id: true },
+  })
+  return res.json({
+    terminal: toTerminalJson(
+      terminal,
+      Boolean(openShift),
+      terminal.device_token_hash,
+      null,
+    ),
+  })
 })
 
 router.post('/', requireRole('manager'), async (req, res) => {
@@ -44,7 +87,11 @@ router.post('/', requireRole('manager'), async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   try {
     const created = await client.terminals.create({
-      data: { tenant_id: req.user!.tenantId, name: parsed.data.name },
+      data: {
+        tenant_id: req.user!.tenantId,
+        name: parsed.data.name,
+        cash_mode: parsed.data.cashMode,
+      },
     })
     return res.status(201).json(toTerminalJson(created, false))
   } catch (err: any) {
@@ -53,6 +100,63 @@ router.post('/', requireRole('manager'), async (req, res) => {
     }
     return res.status(500).json({ error: 'Could not create that counter' })
   }
+})
+
+/**
+ * Pair this browser/device to a logical counter. Pairing is deliberately
+ * replaceable: the owner/manager can move the same browser to another
+ * counter, or pair a replacement browser to the counter after a failure.
+ */
+router.post('/:terminalId/pair', requireRole('manager'), async (req, res) => {
+  const client = forTenant(req.user!.tenantId) as any
+  const target = await client.terminals.findFirst({ where: { id: req.params.terminalId } })
+  if (!target) return res.status(404).json({ error: 'Counter not found' })
+  if (!target.is_active) return res.status(409).json({ error: 'Turn that counter on before pairing a device.' })
+
+  const oldToken = getCounterDeviceToken(req)
+  const newToken = createCounterDeviceToken()
+  const newHash = hashCounterDeviceToken(newToken)
+
+  const paired = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+    const oldTerminal = oldToken
+      ? await tx.terminals.findFirst({
+          where: { device_token_hash: hashCounterDeviceToken(oldToken) },
+          select: { id: true },
+        })
+      : null
+    const affectedTerminalIds = [target.id]
+    if (oldTerminal && oldTerminal.id !== target.id) affectedTerminalIds.push(oldTerminal.id)
+
+    // Re-pairing is an explicit counter/device handover. Any operator who
+    // was active on either side of that handover must log in again, otherwise
+    // a stale tab could carry the previous cashier onto the new counter.
+    await tx.staff_sessions.updateMany({
+      where: { terminal_id: { in: affectedTerminalIds }, logged_out_at: null },
+      data: { logged_out_at: new Date(), logout_reason: 'interrupted', last_seen_at: new Date() },
+    })
+
+    if (oldToken) {
+      await tx.terminals.updateMany({
+        where: { device_token_hash: hashCounterDeviceToken(oldToken) },
+        data: { device_token_hash: null, device_paired_at: null },
+      })
+    }
+    return tx.terminals.update({
+      where: { id: target.id },
+      data: {
+        device_token_hash: newHash,
+        device_paired_at: new Date(),
+        device_last_seen_at: new Date(),
+      },
+    })
+  })
+
+  setCounterDeviceCookie(res, newToken)
+  const openShift = await client.shifts.findFirst({
+    where: { terminal_id: paired.id, closed_at: null },
+    select: { id: true },
+  })
+  return res.json(toTerminalJson(paired, Boolean(openShift), newHash, null))
 })
 
 router.patch('/:terminalId', requireRole('manager'), async (req, res) => {
@@ -87,13 +191,17 @@ router.patch('/:terminalId', requireRole('manager'), async (req, res) => {
       data: {
         ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
         ...(parsed.data.isActive !== undefined ? { is_active: parsed.data.isActive } : {}),
+        ...(parsed.data.cashMode !== undefined ? { cash_mode: parsed.data.cashMode } : {}),
       },
     })
     const openShift = await client.shifts.findFirst({
       where: { terminal_id: updated.id, closed_at: null },
       select: { id: true },
     })
-    return res.json(toTerminalJson(updated, Boolean(openShift)))
+    const token = getCounterDeviceToken(req)
+    return res.json(
+      toTerminalJson(updated, Boolean(openShift), token ? hashCounterDeviceToken(token) : undefined, null),
+    )
   } catch (err: any) {
     if (err.code === 'P2002') {
       return res.status(409).json({ error: 'You already have a counter with that name' })

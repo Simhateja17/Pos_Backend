@@ -7,6 +7,8 @@ type StaffRole = 'owner' | 'manager' | 'cashier'
 export interface OperatorClaims {
   id: string
   role: StaffRole
+  sessionId?: string
+  mustChangePin?: boolean
 }
 
 export type ValidatePinResult =
@@ -70,7 +72,12 @@ export async function validatePin(
     data: { pin_attempts: 0, pin_locked_until: null },
   })
 
-  return { ok: true, staff: { id: staff.id, role: staff.role as StaffRole } }
+  const claims: OperatorClaims = { id: staff.id, role: staff.role as StaffRole }
+  // Keeping this conditional preserves compatibility with pre-0037 test
+  // doubles and, more importantly, makes the claim explicit only for rows
+  // that have the new migration column.
+  if ('pin_must_change' in staff) claims.mustChangePin = Boolean(staff.pin_must_change)
+  return { ok: true, staff: claims }
 }
 
 /**
@@ -86,8 +93,11 @@ export async function validatePin(
  * exception that accidentally propagates trust.
  */
 export function signOperatorToken(staff: OperatorClaims, tenantId: string): string {
+  const payload: Record<string, unknown> = { id: staff.id, role: staff.role, tenant_id: tenantId }
+  if (staff.sessionId) payload.session_id = staff.sessionId
+  if (staff.mustChangePin !== undefined) payload.must_change_pin = staff.mustChangePin
   return jwt.sign(
-    { id: staff.id, role: staff.role, tenant_id: tenantId },
+    payload,
     process.env.SUPABASE_JWT_SECRET as string,
     { expiresIn: OPERATOR_TOKEN_EXPIRY },
   )
@@ -113,7 +123,14 @@ export function verifyOperatorToken(
     ) {
       return null
     }
-    return { id: decoded.id, role: decoded.role as StaffRole, tenantId: decoded.tenant_id }
+    const claims: OperatorClaims & { tenantId: string } = {
+      id: decoded.id,
+      role: decoded.role as StaffRole,
+      tenantId: decoded.tenant_id,
+    }
+    if (typeof decoded.session_id === 'string') claims.sessionId = decoded.session_id
+    if (typeof decoded.must_change_pin === 'boolean') claims.mustChangePin = decoded.must_change_pin
+    return claims
   } catch {
     return null
   }

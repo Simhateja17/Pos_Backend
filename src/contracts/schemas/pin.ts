@@ -10,6 +10,9 @@ export const PinSwitchSchema = z
   .object({
     staffId: z.string(),
     pin: z.string(),
+    /** Approval tokens are one-sale sessions and must not interrupt the
+     * cashier currently operating the counter. */
+    sessionType: z.enum(['register', 'approval']).default('register'),
   })
   .openapi('PinSwitchRequest')
 
@@ -19,9 +22,31 @@ export const PinSwitchResponseSchema = z
     staff: z.object({
       id: z.string(),
       role: z.enum(['owner', 'manager', 'cashier']),
+      mustChangePin: z.boolean(),
     }),
   })
   .openapi('PinSwitchResponse')
+
+export const ChangeOperatorPinSchema = z
+  .object({
+    pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
+  })
+  .openapi('ChangeOperatorPinRequest')
+
+export const StaffSessionSchema = z
+  .object({
+    id: z.string(),
+    staffId: z.string(),
+    staffName: z.string().nullable(),
+    terminalId: z.string().nullable(),
+    terminalName: z.string().nullable(),
+    shiftId: z.string().nullable(),
+    loggedInAt: z.string(),
+    loggedOutAt: z.string().nullable(),
+    logoutReason: z.string().nullable(),
+    lastSeenAt: z.string(),
+  })
+  .openapi('StaffSession')
 
 export type PinSwitchInput = z.infer<typeof PinSwitchSchema>
 export type PinSwitchResponse = z.infer<typeof PinSwitchResponseSchema>

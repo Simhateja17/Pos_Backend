@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { OpenShiftSchema, CloseShiftSchema } from '../contracts/schemas/shift'
 import { forTenant } from '../db/tenantClient'
+import { findPairedTerminal } from '../lib/counterDevice'
 
 const router = Router()
 
@@ -31,6 +32,39 @@ function toShiftJson(row: any) {
 
 function sumBy<T>(rows: T[], fn: (row: T) => Prisma.Decimal): Prisma.Decimal {
   return rows.reduce((acc, row) => acc.plus(fn(row)), ZERO)
+}
+
+async function resolveRequestTerminal(client: any, req: import('express').Request, requestedId?: string) {
+  const paired = await findPairedTerminal(client, req)
+  if (paired) {
+    if (requestedId && requestedId !== paired.id) {
+      return { terminal: null, error: `This device is paired to ${paired.name}.` }
+    }
+    return { terminal: paired, error: null }
+  }
+
+  // A cashier PIN session is only valid on a paired counter. Owners/managers
+  // may still use the explicit id during first-time setup, before pairing a
+  // browser from Settings.
+  if (req.actingStaff?.role === 'cashier' && !requestedId) {
+    return { terminal: null, error: 'Pair this device to a counter before opening a shift.' }
+  }
+  if (!requestedId) return { terminal: null, error: 'Pair this device to a counter before opening a shift.' }
+  return { terminal: await client.terminals.findFirst({ where: { id: requestedId } }), error: null }
+}
+
+function toTerminalContextJson(row: any, hasOpenShift: boolean) {
+  return {
+    id: row.id,
+    name: row.name,
+    isActive: row.is_active,
+    hasOpenShift,
+    createdAt: row.created_at.toISOString(),
+    cashMode: row.cash_mode === 'none' ? 'none' : 'cash',
+    isPaired: Boolean(row.device_token_hash),
+    isCurrentDevice: true,
+    deviceLastSeenAt: row.device_last_seen_at ? row.device_last_seen_at.toISOString() : null,
+  }
 }
 
 /**
@@ -101,6 +135,25 @@ router.get('/', async (req, res) => {
   )
 })
 
+/** The one shift that belongs to this paired counter, irrespective of which
+ * cashier most recently entered their PIN. */
+router.get('/current', async (req, res) => {
+  const client = forTenant(req.user!.tenantId) as any
+  const { terminal } = await resolveRequestTerminal(client, req)
+  if (!terminal) return res.json({ terminal: null, shift: null })
+
+  const shift = await client.shifts.findFirst({
+    where: { terminal_id: terminal.id, closed_at: null },
+  })
+  const staff = shift
+    ? await client.staff_members.findFirst({ where: { id: shift.staff_id }, select: { name: true } })
+    : null
+  return res.json({
+    terminal: toTerminalContextJson(terminal, Boolean(shift)),
+    shift: shift ? { ...toShiftJson(shift), staffName: staff?.name ?? null } : null,
+  })
+})
+
 /**
  * POST / — open a shift with a starting cash count (D-14). The shift row is
  * durable (survives terminal reload), not client-only state (D-13).
@@ -122,8 +175,9 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Could not resolve the acting staff member' })
   }
 
-  // RLS-scoped, so a terminal id from another tenant simply is not found.
-  const terminal = await client.terminals.findFirst({ where: { id: parsed.data.terminalId } })
+  const resolved = await resolveRequestTerminal(client, req, parsed.data.terminalId)
+  if (resolved.error) return res.status(409).json({ error: resolved.error })
+  const terminal = resolved.terminal
   if (!terminal) {
     return res.status(404).json({ error: 'Counter not found' })
   }
@@ -140,10 +194,17 @@ router.post('/', async (req, res) => {
       select: { name: true },
     })
     return res.status(409).json({
+      code: 'SHIFT_ALREADY_OPEN',
       error: holder?.name
         ? `${terminal.name} already has a shift open, run by ${holder.name}. Close it before opening another.`
         : `${terminal.name} already has a shift open. Close it before opening another.`,
+      shift: toShiftJson(openOnTerminal),
     })
+  }
+
+  const startingCash = terminal.cash_mode === 'none' ? '0.00' : parsed.data.startingCash
+  if (terminal.cash_mode === 'cash' && !startingCash) {
+    return res.status(400).json({ error: 'Enter the opening cash in this counter.' })
   }
 
   try {
@@ -152,9 +213,15 @@ router.post('/', async (req, res) => {
         tenant_id: req.user!.tenantId,
         staff_id: staffId,
         terminal_id: terminal.id,
-        starting_cash: parsed.data.startingCash,
+        starting_cash: startingCash,
       },
     })
+    if (req.actingStaff?.sessionId) {
+      await client.staff_sessions.updateMany({
+        where: { id: req.actingStaff.sessionId, logged_out_at: null },
+        data: { shift_id: shift.id, last_seen_at: new Date() },
+      })
+    }
     return res.status(201).json(toShiftJson(shift))
   } catch (err: any) {
     // The partial unique index caught a race the check above could not.
