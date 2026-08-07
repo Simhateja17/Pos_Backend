@@ -17,7 +17,7 @@ const supabase = createClient(
 
 /**
  * Decodes the (already-verified-by-Supabase) JWT payload to read the custom
- * `role`/`tenant_id` claims written by the Custom Access Token Hook
+ * `staff_role`/`tenant_id` claims written by the Custom Access Token Hook
  * (01-RESEARCH.md Pattern 2). Supabase's Custom Access Token Hook writes
  * these as TOP-LEVEL claims, not nested under app_metadata/user_metadata,
  * so a base64 decode of the payload segment is required — `getUser()`'s
@@ -34,6 +34,29 @@ export function decodeJwtPayload(token: string): Record<string, unknown> {
   }
   const json = Buffer.from(segments[1], 'base64url').toString('utf8')
   return JSON.parse(json)
+}
+
+export type StaffRole = 'owner' | 'manager' | 'cashier'
+
+const STAFF_ROLES = new Set<StaffRole>(['owner', 'manager', 'cashier'])
+
+/**
+ * Reads Couture's application role without repurposing Supabase's reserved
+ * `role` claim. New tokens use `staff_role`; the `role` fallback keeps tokens
+ * minted by the previous hook valid until they naturally refresh.
+ */
+export function getStaffRoleClaim(claims: Record<string, unknown>): StaffRole | undefined {
+  const staffRole = claims.staff_role
+  if (typeof staffRole === 'string' && STAFF_ROLES.has(staffRole as StaffRole)) {
+    return staffRole as StaffRole
+  }
+
+  const legacyRole = claims.role
+  if (typeof legacyRole === 'string' && STAFF_ROLES.has(legacyRole as StaffRole)) {
+    return legacyRole as StaffRole
+  }
+
+  return undefined
 }
 
 /**
@@ -76,7 +99,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
-  const role = claims.role as ('owner' | 'manager' | 'cashier' | undefined)
+  const role = getStaffRoleClaim(claims)
   const tenantId = claims.tenant_id as (string | undefined)
 
   if (!role || !tenantId) {

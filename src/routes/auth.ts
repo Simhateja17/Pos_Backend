@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcrypt'
 import { SignupSchema, LoginSchema, OtpRequestSchema, SetPinSchema } from '../contracts/schemas/auth'
 import { STARTER_CATEGORIES } from '../contracts/schemas/category'
-import { authMiddleware, decodeJwtPayload } from '../middleware/auth'
+import { authMiddleware, decodeJwtPayload, getStaffRoleClaim } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
 import { clearAuthCookies, getAuthCookies, setAuthCookies } from '../lib/authCookies'
 
@@ -299,7 +299,7 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid or expired code' })
   }
 
-  const role = claims.role as ('owner' | 'manager' | 'cashier' | undefined)
+  const role = getStaffRoleClaim(claims)
   const tenantId = claims.tenant_id as (string | undefined)
 
   if (!role || !tenantId) {

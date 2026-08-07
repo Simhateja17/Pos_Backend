@@ -6,15 +6,13 @@ process.env.SUPABASE_URL = 'http://localhost:54321'
 process.env.SUPABASE_ANON_KEY = 'anon-key'
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
 
-// auth.ts instantiates two Supabase clients at module load: an admin client
-// (service-role key, used only for auth.admin.createUser/deleteUser) and an
-// anon-key client (used for auth.signInWithPassword on both signup's
-// session-minting step and login). Mock createClient to hand back a distinct
-// mock object depending on which key it was called with, so tests can assert
-// on admin-only vs anon-only behavior independently.
+// auth.ts instantiates separate admin and anon-key clients at module load.
 const createUserMock = vi.fn()
 const deleteUserMock = vi.fn()
-const signInWithPasswordMock = vi.fn()
+const signInWithOtpMock = vi.fn()
+const verifyOtpMock = vi.fn()
+const refreshSessionMock = vi.fn()
+const setSessionMock = vi.fn()
 // authMiddleware (src/middleware/auth.ts) also calls createClient(anon key)
 // and then supabase.auth.getUser(token) — same mock covers both this file's
 // routes and the authMiddleware it now imports for POST /set-pin.
@@ -25,7 +23,15 @@ vi.mock('@supabase/supabase-js', () => ({
     if (key === 'service-role-key') {
       return { auth: { admin: { createUser: createUserMock, deleteUser: deleteUserMock } } }
     }
-    return { auth: { signInWithPassword: signInWithPasswordMock, getUser: getUserMock } }
+    return {
+      auth: {
+        signInWithOtp: signInWithOtpMock,
+        verifyOtp: verifyOtpMock,
+        refreshSession: refreshSessionMock,
+        setSession: setSessionMock,
+        getUser: getUserMock,
+      },
+    }
   }),
 }))
 
@@ -78,7 +84,7 @@ function fakeJwt(claims: Record<string, unknown>): string {
 function validSignupBody() {
   return {
     email: 'owner@example.com',
-    password: 'supersecret123',
+    otp: '123456',
     ownerName: 'Jane Owner',
     businessName: 'Jane\'s Boutique',
     addressLine1: '123 Main St',
@@ -95,7 +101,10 @@ describe('POST /auth/signup and /auth/login', () => {
     vi.resetModules()
     createUserMock.mockReset()
     deleteUserMock.mockReset()
-    signInWithPasswordMock.mockReset()
+    signInWithOtpMock.mockReset()
+    verifyOtpMock.mockReset()
+    refreshSessionMock.mockReset()
+    setSessionMock.mockReset()
     tenantsCreateMock.mockReset()
     staffMembersCreateMock.mockReset()
     staffMembersFindFirstMock.mockReset()
@@ -122,8 +131,14 @@ describe('POST /auth/signup and /auth/login', () => {
   }
 
   it('Test 1: valid signup creates a Supabase Auth user, a tenants row, and an owner staff_members row, returning 201 with { user, session }', async () => {
-    createUserMock.mockResolvedValue({
-      data: { user: { id: 'user-1', email: 'owner@example.com' } },
+    verifyOtpMock.mockResolvedValue({
+      data: {
+        user: { id: 'user-1', email: 'owner@example.com' },
+        session: {
+          access_token: fakeJwt({ role: 'authenticated', sub: 'user-1' }),
+          refresh_token: 'temporary-refresh-token',
+        },
+      },
       error: null,
     })
     // Signup generates the new tenant's id up front (randomUUID()) and uses it
@@ -138,10 +153,12 @@ describe('POST /auth/signup and /auth/login', () => {
       user_id: 'user-1',
       role: 'owner',
     })
-    signInWithPasswordMock.mockResolvedValue({
+    refreshSessionMock.mockResolvedValue({
       data: {
-        user: { id: 'user-1', email: 'owner@example.com' },
-        session: { access_token: 'access-token-1', refresh_token: 'refresh-token-1' },
+        session: {
+          access_token: fakeJwt({ role: 'authenticated', staff_role: 'owner', tenant_id: 'tenant-1' }),
+          refresh_token: 'refresh-token-1',
+        },
       },
       error: null,
     })
@@ -157,12 +174,11 @@ describe('POST /auth/signup and /auth/login', () => {
       tenantId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     })
     expect(res.body.session).toEqual({
-      accessToken: 'access-token-1',
+      accessToken: expect.any(String),
       refreshToken: 'refresh-token-1',
     })
-    expect(createUserMock).toHaveBeenCalledWith(
-      expect.objectContaining({ email: 'owner@example.com', password: 'supersecret123' }),
-    )
+    expect(verifyOtpMock).toHaveBeenCalledWith({ email: 'owner@example.com', token: '123456', type: 'email' })
+    expect(refreshSessionMock).toHaveBeenCalledWith({ refresh_token: 'temporary-refresh-token' })
     expect(tenantsCreateMock).toHaveBeenCalled()
     expect(staffMembersCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -175,10 +191,16 @@ describe('POST /auth/signup and /auth/login', () => {
     )
   })
 
-  it('Test 2: signup with an email that already has a Supabase Auth account returns 409 with the UI-SPEC-exact copy', async () => {
-    createUserMock.mockResolvedValue({
-      data: { user: null },
-      error: { status: 422, code: 'email_exists', message: 'A user with this email address has already been registered' },
+  it('Test 2: signup OTP for an existing tenant member returns 409 with the UI-SPEC-exact copy', async () => {
+    verifyOtpMock.mockResolvedValue({
+      data: {
+        user: { id: 'user-1', email: 'owner@example.com' },
+        session: {
+          access_token: fakeJwt({ role: 'authenticated', staff_role: 'owner', tenant_id: 'tenant-existing' }),
+          refresh_token: 'refresh-token-existing',
+        },
+      },
+      error: null,
     })
 
     const app = await buildApp()
@@ -192,8 +214,8 @@ describe('POST /auth/signup and /auth/login', () => {
   })
 
   it('Test 3a: login with valid credentials returns 200 with { user: { role, tenantId, ... }, session }', async () => {
-    const accessToken = fakeJwt({ role: 'owner', tenant_id: 'tenant-1', sub: 'user-1' })
-    signInWithPasswordMock.mockResolvedValue({
+    const accessToken = fakeJwt({ role: 'authenticated', staff_role: 'owner', tenant_id: 'tenant-1', sub: 'user-1' })
+    verifyOtpMock.mockResolvedValue({
       data: {
         user: { id: 'user-1', email: 'owner@example.com' },
         session: { access_token: accessToken, refresh_token: 'refresh-token-2' },
@@ -204,7 +226,7 @@ describe('POST /auth/signup and /auth/login', () => {
     const app = await buildApp()
     const res = await request(app)
       .post('/auth/login')
-      .send({ email: 'owner@example.com', password: 'supersecret123' })
+      .send({ email: 'owner@example.com', otp: '123456' })
 
     expect(res.status).toBe(200)
     expect(res.body.user).toEqual({
@@ -221,19 +243,37 @@ describe('POST /auth/signup and /auth/login', () => {
   })
 
   it('Test 3b: login with invalid credentials returns 401 { error: "Invalid email or password" }', async () => {
-    signInWithPasswordMock.mockResolvedValue({
+    verifyOtpMock.mockResolvedValue({
       data: { user: null, session: null },
-      error: { message: 'Invalid login credentials' },
+      error: { message: 'Token has expired or is invalid' },
     })
 
     const app = await buildApp()
     const res = await request(app)
       .post('/auth/login')
-      .send({ email: 'owner@example.com', password: 'wrong-password' })
+      .send({ email: 'owner@example.com', otp: '000000' })
 
     expect(res.status).toBe(401)
-    expect(res.body).toEqual({ error: 'Invalid email or password' })
+    expect(res.body).toEqual({ error: 'Invalid or expired code' })
     expect(staffMembersFindFirstMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['login', false],
+    ['signup', true],
+  ] as const)('OTP purpose=%s sets shouldCreateUser=%s', async (purpose, shouldCreateUser) => {
+    signInWithOtpMock.mockResolvedValue({ data: {}, error: null })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/auth/otp/request')
+      .send({ email: 'owner@example.com', purpose })
+
+    expect(res.status).toBe(200)
+    expect(signInWithOtpMock).toHaveBeenCalledWith({
+      email: 'owner@example.com',
+      options: { shouldCreateUser },
+    })
   })
 })
 

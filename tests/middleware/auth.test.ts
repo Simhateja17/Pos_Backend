@@ -52,6 +52,22 @@ describe('authMiddleware', () => {
     expect(res.body.user).toEqual({ id: 'user-123', role: 'manager', tenantId: 'tenant-abc' })
   })
 
+  it('uses Couture staff_role while preserving Supabase role=authenticated', async () => {
+    const token = fakeJwt({
+      sub: 'user-123',
+      role: 'authenticated',
+      staff_role: 'manager',
+      tenant_id: 'tenant-abc',
+    })
+    getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
+
+    const app = await buildApp()
+    const res = await request(app).get('/whoami').set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.user).toEqual({ id: 'user-123', role: 'manager', tenantId: 'tenant-abc' })
+  })
+
   it('Test 2a: missing Authorization header returns 401 and does not run the route', async () => {
     const app = await buildApp()
     const res = await request(app).get('/whoami')
@@ -88,6 +104,17 @@ describe('authMiddleware', () => {
 
   it('responds 403 when JWT has no role/tenant_id claims (no staff_members row yet)', async () => {
     const token = fakeJwt({ sub: 'user-123' })
+    getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
+
+    const app = await buildApp()
+    const res = await request(app).get('/whoami').set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(403)
+    expect(res.body).toEqual({ error: 'No tenant membership found' })
+  })
+
+  it('does not treat Supabase role=authenticated as a Couture staff role', async () => {
+    const token = fakeJwt({ sub: 'user-123', role: 'authenticated', tenant_id: 'tenant-abc' })
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
 
     const app = await buildApp()
