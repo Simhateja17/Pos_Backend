@@ -8,6 +8,7 @@ process.env.SUPABASE_ANON_KEY = 'anon-key'
 const getUserMock = vi.fn()
 const tenantsFindFirstMock = vi.fn()
 const staffFindFirstMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 const customersFindManyMock = vi.fn()
 const customersCountMock = vi.fn()
 const salesFindManyMock = vi.fn()
@@ -24,7 +25,10 @@ vi.mock('@supabase/supabase-js', () => ({
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
     tenants: { findFirst: tenantsFindFirstMock },
-    staff_members: { findFirst: staffFindFirstMock },
+    staff_members: {
+      findFirst: (args: { where?: { role?: string } }) =>
+        args.where?.role ? membershipFindFirstMock(args) : staffFindFirstMock(args),
+    },
     customers: { findMany: customersFindManyMock, count: customersCountMock },
     sales: { findMany: salesFindManyMock, count: salesCountMock },
     sale_line_items: { findMany: linesFindManyMock },
@@ -60,6 +64,7 @@ describe('context and tenant record read routes', () => {
     getUserMock.mockReset().mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
     tenantsFindFirstMock.mockReset()
     staffFindFirstMock.mockReset()
+    membershipFindFirstMock.mockReset().mockResolvedValue({ role: 'owner', tenant_id: 'tenant-real' })
     customersFindManyMock.mockReset().mockResolvedValue([])
     customersCountMock.mockReset().mockResolvedValue(0)
     salesFindManyMock.mockReset().mockResolvedValue([])

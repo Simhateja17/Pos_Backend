@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 
 export class RazorpayConfigurationError extends Error {
   status = 503
+  readonly expose = true
   constructor(message = 'Razorpay billing is not configured for this environment') {
     super(message)
     this.name = 'RazorpayConfigurationError'

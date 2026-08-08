@@ -23,7 +23,7 @@ describe('subscription quote calculation', () => {
 
     const plan = getPlan('IN', 'growth')!
     const quote = calculateQuote(plan, 'monthly')
-    expect(quote.baseAmountMinor).toBe(169_907)
+    expect(quote.baseAmountMinor).toBe(169_407)
     expect(quote.taxAmountMinor).toBe(30_493)
     expect(quote.totalAmountMinor).toBe(199_900)
     expect(quote.taxMode).toBe('included')

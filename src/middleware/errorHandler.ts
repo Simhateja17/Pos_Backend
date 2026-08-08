@@ -1,7 +1,9 @@
 import type { NextFunction, Request, Response } from 'express'
+import { randomUUID } from 'node:crypto'
 
 interface HttpError extends Error {
   status?: number
+  expose?: boolean
 }
 
 /**
@@ -12,8 +14,13 @@ interface HttpError extends Error {
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(err: HttpError, req: Request, res: Response, next: NextFunction) {
+  const requestId = randomUUID()
   // eslint-disable-next-line no-console
-  console.error(err)
+  console.error(`[request:${requestId}]`, err)
   const status = err.status ?? 500
-  res.status(status).json({ error: err.message ?? 'Internal server error' })
+  const exposeMessage = status < 500 || err.expose === true
+  res.status(status).json({
+    error: exposeMessage ? err.message ?? 'Request failed' : 'Internal server error',
+    requestId,
+  })
 }

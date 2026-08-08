@@ -12,11 +12,23 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: vi.fn(() => ({ auth: { getUser: getUserMock } })),
 }))
 
+vi.mock('../../src/services/billing', () => ({
+  getBillingStatus: vi.fn(async () => ({
+    hasSubscription: true,
+    entitlement: 'active',
+    accessAllowed: true,
+    graceUntil: null,
+    subscription: null,
+  })),
+}))
+
 const tenantsFindFirstMock = vi.fn()
 const tenantsUpdateMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
+    staff_members: { findFirst: membershipFindFirstMock },
     tenants: {
       findFirst: tenantsFindFirstMock,
       update: tenantsUpdateMock,
@@ -143,6 +155,10 @@ describe('onboarding routes', () => {
     getUserMock.mockReset()
     tenantsFindFirstMock.mockReset()
     tenantsUpdateMock.mockReset()
+    membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
+      role: where.role,
+      tenant_id: 'tenant-real',
+    }))
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
   })
 
@@ -174,9 +190,13 @@ describe('onboarding routes', () => {
     expect(first.body.data['1'].trialPlan).toBe('growth')
 
     const { forTenant } = await import('../../src/db/tenantClient')
-    expect(forTenant).toHaveBeenCalledTimes(2)
+    // authMiddleware verifies the live membership before the route reads the
+    // tenant draft, so each request enters the tenant client twice.
+    expect(forTenant).toHaveBeenCalledTimes(4)
     expect(forTenant).toHaveBeenNthCalledWith(1, 'tenant-real')
     expect(forTenant).toHaveBeenNthCalledWith(2, 'tenant-real')
+    expect(forTenant).toHaveBeenNthCalledWith(3, 'tenant-real')
+    expect(forTenant).toHaveBeenNthCalledWith(4, 'tenant-real')
   })
 
   it('lets an owner save the next strict step and derives progress from persisted data', async () => {

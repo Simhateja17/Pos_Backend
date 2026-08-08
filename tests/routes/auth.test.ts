@@ -9,6 +9,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
 // auth.ts instantiates separate admin and anon-key clients at module load.
 const createUserMock = vi.fn()
 const deleteUserMock = vi.fn()
+const adminSignOutMock = vi.fn()
 const signInWithOtpMock = vi.fn()
 const verifyOtpMock = vi.fn()
 const refreshSessionMock = vi.fn()
@@ -21,7 +22,7 @@ const getUserMock = vi.fn()
 vi.mock('@supabase/supabase-js', () => ({
   createClient: vi.fn((_url: string, key: string) => {
     if (key === 'service-role-key') {
-      return { auth: { admin: { createUser: createUserMock, deleteUser: deleteUserMock } } }
+      return { auth: { admin: { createUser: createUserMock, deleteUser: deleteUserMock, signOut: adminSignOutMock } } }
     }
     return {
       auth: {
@@ -38,11 +39,12 @@ vi.mock('@supabase/supabase-js', () => ({
 const tenantsCreateMock = vi.fn()
 const staffMembersCreateMock = vi.fn()
 const staffMembersUpdateManyMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 // 0033: set-pin reads the row first to detect first-time activation.
 // Defaults to an existing staff row with no PIN yet set — the common case
 // these tests exercise — individual tests override when they need to.
-const staffMembersFindFirstTenantScopedMock = vi.fn(async () => ({
-  id: 'staff-1', name: 'Test Staff', pin_hash: null as string | null,
+const staffMembersFindFirstTenantScopedMock = vi.fn(async (): Promise<any> => ({
+  id: 'staff-1', name: 'Test Staff', role: 'manager', tenant_id: 'tenant-1', is_active: true, pin_hash: null as string | null,
 }))
 // Signup now seeds a starter category list (0032's "no categories yet" fix).
 const categoriesCreateMock = vi.fn(async () => ({ id: 'category-1' }))
@@ -55,7 +57,9 @@ vi.mock('../../src/db/tenantClient', () => ({
     staff_members: {
       create: staffMembersCreateMock,
       updateMany: staffMembersUpdateManyMock,
-      findFirst: staffMembersFindFirstTenantScopedMock,
+      findFirst: (args: any) => args?.where?.role && args?.where?.is_active
+        ? membershipFindFirstMock(args)
+        : staffMembersFindFirstTenantScopedMock(),
     },
     categories: { create: categoriesCreateMock },
     notifications: { create: notificationsCreateMock },
@@ -101,6 +105,7 @@ describe('POST /auth/signup and /auth/login', () => {
     vi.resetModules()
     createUserMock.mockReset()
     deleteUserMock.mockReset()
+    adminSignOutMock.mockReset()
     signInWithOtpMock.mockReset()
     verifyOtpMock.mockReset()
     refreshSessionMock.mockReset()
@@ -108,6 +113,9 @@ describe('POST /auth/signup and /auth/login', () => {
     tenantsCreateMock.mockReset()
     staffMembersCreateMock.mockReset()
     staffMembersFindFirstMock.mockReset()
+    membershipFindFirstMock.mockReset().mockResolvedValue({
+      role: 'manager', tenant_id: 'tenant-1', is_active: true,
+    })
     staffMembersUpdateManyMock.mockReset()
     getUserMock.mockReset()
   })
@@ -281,6 +289,9 @@ describe('POST /auth/set-pin', () => {
   beforeEach(() => {
     vi.resetModules()
     getUserMock.mockReset()
+    membershipFindFirstMock.mockReset().mockResolvedValue({
+      role: 'manager', tenant_id: 'tenant-1', is_active: true,
+    })
     staffMembersUpdateManyMock.mockReset()
     staffMembersFindFirstTenantScopedMock.mockClear()
     notificationsCreateMock.mockClear()
@@ -386,5 +397,29 @@ describe('POST /auth/set-pin', () => {
     expect(staffMembersUpdateManyMock).toHaveBeenCalledWith(
       expect.objectContaining({ where: { user_id: 'user-1' } }),
     )
+  })
+})
+
+describe('POST /auth/logout', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    adminSignOutMock.mockReset().mockResolvedValue({ error: null })
+  })
+
+  it('revokes the provider session before clearing the local cookies', async () => {
+    const { default: authRouter } = await import('../../src/routes/auth')
+    const app = express()
+    app.use(express.json())
+    app.use('/auth', authRouter)
+
+    const response = await request(app)
+      .post('/auth/logout')
+      .set('Cookie', ['couture_access_token=access-token'])
+
+    expect(response.status).toBe(204)
+    expect(adminSignOutMock).toHaveBeenCalledWith('access-token', 'global')
+    expect(response.headers['set-cookie']).toEqual(expect.arrayContaining([
+      expect.stringContaining('couture_access_token='),
+    ]))
   })
 })

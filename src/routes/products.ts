@@ -238,7 +238,10 @@ router.post('/', async (req, res) => {
           : 'A variant with that SKU already exists',
       })
     }
-    return res.status(err.status ?? 500).json({ error: err.message ?? 'Could not create product' })
+    const status = Number.isInteger(err?.status) ? err.status : 500
+    return res.status(status).json({
+      error: status >= 500 ? 'Could not create product' : err.message ?? 'Could not create product',
+    })
   }
 })
 

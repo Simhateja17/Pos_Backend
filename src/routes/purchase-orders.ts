@@ -136,7 +136,10 @@ router.post('/', async (req, res) => {
 
     return res.status(201).json(toPurchaseOrderJson(po))
   } catch (err: any) {
-    return res.status(err.status ?? 500).json({ error: err.message ?? 'Could not create purchase order' })
+    const status = Number.isInteger(err?.status) ? err.status : 500
+    return res.status(status).json({
+      error: status >= 500 ? 'Could not create purchase order' : err.message ?? 'Could not create purchase order',
+    })
   }
 })
 
@@ -282,7 +285,10 @@ router.post('/:poId/receive', async (req, res) => {
     if (err.code === 'P2002') {
       return res.status(409).json({ error: 'This receipt has already been recorded' })
     }
-    return res.status(err.status ?? 500).json({ error: err.message ?? 'Could not record this receipt' })
+    const status = Number.isInteger(err?.status) ? err.status : 500
+    return res.status(status).json({
+      error: status >= 500 ? 'Could not record this receipt' : err.message ?? 'Could not record this receipt',
+    })
   }
 })
 

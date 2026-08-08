@@ -25,6 +25,8 @@ import {
 const OPEN_STATUSES = ['created', 'authenticated', 'active', 'pending', 'halted']
 
 export class BillingHttpError extends Error {
+  public readonly expose = true
+
   constructor(public readonly status: number, message: string) {
     super(message)
     this.name = 'BillingHttpError'

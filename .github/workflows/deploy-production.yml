@@ -29,8 +29,33 @@ jobs:
       - name: Build backend
         run: npm run build
 
-  deploy:
+  migrate:
     needs: verify
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      RLS_DATABASE_URL: ${{ secrets.RLS_DATABASE_URL }}
+    steps:
+      - name: Check out backend
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Apply checked-in Supabase migrations
+        run: npm exec --yes supabase@latest -- db push --db-url "$DATABASE_URL" --include-all
+
+      - name: Verify production schema and runtime identity
+        run: npm run db:verify-production
+
+  deploy:
+    needs: migrate
     runs-on: ubuntu-latest
     env:
       VM_HOST: ${{ secrets.AZURE_VM_HOST }}

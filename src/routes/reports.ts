@@ -88,7 +88,7 @@ type BuildArgs = {
   includeImported: boolean
 }
 
-async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable> {
+export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable> {
   const meta = CATALOG.find((entry) => entry.kind === args.kind)!
   const base: Omit<ReportTable, 'columns' | 'rows' | 'totals' | 'unavailable'> = {
     id: args.kind,
@@ -151,7 +151,10 @@ async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable> {
     case 'sales-by-product':
     case 'sales-by-category': {
       const byCategory = args.kind === 'sales-by-category'
-      const label = byCategory ? `coalesce(p.category, 'Uncategorised')` : 'p.name'
+      // `products.category` was removed by migration 0032. Categories are
+      // tenant-owned rows now, so resolve the display name through the
+      // category relation and keep products without a category visible.
+      const label = byCategory ? `coalesce(c.name, 'Uncategorised')` : 'p.name'
       const extra = byCategory ? '' : ', v.sku'
       const rows = await tx.$queryRawUnsafe(
         `select ${label} as label${extra},
@@ -162,6 +165,7 @@ async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable> {
          join sales s on s.id = l.sale_id
          join variants v on v.id = l.variant_id
          join products p on p.id = v.product_id
+         left join categories c on c.id = p.category_id and c.tenant_id = p.tenant_id
          where s.tenant_id = $4::uuid and ${window} ${sourceFilter}
          group by 1${byCategory ? '' : ', v.sku'} order by 3 desc limit 500`,
         args.from,

@@ -16,6 +16,7 @@ vi.mock('@supabase/supabase-js', () => ({
 const stockMovementsCreateMock = vi.fn()
 const stockMovementsFindManyMock = vi.fn()
 const staffMembersFindFirstMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 const variantsFindFirstMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
@@ -25,7 +26,8 @@ vi.mock('../../src/db/tenantClient', () => ({
       findMany: stockMovementsFindManyMock,
     },
     staff_members: {
-      findFirst: staffMembersFindFirstMock,
+      findFirst: (args: { where?: { role?: string } }) =>
+        args.where?.role ? membershipFindFirstMock(args) : staffMembersFindFirstMock(args),
     },
     variants: {
       findFirst: variantsFindFirstMock,
@@ -49,6 +51,10 @@ describe('stock-movements routes (INV-01)', () => {
     stockMovementsCreateMock.mockReset()
     stockMovementsFindManyMock.mockReset()
     staffMembersFindFirstMock.mockReset()
+    membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
+      role: where.role,
+      tenant_id: 'tenant-abc',
+    }))
     variantsFindFirstMock.mockReset()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
     staffMembersFindFirstMock.mockResolvedValue({ id: 'staff-1' })

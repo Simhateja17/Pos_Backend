@@ -229,6 +229,7 @@ router.post('/signup', async (req, res) => {
     }
 
     console.log(`[auth:signup] tenant=${tenantId} userId=${newUser.id} complete — 201`)
+    res.set('Cache-Control', 'no-store')
     setAuthCookies(res, refreshed.session.access_token, refreshed.session.refresh_token)
 
     return res.status(201).json({
@@ -308,6 +309,7 @@ router.post('/login', async (req, res) => {
   }
   console.log(`[auth:login] userId=${data.user.id} role=${role} tenantId=${tenantId} — 200`)
 
+  res.set('Cache-Control', 'no-store')
   setAuthCookies(res, data.session.access_token, data.session.refresh_token)
 
   return res.status(200).json({
@@ -324,7 +326,22 @@ router.post('/login', async (req, res) => {
   })
 })
 
-router.post('/logout', (_req, res) => {
+router.post('/logout', async (req, res) => {
+  const { accessToken } = getAuthCookies(req)
+  const bearerToken = req.headers.authorization?.startsWith('Bearer ')
+    ? req.headers.authorization.slice('Bearer '.length).trim()
+    : undefined
+  const token = bearerToken ?? accessToken
+
+  if (token) {
+    const { error } = await supabaseAdmin.auth.admin.signOut(token, 'global')
+    if (error) {
+      console.error('[auth:logout] Supabase session revocation failed', error)
+      clearAuthCookies(res)
+      return res.status(503).json({ error: 'Could not end the secure session. Please try again.' })
+    }
+  }
+
   clearAuthCookies(res)
   return res.status(204).send()
 })

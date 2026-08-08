@@ -14,9 +14,11 @@ vi.mock('@supabase/supabase-js', () => ({
 const variantsFindManyMock = vi.fn()
 const variantStockLevelsFindManyMock = vi.fn()
 const productsFindManyMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
+    staff_members: { findFirst: membershipFindFirstMock },
     variants: { findMany: variantsFindManyMock },
     variant_stock_levels: { findMany: variantStockLevelsFindManyMock },
     products: { findMany: productsFindManyMock },
@@ -39,6 +41,10 @@ describe('GET /stock-movements/low-stock (INV-03)', () => {
     variantsFindManyMock.mockReset()
     variantStockLevelsFindManyMock.mockReset()
     productsFindManyMock.mockReset()
+    membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
+      role: where.role,
+      tenant_id: 'tenant-abc',
+    }))
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
     productsFindManyMock.mockResolvedValue([{ id: 'product-1', name: 'Blue Dress' }])
   })

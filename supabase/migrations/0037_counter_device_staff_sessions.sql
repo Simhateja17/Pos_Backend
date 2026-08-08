@@ -51,6 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_staff_sessions_terminal_active
 
 ALTER TABLE public.staff_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS tenant_isolation_staff_sessions ON public.staff_sessions;
 CREATE POLICY tenant_isolation_staff_sessions ON public.staff_sessions
   FOR ALL
   USING (tenant_id = current_setting('app.tenant_id', true)::uuid)

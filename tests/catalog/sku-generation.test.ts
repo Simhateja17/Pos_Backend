@@ -19,9 +19,11 @@ const variantsFindFirstMock = vi.fn()
 const categoriesFindManyMock = vi.fn(async () => [])
 const categoriesFindFirstMock = vi.fn(async () => null)
 const categoriesCreateMock = vi.fn(async () => ({ id: 'category-1' }))
+const membershipFindFirstMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
+    staff_members: { findFirst: membershipFindFirstMock },
     products: {
       create: productsCreateMock,
     },
@@ -67,6 +69,10 @@ describe('products routes — SKU generation/override (CATALOG-02)', () => {
     variantsCreateMock.mockReset()
     variantsFindFirstMock.mockReset()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
+    membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
+      role: where.role,
+      tenant_id: 'tenant-abc',
+    }))
     variantsFindFirstMock.mockResolvedValue(null) // no SKU collision by default
   })
 

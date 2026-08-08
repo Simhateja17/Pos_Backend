@@ -5,10 +5,17 @@ import request from 'supertest'
 // Mock @supabase/supabase-js BEFORE importing the module under test, since
 // auth.ts instantiates createClient() at module load time.
 const getUserMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     auth: { getUser: getUserMock },
   }),
+}))
+
+vi.mock('../../src/db/tenantClient', () => ({
+  forTenant: vi.fn(() => ({
+    staff_members: { findFirst: membershipFindFirstMock },
+  })),
 }))
 
 // Build a syntactically valid (but unsigned/fake) JWT string: header.payload.signature.
@@ -26,6 +33,12 @@ describe('authMiddleware', () => {
   beforeEach(() => {
     vi.resetModules()
     getUserMock.mockReset()
+    membershipFindFirstMock.mockReset()
+    membershipFindFirstMock.mockImplementation(({ where }: { where: { role: string; user_id: string } }) => ({
+      role: where.role,
+      tenant_id: 'tenant-abc',
+      user_id: where.user_id,
+    }))
   })
 
   async function buildApp() {
@@ -116,6 +129,18 @@ describe('authMiddleware', () => {
   it('does not treat Supabase role=authenticated as a Couture staff role', async () => {
     const token = fakeJwt({ sub: 'user-123', role: 'authenticated', tenant_id: 'tenant-abc' })
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
+
+    const app = await buildApp()
+    const res = await request(app).get('/whoami').set('Authorization', `Bearer ${token}`)
+
+    expect(res.status).toBe(403)
+    expect(res.body).toEqual({ error: 'No tenant membership found' })
+  })
+
+  it('rejects a previously issued token after the current membership no longer matches its role', async () => {
+    const token = fakeJwt({ sub: 'user-123', role: 'owner', tenant_id: 'tenant-abc' })
+    getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
+    membershipFindFirstMock.mockResolvedValue(null)
 
     const app = await buildApp()
     const res = await request(app).get('/whoami').set('Authorization', `Bearer ${token}`)

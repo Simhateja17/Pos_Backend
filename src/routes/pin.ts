@@ -5,8 +5,12 @@ import { ChangeOperatorPinSchema, PinSwitchSchema } from '../contracts/schemas/p
 import { requireRole } from '../middleware/requireRole'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { findPairedTerminal } from '../lib/counterDevice'
+import { consumeRateLimit } from '../lib/rateLimit'
 
 const router = Router()
+const PIN_SWITCH_WINDOW_MS = 15 * 60 * 1000
+const PIN_SWITCH_TARGET_LIMIT = 10
+const PIN_SWITCH_ACTOR_LIMIT = 30
 
 /**
  * POST /switch — PIN-switch the acting operator on a shared terminal.
@@ -29,6 +33,22 @@ router.post('/switch', async (req, res) => {
   }
 
   const { staffId, pin, sessionType } = parsed.data
+  const targetLimit = consumeRateLimit(
+    `pin-switch-target:${req.user.tenantId}:${staffId}`,
+    PIN_SWITCH_TARGET_LIMIT,
+    PIN_SWITCH_WINDOW_MS,
+  )
+  const actorLimit = consumeRateLimit(
+    `pin-switch-actor:${req.user.tenantId}:${req.user.id}:${req.ip}`,
+    PIN_SWITCH_ACTOR_LIMIT,
+    PIN_SWITCH_WINDOW_MS,
+  )
+  if (!targetLimit.allowed || !actorLimit.allowed) {
+    const retryAfter = Math.max(targetLimit.retryAfterSeconds, actorLimit.retryAfterSeconds)
+    res.set('Retry-After', String(retryAfter))
+    return res.status(429).json({ error: 'Too many PIN attempts. Please try again later.' })
+  }
+
   const client = forTenant(req.user.tenantId) as any
   const terminal = await findPairedTerminal(client, req)
 

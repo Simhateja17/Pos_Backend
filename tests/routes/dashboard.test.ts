@@ -12,6 +12,7 @@ const shiftsFindFirstMock = vi.fn()
 const variantsFindManyMock = vi.fn()
 const stockLevelsFindManyMock = vi.fn()
 const productsFindManyMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: vi.fn(() => ({ auth: { getUser: getUserMock } })),
@@ -19,6 +20,7 @@ vi.mock('@supabase/supabase-js', () => ({
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
+    staff_members: { findFirst: membershipFindFirstMock },
     sales: { findMany: salesFindManyMock },
     sale_line_items: { findMany: saleLineItemsFindManyMock },
     shifts: { findFirst: shiftsFindFirstMock },
@@ -55,6 +57,10 @@ describe('dashboard route', () => {
     variantsFindManyMock.mockReset().mockResolvedValue([])
     stockLevelsFindManyMock.mockReset().mockResolvedValue([])
     productsFindManyMock.mockReset().mockResolvedValue([])
+    membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
+      role: where.role,
+      tenant_id: '11111111-1111-4111-8111-111111111111',
+    }))
   })
 
   it('rejects unauthenticated dashboard reads', async () => {

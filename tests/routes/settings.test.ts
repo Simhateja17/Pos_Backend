@@ -14,9 +14,11 @@ vi.mock('@supabase/supabase-js', () => ({
 
 const tenantsFindFirstMock = vi.fn()
 const tenantsUpdateMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
+    staff_members: { findFirst: membershipFindFirstMock },
     tenants: { findFirst: tenantsFindFirstMock, update: tenantsUpdateMock },
   })),
 }))
@@ -60,6 +62,10 @@ describe('settings routes', () => {
     getUserMock.mockReset()
     tenantsFindFirstMock.mockReset()
     tenantsUpdateMock.mockReset()
+    membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
+      role: where.role,
+      tenant_id: 'tenant-real',
+    }))
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
   })
 

@@ -30,6 +30,7 @@ const staffMembersFindManyMock = vi.fn()
 const staffMembersCreateMock = vi.fn()
 const staffMembersUpdateMock = vi.fn()
 const staffMembersFindFirstMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 const staffMembersCountMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
@@ -38,7 +39,8 @@ vi.mock('../../src/db/tenantClient', () => ({
       findMany: staffMembersFindManyMock,
       create: staffMembersCreateMock,
       update: staffMembersUpdateMock,
-      findFirst: staffMembersFindFirstMock,
+      findFirst: (args: { where?: { role?: string } }) =>
+        args.where?.role ? membershipFindFirstMock(args) : staffMembersFindFirstMock(args),
       count: staffMembersCountMock,
     },
   })),
@@ -67,6 +69,10 @@ describe('members routes', () => {
     staffMembersCreateMock.mockReset()
     staffMembersUpdateMock.mockReset()
     staffMembersFindFirstMock.mockReset()
+    membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
+      role: where.role,
+      tenant_id: 'tenant-abc',
+    }))
     staffMembersCountMock.mockReset()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
   })

@@ -14,9 +14,11 @@ vi.mock('@supabase/supabase-js', () => ({
 const variantsFindFirstMock = vi.fn()
 const variantsUpdateMock = vi.fn()
 const variantStockLevelsFindFirstMock = vi.fn()
+const membershipFindFirstMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
+    staff_members: { findFirst: membershipFindFirstMock },
     variants: {
       findFirst: variantsFindFirstMock,
       update: variantsUpdateMock,
@@ -57,6 +59,10 @@ describe('products routes — variant identity lock (CATALOG-01/D-04)', () => {
     variantsUpdateMock.mockReset()
     variantStockLevelsFindFirstMock.mockReset()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
+    membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
+      role: where.role,
+      tenant_id: 'tenant-abc',
+    }))
   })
 
   async function buildApp() {

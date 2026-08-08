@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
-import { forTenant } from '../db/tenantClient'
+import { forTenantTransaction } from '../db/tenantClient'
 
 type StaffRole = 'owner' | 'manager' | 'cashier'
 
@@ -39,45 +39,59 @@ export async function validatePin(
   staffId: string,
   pin: string,
 ): Promise<ValidatePinResult> {
-  const client = forTenant(tenantId)
-  const staff = await (client as any).staff_members.findFirst({
-    where: { id: staffId, is_active: true },
-  })
+  // The read, bcrypt comparison, and counter update must share one row lock.
+  // Otherwise concurrent requests can all read the same pin_attempts value and
+  // overwrite one another's increments, defeating the five-attempt lockout.
+  return forTenantTransaction(tenantId, async (tx) => {
+    const rows = await tx.$queryRaw<Array<{
+      id: string
+      role: string
+      pin_hash: string | null
+      pin_attempts: number | null
+      pin_locked_until: Date | null
+      pin_must_change: boolean | null
+    }>>`
+      SELECT id, role, pin_hash, pin_attempts, pin_locked_until, pin_must_change
+      FROM public.staff_members
+      WHERE id = ${staffId}::uuid
+        AND tenant_id = ${tenantId}::uuid
+        AND is_active = true
+      FOR UPDATE
+    `
+    const staff = rows[0]
 
-  if (!staff || !staff.pin_hash) {
-    return { ok: false, reason: 'not_found' }
-  }
-
-  if (staff.pin_locked_until && new Date(staff.pin_locked_until).getTime() > Date.now()) {
-    return { ok: false, reason: 'locked' }
-  }
-
-  const matches = await bcrypt.compare(pin, staff.pin_hash)
-
-  if (!matches) {
-    const nextAttempts = (staff.pin_attempts ?? 0) + 1
-    const data: { pin_attempts: number; pin_locked_until?: Date } = { pin_attempts: nextAttempts }
-    if (nextAttempts >= LOCKOUT_THRESHOLD) {
-      data.pin_locked_until = new Date(Date.now() + LOCKOUT_DURATION_MS)
+    if (!staff || !staff.pin_hash) {
+      return { ok: false, reason: 'not_found' }
     }
-    await (client as any).staff_members.update({
-      where: { id: staffId },
-      data,
+
+    if (staff.pin_locked_until && new Date(staff.pin_locked_until).getTime() > Date.now()) {
+      return { ok: false, reason: 'locked' }
+    }
+
+    const matches = await bcrypt.compare(pin, staff.pin_hash)
+
+    if (!matches) {
+      const nextAttempts = (staff.pin_attempts ?? 0) + 1
+      const data: { pin_attempts: number; pin_locked_until?: Date } = { pin_attempts: nextAttempts }
+      if (nextAttempts >= LOCKOUT_THRESHOLD) {
+        data.pin_locked_until = new Date(Date.now() + LOCKOUT_DURATION_MS)
+      }
+      await tx.staff_members.update({
+        where: { id: staff.id },
+        data,
+      })
+      return { ok: false, reason: 'incorrect' }
+    }
+
+    await tx.staff_members.update({
+      where: { id: staff.id },
+      data: { pin_attempts: 0, pin_locked_until: null },
     })
-    return { ok: false, reason: 'incorrect' }
-  }
 
-  await (client as any).staff_members.update({
-    where: { id: staffId },
-    data: { pin_attempts: 0, pin_locked_until: null },
+    const claims: OperatorClaims = { id: staff.id, role: staff.role as StaffRole }
+    if (staff.pin_must_change !== null) claims.mustChangePin = Boolean(staff.pin_must_change)
+    return { ok: true, staff: claims }
   })
-
-  const claims: OperatorClaims = { id: staff.id, role: staff.role as StaffRole }
-  // Keeping this conditional preserves compatibility with pre-0037 test
-  // doubles and, more importantly, makes the claim explicit only for rows
-  // that have the new migration column.
-  if ('pin_must_change' in staff) claims.mustChangePin = Boolean(staff.pin_must_change)
-  return { ok: true, staff: claims }
 }
 
 /**

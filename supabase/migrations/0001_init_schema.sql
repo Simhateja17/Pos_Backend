@@ -38,12 +38,13 @@ create index idx_staff_members_user_id on public.staff_members(user_id);
 
 -- Dedicated restricted role for runtime app traffic (RESEARCH.md Pitfall 1 / Anti-Patterns).
 -- NOBYPASSRLS is the default for a freshly created role (only superusers get BYPASSRLS) — explicit here for clarity.
--- Password is a placeholder; MUST be rotated via `ALTER ROLE app_runtime WITH PASSWORD '<real-secret>'`
--- through the Supabase SQL editor or CLI BEFORE production use — never commit the real password to a migration file.
+-- Do not put a password in source control. The production deployment preflight
+-- requires the RLS_DATABASE_URL credential to be provisioned out of band before
+-- the application is started.
 do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'app_runtime') then
-    create role app_runtime login password 'CHANGE_ME_VIA_ALTER_ROLE' nobypassrls;
+    create role app_runtime login nobypassrls;
   end if;
 end
 $$;

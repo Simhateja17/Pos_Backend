@@ -84,7 +84,10 @@ router.post('/generate', requireRole('manager'), async (req, res) => {
       skipped: result.skipped,
     })
   } catch (err: any) {
-    return res.status(err.status ?? 500).json({ error: err.message ?? 'Could not generate reorder suggestions' })
+    const status = Number.isInteger(err?.status) ? err.status : 500
+    return res.status(status).json({
+      error: status >= 500 ? 'Could not generate reorder suggestions' : err.message ?? 'Could not generate reorder suggestions',
+    })
   }
 })
 

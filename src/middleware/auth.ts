@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
 import { getAuthCookies, setAuthCookies } from '../lib/authCookies'
+import { forTenant } from '../db/tenantClient'
 
 // supabase-js 2.110 initialises a Realtime client even though this API only
 // uses Auth's `getUser()`. Node 20 has no native WebSocket, so provide the
@@ -99,13 +100,33 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
-  const role = getStaffRoleClaim(claims)
-  const tenantId = claims.tenant_id as (string | undefined)
+  const claimedRole = getStaffRoleClaim(claims)
+  const tenantId = typeof claims.tenant_id === 'string' ? claims.tenant_id : undefined
 
-  if (!role || !tenantId) {
+  if (!claimedRole || !tenantId) {
     return res.status(403).json({ error: 'No tenant membership found' })
   }
 
-  req.user = { id: data.user.id, role, tenantId }
+  // JWT claims are a cache of membership state, not the authority itself.
+  // Check the current row on every request so demotion/deactivation takes
+  // effect immediately instead of waiting for an access-token refresh.
+  const tenantClient = forTenant(tenantId) as any
+  if (typeof tenantClient.staff_members?.findFirst !== 'function') {
+    // A generated Prisma client always has this model. Treat an unavailable
+    // lookup as an operational error rather than silently trusting stale JWT
+    // claims.
+    throw new Error('Membership lookup is unavailable')
+  }
+
+  const membership = await tenantClient.staff_members.findFirst({
+    where: { user_id: data.user.id, role: claimedRole, is_active: true },
+    select: { role: true, tenant_id: true },
+  })
+
+  if (!membership || membership.tenant_id !== tenantId || membership.role !== claimedRole) {
+    return res.status(403).json({ error: 'No tenant membership found' })
+  }
+
+  req.user = { id: data.user.id, role: membership.role, tenantId }
   next()
 }

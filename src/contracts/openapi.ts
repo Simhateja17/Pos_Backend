@@ -572,7 +572,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/sales/{saleId}/resend-receipt',
-  description: 'Resend a receipt email for a completed sale (CHECK-06) — resolves a real target email and reports the actual send outcome.',
+  description: 'Resend a receipt email for a completed sale (CHECK-06) — uses the customer address on file for cashier requests, requires manager approval for a different address, and is rate limited.',
   request: {
     params: z.object({ saleId: z.string().uuid() }),
     body: { content: { 'application/json': { schema: ResendReceiptInputSchema } } },
@@ -580,7 +580,9 @@ registry.registerPath({
   responses: {
     200: { description: 'Receipt sent', content: { 'application/json': { schema: ResendReceiptResponseSchema } } },
     400: { description: 'No email address available' },
+    403: { description: 'A manager is required to change the recipient address' },
     404: { description: 'Sale not found' },
+    429: { description: 'Receipt resend cooldown or tenant email budget exceeded' },
     502: { description: 'Email delivery failed' },
   },
 })

@@ -10,10 +10,14 @@ import { computeCheckout } from '../lib/money'
 import { findOrCreateCustomer, searchCustomers } from '../lib/customers'
 import { sendLoggedEmail } from '../services/email'
 import { findPairedTerminal } from '../lib/counterDevice'
+import { consumeRateLimit } from '../lib/rateLimit'
 
 const router = Router()
 
 const ZERO = new Prisma.Decimal(0)
+const RECEIPT_RESEND_COOLDOWN_MS = 60 * 1000
+const RECEIPT_RESEND_TENANT_WINDOW_MS = 60 * 60 * 1000
+const RECEIPT_RESEND_TENANT_LIMIT = 100
 
 // D-05 body-dependent role gate — mirrors stockMovements.ts's isAllowedToAdjust
 // exactly, reusing the same ROLE_RANK import and acting-identity precedence
@@ -603,13 +607,40 @@ router.post('/:saleId/resend-receipt', async (req, res) => {
     return res.status(404).json({ error: 'Sale not found' })
   }
 
-  let email = parsed.data.email
-  if (!email && sale.customer_id) {
-    const customer = await client.customers.findFirst({ where: { id: sale.customer_id } })
-    email = customer?.email ?? undefined
+  const customer = sale.customer_id
+    ? await client.customers.findFirst({ where: { id: sale.customer_id } })
+    : null
+  const onFileEmail = customer?.email?.trim().toLowerCase() ?? null
+  let email = parsed.data.email?.trim()
+  const actingRole = req.actingStaff?.role ?? req.user!.role
+
+  // A cashier may resend to the customer's stored address, but changing the
+  // destination is a manager-level trust decision. This prevents the endpoint
+  // from becoming an authenticated arbitrary-mail sender.
+  if (email && email.trim().toLowerCase() !== onFileEmail && ROLE_RANK[actingRole] < ROLE_RANK.manager) {
+    return res.status(403).json({ error: 'A manager must approve sending this receipt to a different address.' })
   }
+  if (!email && onFileEmail) email = customer!.email
   if (!email) {
     return res.status(400).json({ error: 'No email address is on file for this sale — enter one to send a receipt.' })
+  }
+
+  const recipient = email.trim().toLowerCase()
+  const actorId = req.actingStaff?.id ?? req.user!.id
+  const cooldown = consumeRateLimit(
+    `receipt-resend:${req.user!.tenantId}:${actorId}:${sale.id}:${recipient}`,
+    1,
+    RECEIPT_RESEND_COOLDOWN_MS,
+  )
+  const tenantBudget = consumeRateLimit(
+    `receipt-resend-tenant:${req.user!.tenantId}`,
+    RECEIPT_RESEND_TENANT_LIMIT,
+    RECEIPT_RESEND_TENANT_WINDOW_MS,
+  )
+  if (!cooldown.allowed || !tenantBudget.allowed) {
+    const retryAfter = Math.max(cooldown.retryAfterSeconds, tenantBudget.retryAfterSeconds)
+    res.set('Retry-After', String(retryAfter))
+    return res.status(429).json({ error: 'This receipt was sent recently. Please try again later.' })
   }
 
   const tenant = await client.tenants.findFirst({ where: { id: req.user!.tenantId } })
@@ -621,6 +652,7 @@ router.post('/:saleId/resend-receipt', async (req, res) => {
     subject: `Receipt from ${tenant?.business_name ?? ''} — ${sale.total_amount.toString()}`,
     businessName: tenant?.business_name ?? '',
     totalAmount: sale.total_amount.toString(),
+    createdBy: actorId,
   })
 
   if (result.status === 'suppressed') {

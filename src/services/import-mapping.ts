@@ -245,10 +245,13 @@ export async function suggestMapping(input: MappingInput): Promise<MappingSugges
     const parsed = JSON.parse(text.text) as { mappings: ColumnMapping[] }
     return { mappings: reconcile(input, parsed.mappings ?? []), source: 'claude', note: null }
   } catch (error) {
+    // Provider diagnostics stay in protected server logs; the owner only
+    // needs to know that the safe heuristic fallback was used.
+    console.error('[import:mapping] AI suggestion failed', error)
     return {
       mappings: heuristicMapping(input),
       source: 'heuristic',
-      note: `AI mapping was unavailable (${error instanceof Error ? error.message : 'unknown error'}), so these came from header matching. Check every row carefully.`,
+      note: 'AI mapping was unavailable, so these came from header matching. Check every row carefully.',
     }
   }
 }
