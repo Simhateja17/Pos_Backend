@@ -34,6 +34,18 @@ vi.mock('../../src/db/tenantClient', () => ({
     sale_line_items: { findMany: linesFindManyMock },
     payments: { findMany: paymentsFindManyMock, count: paymentsCountMock, groupBy: paymentsGroupByMock },
   })),
+  forTenantTransaction: vi.fn(async (_tenantId: string, callback: (tx: any) => Promise<unknown>) =>
+    callback({
+      tenants: { findFirst: tenantsFindFirstMock },
+      staff_members: {
+        findFirst: (args: { where?: { role?: string } }) =>
+          args.where?.role ? membershipFindFirstMock(args) : staffFindFirstMock(args),
+      },
+      billing_subscriptions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      terminals: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+    }),
+  ),
 }))
 
 function fakeJwt(payload: Record<string, unknown>): string {
@@ -94,8 +106,8 @@ describe('context and tenant record read routes', () => {
       tenant: { id: 'tenant-real', businessName: 'Real Shop', locality: 'Mumbai, Maharashtra' },
       onboarding: { step: 3, completed: false },
     })
-    const { forTenant } = await import('../../src/db/tenantClient')
-    expect(forTenant).toHaveBeenCalledWith('tenant-real')
+    const { forTenantTransaction } = await import('../../src/db/tenantClient')
+    expect(forTenantTransaction).toHaveBeenCalledWith('tenant-real', expect.any(Function))
   })
 
   it('caps invalid pagination and returns an honest empty customer record page', async () => {

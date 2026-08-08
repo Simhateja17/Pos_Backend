@@ -26,6 +26,8 @@ import reportsRouter from './reports'
 import emailRouter from './email'
 import billingRouter from './billing'
 import { requireSubscription } from '../middleware/requireSubscription'
+import { requireRole } from '../middleware/requireRole'
+import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
 
 const router = Router()
 
@@ -43,28 +45,38 @@ router.use('/auth', authRouter)
 // populated from a trusted source.
 router.use('/terminal/pin', authMiddleware, requireSubscription, operatorContext, pinRouter)
 router.use('/members', authMiddleware, requireSubscription, operatorContext, membersRouter)
-router.use('/products', authMiddleware, requireSubscription, operatorContext, productsRouter)
-router.use('/categories', authMiddleware, requireSubscription, operatorContext, categoriesRouter)
 router.use('/terminals', authMiddleware, requireSubscription, operatorContext, terminalsRouter)
-router.use('/settings', authMiddleware, requireSubscription, operatorContext, settingsRouter)
-router.use('/notifications', authMiddleware, requireSubscription, operatorContext, notificationsRouter)
-router.use('/stock-movements', authMiddleware, requireSubscription, operatorContext, stockMovementsRouter)
-router.use('/sales', authMiddleware, requireSubscription, operatorContext, salesRouter)
-router.use('/returns', authMiddleware, requireSubscription, operatorContext, returnsRouter)
-router.use('/customers', authMiddleware, requireSubscription, operatorContext, customersRouter)
-router.use('/shifts', authMiddleware, requireSubscription, operatorContext, shiftsRouter)
-router.use('/onboarding', authMiddleware, operatorContext, onboardingRouter)
-router.use('/billing', authMiddleware, operatorContext, billingRouter)
+
+// Once a browser is paired to a counter, the organisation login remains the
+// durable device session but cannot authorize app work by itself. A verified
+// staff PIN session is required before any operational or admin API below.
+const appAccess = [authMiddleware, requireSubscription, operatorContext, requireOperatorOnPairedDevice]
+router.use('/products', ...appAccess, productsRouter)
+router.use('/categories', ...appAccess, categoriesRouter)
+router.use('/sales', ...appAccess, salesRouter)
+router.use('/returns', ...appAccess, returnsRouter)
+router.use('/customers', ...appAccess, customersRouter)
+router.use('/shifts', ...appAccess, shiftsRouter)
+
+// Back-office modules are also server-gated. Filtering the sidebar is only a
+// convenience; a cashier who types these URLs or calls the APIs still gets a
+// 403 from requireRole.
+router.use('/settings', ...appAccess, requireRole('manager'), settingsRouter)
+router.use('/notifications', ...appAccess, requireRole('manager'), notificationsRouter)
+router.use('/stock-movements', ...appAccess, requireRole('manager'), stockMovementsRouter)
+router.use('/dashboard', ...appAccess, requireRole('manager'), dashboardRouter)
+router.use('/suppliers', ...appAccess, requireRole('manager'), suppliersRouter)
+router.use('/variants/:variantId/supplier-products', ...appAccess, requireRole('manager'), supplierProductsRouter)
+router.use('/purchase-orders', ...appAccess, requireRole('manager'), purchaseOrdersRouter)
+router.use('/reorder', ...appAccess, requireRole('manager'), reorderRouter)
+router.use('/import', ...appAccess, requireRole('manager'), importRouter)
+router.use('/reports', ...appAccess, requireRole('manager'), reportsRouter)
+router.use('/email', ...appAccess, requireRole('manager'), emailRouter)
+
+router.use('/onboarding', authMiddleware, operatorContext, requireOperatorOnPairedDevice, requireRole('manager'), onboardingRouter)
+router.use('/billing', authMiddleware, operatorContext, requireOperatorOnPairedDevice, billingRouter)
 // Context precedes read-model routers so the authenticated app shell can
 // establish its server-owned identity before record pages request data.
-router.use('/context', authMiddleware, operatorContext, contextRouter)
-router.use('/dashboard', authMiddleware, requireSubscription, operatorContext, dashboardRouter)
-router.use('/suppliers', authMiddleware, requireSubscription, operatorContext, suppliersRouter)
-router.use('/variants/:variantId/supplier-products', authMiddleware, requireSubscription, operatorContext, supplierProductsRouter)
-router.use('/purchase-orders', authMiddleware, requireSubscription, operatorContext, purchaseOrdersRouter)
-router.use('/reorder', authMiddleware, requireSubscription, operatorContext, reorderRouter)
-router.use('/import', authMiddleware, requireSubscription, operatorContext, importRouter)
-router.use('/reports', authMiddleware, requireSubscription, operatorContext, reportsRouter)
-router.use('/email', authMiddleware, requireSubscription, operatorContext, emailRouter)
+router.use('/context', authMiddleware, operatorContext, requireOperatorOnPairedDevice, contextRouter)
 
 export default router

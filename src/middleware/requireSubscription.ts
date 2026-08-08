@@ -8,7 +8,10 @@ import { getBillingStatus } from '../services/billing'
  * renewal grace period as accessAllowed.
  */
 export async function requireSubscription(req: Request, res: Response, next: NextFunction) {
-  const status = await getBillingStatus(req.user!.tenantId)
+  // authMiddleware resolves this in the request's consolidated authorization
+  // transaction. The fallback keeps this middleware safe when mounted on its
+  // own by a future route or a focused unit test.
+  const status = req.accessContext?.subscription ?? await getBillingStatus(req.user!.tenantId)
   if (!status.accessAllowed) {
     return res.status(402).json({
       error: 'An active subscription is required to access the application',

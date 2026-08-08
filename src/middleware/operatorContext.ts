@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express'
 import { verifyOperatorToken } from './pinSwitch'
-import { forTenant } from '../db/tenantClient'
+import { forTenantTransaction } from '../db/tenantClient'
 import { findPairedTerminal } from '../lib/counterDevice'
 
 /**
@@ -33,6 +33,17 @@ export async function operatorContext(req: Request, res: Response, next: NextFun
     return next()
   }
 
+  // Normal protected routes arrive with a server-owned snapshot produced by
+  // authMiddleware. Reuse it so this gate does not start a second transaction.
+  if (req.accessContext) {
+    const cached = req.accessContext.operator
+    if (cached.state !== 'valid') {
+      return res.status(401).json({ error: 'Invalid operator session' })
+    }
+    req.actingStaff = cached.staff
+    return next()
+  }
+
   const tokenString = Array.isArray(token) ? token[0] : token
   const claims = verifyOperatorToken(tokenString)
 
@@ -48,27 +59,33 @@ export async function operatorContext(req: Request, res: Response, next: NextFun
   // New operator tokens are bound to a durable staff_sessions row. This makes
   // an explicit logout, deactivation, or replacement of the active cashier
   // take effect immediately instead of waiting for the JWT's expiry.
-  const client = forTenant(req.user.tenantId) as any
-  const session = await client.staff_sessions.findFirst({
-    where: { id: claims.sessionId, logged_out_at: null },
-    include: { staff_members: { select: { id: true, role: true, is_active: true } } },
-  })
-  const pairedTerminal = session?.terminal_id ? await findPairedTerminal(client, req) : null
+  const valid = await forTenantTransaction(req.user.tenantId, async (tx) => {
+    const session = await tx.staff_sessions.findFirst({
+      where: { id: claims.sessionId, logged_out_at: null },
+      include: { staff_members: { select: { id: true, role: true, is_active: true } } },
+    })
+    const pairedTerminal = session?.terminal_id ? await findPairedTerminal(tx, req) : null
 
-  if (
-    !session ||
-    !session.staff_members?.is_active ||
-    session.staff_members.id !== claims.id ||
-    session.staff_members.role !== claims.role ||
-    (session.terminal_id !== null && pairedTerminal?.id !== session.terminal_id)
-  ) {
+    if (
+      !session ||
+      !session.staff_members?.is_active ||
+      session.staff_members.id !== claims.id ||
+      session.staff_members.role !== claims.role ||
+      (session.terminal_id !== null && pairedTerminal?.id !== session.terminal_id)
+    ) {
+      return false
+    }
+
+    await tx.staff_sessions.update({
+      where: { id: claims.sessionId },
+      data: { last_seen_at: new Date() },
+    })
+    return true
+  })
+
+  if (!valid) {
     return res.status(401).json({ error: 'Invalid operator session' })
   }
-
-  await client.staff_sessions.update({
-    where: { id: claims.sessionId },
-    data: { last_seen_at: new Date() },
-  })
 
   req.actingStaff = {
     id: claims.id,

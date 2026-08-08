@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
 import { getAuthCookies, setAuthCookies } from '../lib/authCookies'
-import { forTenant } from '../db/tenantClient'
+import { resolveRequestAccess } from './requestAccess'
 
 // supabase-js 2.110 initialises a Realtime client even though this API only
 // uses Auth's `getUser()`. Node 20 has no native WebSocket, so provide the
@@ -108,25 +108,20 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   }
 
   // JWT claims are a cache of membership state, not the authority itself.
-  // Check the current row on every request so demotion/deactivation takes
-  // effect immediately instead of waiting for an access-token refresh.
-  const tenantClient = forTenant(tenantId) as any
-  if (typeof tenantClient.staff_members?.findFirst !== 'function') {
-    // A generated Prisma client always has this model. Treat an unavailable
-    // lookup as an operational error rather than silently trusting stale JWT
-    // claims.
-    throw new Error('Membership lookup is unavailable')
-  }
-
-  const membership = await tenantClient.staff_members.findFirst({
-    where: { user_id: data.user.id, role: claimedRole, is_active: true },
-    select: { role: true, tenant_id: true },
+  // Membership, subscription, operator-session, and paired-device facts are
+  // resolved together so an authenticated request acquires one authorization
+  // transaction instead of several independent transactions.
+  const resolved = await resolveRequestAccess(req, {
+    userId: data.user.id,
+    tenantId,
+    role: claimedRole,
   })
 
-  if (!membership || membership.tenant_id !== tenantId || membership.role !== claimedRole) {
+  if (!resolved.membership || !resolved.accessContext) {
     return res.status(403).json({ error: 'No tenant membership found' })
   }
 
-  req.user = { id: data.user.id, role: membership.role, tenantId }
+  req.user = { id: data.user.id, role: resolved.membership.role, tenantId }
+  req.accessContext = resolved.accessContext
   next()
 }

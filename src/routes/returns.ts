@@ -1,7 +1,8 @@
 import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { CreateReturnSchema } from '../contracts/schemas/return'
-import { forTenantTransaction } from '../db/tenantClient'
+import { forTenant, forTenantTransaction } from '../db/tenantClient'
+import { findPairedTerminal } from '../lib/counterDevice'
 
 const router = Router()
 
@@ -30,6 +31,12 @@ router.post('/', async (req, res) => {
   const tenantId = req.user!.tenantId
 
   try {
+    const pairedTerminal = await findPairedTerminal(forTenant(tenantId) as any, req)
+    const actingRole = req.actingStaff?.role ?? req.user!.role
+    if (actingRole === 'cashier' && !pairedTerminal) {
+      return res.status(409).json({ error: 'This device is not paired to a counter.' })
+    }
+
     const result = await forTenantTransaction(tenantId, async (tx) => {
       // T-03-14 / CASH-02 / D-13/D-15: shift lookup + closed-shift guard MUST
       // happen before any sale/line lookup or write, mirroring the identical
@@ -43,6 +50,9 @@ router.post('/', async (req, res) => {
           status: 409,
           body: { error: 'This shift has already been closed and cannot accept new returns.' },
         }
+      }
+      if (pairedTerminal && shift.terminal_id !== pairedTerminal.id) {
+        return { status: 409, body: { error: 'This return belongs to a different counter.' } }
       }
 
       // CR-01 tenant-scoped lookup — never a bare/cross-tenant lookup.
@@ -132,6 +142,10 @@ router.post('/', async (req, res) => {
             movement_type: 'return',
             quantity_delta: refundLine.quantity,
             reference_id: sale.id,
+            // One append-only return movement retains the reason and the
+            // counter/shift that processed it. Together with created_by and
+            // created_at this is the cashier return audit trail.
+            reason_note: `${parsed.data.reason} [shift:${shift.id}; counter:${shift.terminal_id ?? 'unpaired'}]`,
             created_by: createdBy,
           },
         })

@@ -9,6 +9,16 @@ const router = Router()
 
 const ZERO = new Prisma.Decimal(0)
 
+function effectiveRole(req: import('express').Request) {
+  return req.actingStaff?.role ?? req.user!.role
+}
+
+async function cashierCanAccessShift(client: any, req: import('express').Request, shift: any) {
+  if (effectiveRole(req) !== 'cashier') return true
+  const terminal = await findPairedTerminal(client, req)
+  return Boolean(terminal && shift.terminal_id === terminal.id)
+}
+
 // Copied verbatim from stockMovements.ts (per plan interfaces note) — resolves
 // the acting staff member's id for `staff_id`/`created_by` attribution.
 async function resolveActingStaffId(client: any, req: import('express').Request): Promise<string | null> {
@@ -46,7 +56,7 @@ async function resolveRequestTerminal(client: any, req: import('express').Reques
   // A cashier PIN session is only valid on a paired counter. Owners/managers
   // may still use the explicit id during first-time setup, before pairing a
   // browser from Settings.
-  if (req.actingStaff?.role === 'cashier' && !requestedId) {
+  if (effectiveRole(req) === 'cashier' && !requestedId) {
     return { terminal: null, error: 'Pair this device to a counter before opening a shift.' }
   }
   if (!requestedId) return { terminal: null, error: 'Pair this device to a counter before opening a shift.' }
@@ -119,7 +129,14 @@ async function computeXReport(client: any, shift: any) {
 router.get('/', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
 
-  const shifts = await client.shifts.findMany({ orderBy: [{ opened_at: 'desc' }], take: 100 })
+  let where: any = undefined
+  if (effectiveRole(req) === 'cashier') {
+    const terminal = await findPairedTerminal(client, req)
+    if (!terminal) return res.status(409).json({ error: 'This device is not paired to a counter.' })
+    where = { terminal_id: terminal.id, closed_at: null }
+  }
+
+  const shifts = await client.shifts.findMany({ where, orderBy: [{ opened_at: 'desc' }], take: 100 })
   const staff = await client.staff_members.findMany({ select: { id: true, name: true } })
   const terminals = await client.terminals.findMany({ select: { id: true, name: true } })
 
@@ -246,6 +263,9 @@ router.get('/:shiftId/x-report', async (req, res) => {
   if (!shift) {
     return res.status(404).json({ error: 'Shift not found' })
   }
+  if (!(await cashierCanAccessShift(client, req, shift))) {
+    return res.status(403).json({ error: 'This shift belongs to a different counter.' })
+  }
 
   const { _expectedCashDecimal, ...report } = await computeXReport(client, shift)
   return res.json(report)
@@ -272,6 +292,9 @@ router.post('/:shiftId/close', async (req, res) => {
   const shift = await client.shifts.findFirst({ where: { id: req.params.shiftId } })
   if (!shift) {
     return res.status(404).json({ error: 'Shift not found' })
+  }
+  if (!(await cashierCanAccessShift(client, req, shift))) {
+    return res.status(403).json({ error: 'This shift belongs to a different counter.' })
   }
   if (shift.closed_at !== null) {
     return res.status(409).json({ error: 'This shift has already been closed.' })

@@ -42,6 +42,10 @@ vi.mock('../../src/db/tenantClient', () => ({
   // the real one passes into `fn`, so route behavior/tests are unaffected.
   forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
     fn({
+      staff_members: { findFirst: membershipFindFirstMock },
+      billing_subscriptions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      terminals: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       products: { create: productsCreateMock },
       variants: { create: variantsCreateMock, findFirst: variantsFindFirstMock },
       categories: {

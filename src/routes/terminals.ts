@@ -9,6 +9,7 @@ import {
   hashCounterDeviceToken,
   setCounterDeviceCookie,
 } from '../lib/counterDevice'
+import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
 
 const router = Router()
 
@@ -55,7 +56,19 @@ async function listWithOpenShifts(client: any, currentDeviceHash?: string) {
 router.get('/', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const token = getCounterDeviceToken(req)
-  return res.json(await listWithOpenShifts(client, token ? hashCounterDeviceToken(token) : undefined))
+  const currentDeviceHash = token ? hashCounterDeviceToken(token) : undefined
+
+  // The unlocked cashier only needs the counter represented by this browser.
+  // The no-operator lock screen intentionally still receives the full list so
+  // an owner can pair an unassigned device during setup.
+  if (req.actingStaff?.role === 'cashier') {
+    const current = await findPairedTerminal(client, req)
+    if (!current) return res.json([])
+    const all = await listWithOpenShifts(client, currentDeviceHash)
+    return res.json(all.filter((terminal: { id: string }) => terminal.id === current.id))
+  }
+
+  return res.json(await listWithOpenShifts(client, currentDeviceHash))
 })
 
 /** Resolve the counter represented by this browser/device cookie. */
@@ -78,7 +91,7 @@ router.get('/device', async (req, res) => {
   })
 })
 
-router.post('/', requireRole('manager'), async (req, res) => {
+router.post('/', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {
   const parsed = CreateTerminalSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Enter a name for this counter.' })
@@ -107,8 +120,16 @@ router.post('/', requireRole('manager'), async (req, res) => {
  * replaceable: the owner/manager can move the same browser to another
  * counter, or pair a replacement browser to the counter after a failure.
  */
-router.post('/:terminalId/pair', requireRole('manager'), async (req, res) => {
+router.post('/:terminalId/pair', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
+  const pinReadyStaff = await client.staff_members.count({
+    where: { is_active: true, pin_hash: { not: null } },
+  })
+  if (pinReadyStaff === 0) {
+    return res.status(409).json({
+      error: 'Set a counter PIN for at least one active staff member before pairing this device.',
+    })
+  }
   const target = await client.terminals.findFirst({ where: { id: req.params.terminalId } })
   if (!target) return res.status(404).json({ error: 'Counter not found' })
   if (!target.is_active) return res.status(409).json({ error: 'Turn that counter on before pairing a device.' })
@@ -159,7 +180,7 @@ router.post('/:terminalId/pair', requireRole('manager'), async (req, res) => {
   return res.json(toTerminalJson(paired, Boolean(openShift), newHash, null))
 })
 
-router.patch('/:terminalId', requireRole('manager'), async (req, res) => {
+router.patch('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {
   const parsed = UpdateTerminalSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request' })
@@ -216,7 +237,7 @@ router.patch('/:terminalId', requireRole('manager'), async (req, res) => {
  * counter it happened on, so the route steers the caller to deactivation
  * instead of silently orphaning history.
  */
-router.delete('/:terminalId', requireRole('manager'), async (req, res) => {
+router.delete('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const existing = await client.terminals.findFirst({ where: { id: req.params.terminalId } })
   if (!existing) {

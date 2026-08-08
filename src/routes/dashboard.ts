@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { DashboardQuerySchema } from '../contracts/schemas/dashboard'
-import { forTenant } from '../db/tenantClient'
+import { forTenantTransaction } from '../db/tenantClient'
 
 const router = Router()
 const INDIA_OFFSET_MS = 5.5 * 60 * 60 * 1000
@@ -35,30 +35,35 @@ router.get('/', async (req, res) => {
 
   const now = new Date()
   const startsAt = indiaDayBoundary(now, RANGE_DAYS[parsed.data.range])
-  const client = forTenant(req.user!.tenantId) as any
-
-  const [sales, saleLines, openShift, variants, stockLevels] = await Promise.all([
-    client.sales.findMany({
-      where: { status: 'completed', created_at: { gte: startsAt, lte: now } },
-      select: { total_amount: true, created_at: true },
-      orderBy: { created_at: 'asc' },
-    }),
-    // Line-level detail is what makes margin computable: cost lives per
-    // variant, so revenue has to be attributed per variant too.
-    client.sale_line_items.findMany({
-      where: { sales: { status: 'completed', created_at: { gte: startsAt, lte: now } } },
-      select: { variant_id: true, quantity: true, line_total: true },
-    }),
-    client.shifts.findFirst({ where: { closed_at: null }, orderBy: { opened_at: 'desc' } }),
-    client.variants.findMany({}),
-    client.variant_stock_levels.findMany({}),
-  ])
+  const { sales, saleLines, openShift, variants, stockLevels, products } = await forTenantTransaction(
+    req.user!.tenantId,
+    async (tx) => {
+      // One short read transaction is materially cheaper than five concurrent
+      // transactions against the same tenant. Keep the transaction limited to
+      // database reads; all calculations happen after commit below.
+      const sales = await tx.sales.findMany({
+        where: { status: 'completed', created_at: { gte: startsAt, lte: now } },
+        select: { total_amount: true, created_at: true },
+        orderBy: { created_at: 'asc' },
+      })
+      // Line-level detail is what makes margin computable: cost lives per
+      // variant, so revenue has to be attributed per variant too.
+      const saleLines = await tx.sale_line_items.findMany({
+        where: { sales: { status: 'completed', created_at: { gte: startsAt, lte: now } } },
+        select: { variant_id: true, quantity: true, line_total: true },
+      })
+      const openShift = await tx.shifts.findFirst({ where: { closed_at: null }, orderBy: { opened_at: 'desc' } })
+      const variants = await tx.variants.findMany({})
+      const stockLevels = await tx.variant_stock_levels.findMany({})
+      const productIds = [...new Set(variants.map((variant: any) => variant.product_id))]
+      const products = productIds.length > 0
+        ? await tx.products.findMany({ where: { id: { in: productIds } } })
+        : []
+      return { sales, saleLines, openShift, variants, stockLevels, products }
+    },
+  )
 
   const stockByVariant = new Map(stockLevels.map((level: any) => [level.variant_id, Number(level.quantity)]))
-  const productIds = [...new Set(variants.map((variant: any) => variant.product_id))]
-  const products = productIds.length > 0
-    ? await client.products.findMany({ where: { id: { in: productIds } } })
-    : []
   const productNameById = new Map(products.map((product: any) => [product.id, product.name]))
   const lowStock = variants
     .map((variant: any) => ({ variant, quantity: stockByVariant.get(variant.id) ?? 0 }))

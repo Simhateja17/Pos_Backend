@@ -2,6 +2,20 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { Request, Response } from 'express'
 
 export const COUNTER_DEVICE_COOKIE = 'couture_counter_device'
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 60_000
+
+function positiveEnvInt(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? '', 10)
+  return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+export function accessHeartbeatCutoff(now = new Date()): Date {
+  return new Date(now.getTime() - positiveEnvInt('ACCESS_HEARTBEAT_INTERVAL_MS', DEFAULT_HEARTBEAT_INTERVAL_MS))
+}
+
+export function accessHeartbeatDue(lastSeen: unknown, cutoff: Date): boolean {
+  return !(lastSeen instanceof Date) || lastSeen < cutoff
+}
 
 function parseCookies(header: string | undefined): Record<string, string> {
   if (!header) return {}
@@ -52,12 +66,20 @@ export async function findPairedTerminal(client: any, req: Request) {
   const terminal = await client.terminals.findFirst({
     where: { device_token_hash: hashCounterDeviceToken(token), is_active: true },
   })
-  if (terminal) {
-    await client.terminals.update({
-      where: { id: terminal.id },
+  const now = new Date()
+  const cutoff = accessHeartbeatCutoff(now)
+  if (terminal && accessHeartbeatDue(terminal.device_last_seen_at, cutoff)) {
+    // The same helper is used by request guards and terminal endpoints. A
+    // conditional update prevents every API call from becoming a physical
+    // write while still retaining useful device-presence information.
+    await client.terminals.updateMany({
+      where: {
+        id: terminal.id,
+        OR: [{ device_last_seen_at: null }, { device_last_seen_at: { lt: cutoff } }],
+      },
       data: { device_last_seen_at: new Date() },
     })
-    terminal.device_last_seen_at = new Date()
+    terminal.device_last_seen_at = now
   }
   return terminal
 }

@@ -25,6 +25,19 @@ vi.mock('../../src/services/billing', () => ({
 const tenantsFindFirstMock = vi.fn()
 const tenantsUpdateMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
+const billingFindFirstMock = vi.fn()
+const billingUpdateManyMock = vi.fn()
+const terminalFindFirstMock = vi.fn()
+const terminalUpdateManyMock = vi.fn()
+const forTenantTransactionMock = vi.fn(async (_tenantId: string, callback: (tx: any) => Promise<unknown>) => callback({
+  staff_members: { findFirst: membershipFindFirstMock },
+  billing_subscriptions: {
+    findFirst: billingFindFirstMock,
+    updateMany: billingUpdateManyMock,
+  },
+  terminals: { findFirst: terminalFindFirstMock, updateMany: terminalUpdateManyMock },
+  staff_sessions: { findFirst: vi.fn(), updateMany: vi.fn() },
+}))
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
@@ -34,6 +47,7 @@ vi.mock('../../src/db/tenantClient', () => ({
       update: tenantsUpdateMock,
     },
   })),
+  forTenantTransaction: forTenantTransactionMock,
 }))
 
 function fakeJwt(payload: Record<string, unknown>): string {
@@ -159,6 +173,11 @@ describe('onboarding routes', () => {
       role: where.role,
       tenant_id: 'tenant-real',
     }))
+    billingFindFirstMock.mockReset().mockResolvedValue(null)
+    billingUpdateManyMock.mockReset()
+    terminalFindFirstMock.mockReset().mockResolvedValue(null)
+    terminalUpdateManyMock.mockReset()
+    forTenantTransactionMock.mockClear()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
   })
 
@@ -190,13 +209,12 @@ describe('onboarding routes', () => {
     expect(first.body.data['1'].trialPlan).toBe('growth')
 
     const { forTenant } = await import('../../src/db/tenantClient')
-    // authMiddleware verifies the live membership before the route reads the
-    // tenant draft, so each request enters the tenant client twice.
-    expect(forTenant).toHaveBeenCalledTimes(4)
+    // Each request uses one consolidated authorization transaction and only
+    // the onboarding handler itself creates the per-operation tenant client.
+    expect(forTenantTransactionMock).toHaveBeenCalledTimes(2)
+    expect(forTenant).toHaveBeenCalledTimes(2)
     expect(forTenant).toHaveBeenNthCalledWith(1, 'tenant-real')
     expect(forTenant).toHaveBeenNthCalledWith(2, 'tenant-real')
-    expect(forTenant).toHaveBeenNthCalledWith(3, 'tenant-real')
-    expect(forTenant).toHaveBeenNthCalledWith(4, 'tenant-real')
   })
 
   it('lets an owner save the next strict step and derives progress from persisted data', async () => {

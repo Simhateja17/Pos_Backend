@@ -33,6 +33,14 @@ vi.mock('../../src/db/tenantClient', () => ({
       findFirst: variantsFindFirstMock,
     },
   })),
+  forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
+    fn({
+      staff_members: { findFirst: membershipFindFirstMock },
+      billing_subscriptions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      terminals: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+    }),
+  ),
 }))
 
 function fakeJwt(payload: Record<string, unknown>): string {

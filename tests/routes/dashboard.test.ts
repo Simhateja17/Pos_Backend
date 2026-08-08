@@ -28,6 +28,20 @@ vi.mock('../../src/db/tenantClient', () => ({
     variant_stock_levels: { findMany: stockLevelsFindManyMock },
     products: { findMany: productsFindManyMock },
   })),
+  forTenantTransaction: vi.fn(async (_tenantId: string, callback: (tx: any) => Promise<unknown>) =>
+    callback({
+      staff_members: { findFirst: membershipFindFirstMock },
+      billing_subscriptions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      terminals: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      sales: { findMany: salesFindManyMock },
+      sale_line_items: { findMany: saleLineItemsFindManyMock },
+      shifts: { findFirst: shiftsFindFirstMock },
+      variants: { findMany: variantsFindManyMock },
+      variant_stock_levels: { findMany: stockLevelsFindManyMock },
+      products: { findMany: productsFindManyMock },
+    }),
+  ),
 }))
 
 function fakeJwt(payload: Record<string, unknown>): string {
@@ -122,8 +136,8 @@ describe('dashboard route', () => {
       productName: 'Indigo Kurta', sku: 'KURTA-1', quantity: 2, reorderThreshold: 4,
     }] })
     expect(response.body.cashDrawer).toMatchObject({ status: 'open', openingCash: '500.00' })
-    const { forTenant } = await import('../../src/db/tenantClient')
-    expect(forTenant).toHaveBeenLastCalledWith('11111111-1111-4111-8111-111111111111')
+    const { forTenantTransaction } = await import('../../src/db/tenantClient')
+    expect(forTenantTransaction).toHaveBeenLastCalledWith('11111111-1111-4111-8111-111111111111', expect.any(Function))
     expect(salesFindManyMock).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ status: 'completed' }) }))
   })
 
@@ -138,8 +152,8 @@ describe('dashboard route', () => {
 
     expect(response.status).toBe(200)
     expect(response.body.sales.totalAmount).toBe('25.00')
-    const { forTenant } = await import('../../src/db/tenantClient')
-    expect(forTenant).toHaveBeenLastCalledWith('11111111-1111-4111-8111-111111111111')
+    const { forTenantTransaction } = await import('../../src/db/tenantClient')
+    expect(forTenantTransaction).toHaveBeenLastCalledWith('11111111-1111-4111-8111-111111111111', expect.any(Function))
   })
 
   // --- Phase 5: gross margin, now that goods receipt persists a cost basis.

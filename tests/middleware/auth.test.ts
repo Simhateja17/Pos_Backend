@@ -6,6 +6,19 @@ import request from 'supertest'
 // auth.ts instantiates createClient() at module load time.
 const getUserMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
+const billingFindFirstMock = vi.fn()
+const billingUpdateManyMock = vi.fn()
+const terminalFindFirstMock = vi.fn()
+const terminalUpdateManyMock = vi.fn()
+const forTenantTransactionMock = vi.fn(async (_tenantId: string, callback: (tx: any) => Promise<unknown>) => callback({
+  staff_members: { findFirst: membershipFindFirstMock },
+  billing_subscriptions: {
+    findFirst: billingFindFirstMock,
+    updateMany: billingUpdateManyMock,
+  },
+  terminals: { findFirst: terminalFindFirstMock, updateMany: terminalUpdateManyMock },
+  staff_sessions: { findFirst: vi.fn(), updateMany: vi.fn() },
+}))
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     auth: { getUser: getUserMock },
@@ -13,9 +26,7 @@ vi.mock('@supabase/supabase-js', () => ({
 }))
 
 vi.mock('../../src/db/tenantClient', () => ({
-  forTenant: vi.fn(() => ({
-    staff_members: { findFirst: membershipFindFirstMock },
-  })),
+  forTenantTransaction: forTenantTransactionMock,
 }))
 
 // Build a syntactically valid (but unsigned/fake) JWT string: header.payload.signature.
@@ -34,6 +45,11 @@ describe('authMiddleware', () => {
     vi.resetModules()
     getUserMock.mockReset()
     membershipFindFirstMock.mockReset()
+    billingFindFirstMock.mockReset().mockResolvedValue(null)
+    billingUpdateManyMock.mockReset()
+    terminalFindFirstMock.mockReset().mockResolvedValue(null)
+    terminalUpdateManyMock.mockReset()
+    forTenantTransactionMock.mockClear()
     membershipFindFirstMock.mockImplementation(({ where }: { where: { role: string; user_id: string } }) => ({
       role: where.role,
       tenant_id: 'tenant-abc',
@@ -63,6 +79,7 @@ describe('authMiddleware', () => {
 
     expect(res.status).toBe(200)
     expect(res.body.user).toEqual({ id: 'user-123', role: 'manager', tenantId: 'tenant-abc' })
+    expect(forTenantTransactionMock).toHaveBeenCalledOnce()
   })
 
   it('uses Couture staff_role while preserving Supabase role=authenticated', async () => {

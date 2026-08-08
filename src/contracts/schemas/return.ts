@@ -15,6 +15,7 @@ export const CreateReturnSchema = z
   .object({
     saleId: z.string().uuid(),
     shiftId: z.string().uuid(),
+    reason: z.string().trim().min(2).max(500),
     lines: z.array(ReturnLineInputSchema).min(1),
     refundPayments: z
       .array(

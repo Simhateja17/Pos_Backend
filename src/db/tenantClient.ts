@@ -1,5 +1,59 @@
 import { basePrisma } from './prisma'
 
+const DEFAULT_MAX_WAIT_MS = 10_000
+const DEFAULT_TRANSACTION_TIMEOUT_MS = 15_000
+const DEFAULT_RETRY_BASE_MS = 50
+const MAX_START_RETRIES = 2
+
+function positiveEnvInt(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? '', 10)
+  return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+const TENANT_TRANSACTION_OPTIONS = {
+  // Prisma's defaults (2s maxWait / 5s timeout) are too small for a
+  // persistent VM talking through Supavisor. These remain bounded; they are
+  // not a license to leave a transaction open indefinitely.
+  maxWait: positiveEnvInt('PRISMA_TX_MAX_WAIT_MS', DEFAULT_MAX_WAIT_MS),
+  timeout: positiveEnvInt('PRISMA_TX_TIMEOUT_MS', DEFAULT_TRANSACTION_TIMEOUT_MS),
+}
+
+function isTransactionStartTimeout(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      (error as { code?: string }).code === 'P2028' &&
+      typeof (error as { message?: unknown }).message === 'string' &&
+      (error as { message: string }).message.includes('Unable to start a transaction'),
+  )
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+/**
+ * Retries only the pre-callback connection-acquisition form of P2028. A
+ * callback that has started is never replayed, so writes cannot be duplicated
+ * by this resilience guard.
+ */
+async function runTenantTransaction<T>(callback: (tx: any) => Promise<T>): Promise<T> {
+  let attempt = 0
+  while (true) {
+    try {
+      return await basePrisma.$transaction(callback, TENANT_TRANSACTION_OPTIONS)
+    } catch (error) {
+      if (!isTransactionStartTimeout(error) || attempt >= MAX_START_RETRIES) {
+        throw error
+      }
+      const base = positiveEnvInt('PRISMA_TX_RETRY_BASE_MS', DEFAULT_RETRY_BASE_MS)
+      const jitter = Math.floor(Math.random() * base)
+      await sleep(base * 2 ** attempt + jitter)
+      attempt += 1
+    }
+  }
+}
+
 /**
  * forTenant(tenantId) returns a Prisma Client Extension that wraps every query
  * in a single interactive transaction: SET (session-local) app.tenant_id first,
@@ -18,11 +72,10 @@ import { basePrisma } from './prisma'
  *
  * CAVEAT: nested `$transaction()` calls from route code will conflict with
  * this per-query transaction wrapping (Prisma does not support nesting
- * interactive transactions). Acceptable for Phase 1's scope (simple CRUD,
- * no cross-model transactional writes yet) — flag for revisit once
- * Phase 2/3 need multi-step transactional writes (e.g. checkout, stock
- * movements), which will likely need a request-scoped transaction
- * (AsyncLocalStorage-based) instead of a per-call one.
+ * interactive transactions). Multi-step workflows must use
+ * `forTenantTransaction()` directly. High-volume read paths should also use
+ * that helper so one request acquires one transaction instead of one per
+ * query.
  */
 export function forTenant(tenantId: string) {
   if (!tenantId) {
@@ -33,7 +86,7 @@ export function forTenant(tenantId: string) {
     query: {
       $allModels: {
         async $allOperations({ args, operation, model }) {
-          return basePrisma.$transaction(async (tx) => {
+          return runTenantTransaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`
             // re-dispatch the original operation against the transaction client
             return (tx as any)[model!][operation](args)
@@ -45,8 +98,7 @@ export function forTenant(tenantId: string) {
 }
 
 /**
- * forTenantTransaction(tenantId, fn) — CR-02: the request-scoped transaction
- * helper flagged as a future need in forTenant()'s own CAVEAT above. Opens
+ * forTenantTransaction(tenantId, fn) — CR-02: opens
  * exactly ONE basePrisma.$transaction for the whole callback, sets
  * app.tenant_id once at the top (so RLS sees the tenant for every operation
  * run against `tx` inside `fn`), and returns fn's result. Use this instead of
@@ -68,7 +120,7 @@ export async function forTenantTransaction<T>(
     throw new Error('tenantId is required')
   }
 
-  return basePrisma.$transaction(async (tx) => {
+  return runTenantTransaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`
     return fn(tx)
   })

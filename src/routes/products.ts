@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { CreateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
+import { requireRole } from '../middleware/requireRole'
 
 const uuidSchema = z.string().uuid()
 
@@ -148,7 +149,7 @@ router.get('/:productId', async (req, res) => {
  * POST / — create a product with 1-N variants in one request (D-02). Each
  * variant gets an auto-generated SKU (D-03) unless the request supplies one.
  */
-router.post('/', async (req, res) => {
+router.post('/', requireRole('manager'), async (req, res) => {
   const parsed = CreateProductSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request' })
@@ -251,7 +252,7 @@ router.post('/', async (req, res) => {
  * 0008 migration's BEFORE UPDATE trigger once identity_locked is true — this
  * app-level check gives a friendly 409 before the DB trigger would raise.
  */
-router.patch('/:productId/variants/:variantId', async (req, res) => {
+router.patch('/:productId/variants/:variantId', requireRole('manager'), async (req, res) => {
   if (!uuidSchema.safeParse(req.params.productId).success || !uuidSchema.safeParse(req.params.variantId).success) {
     return res.status(400).json({ error: 'Invalid productId or variantId' })
   }

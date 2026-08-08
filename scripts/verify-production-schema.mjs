@@ -12,6 +12,11 @@ if (!runtimePassword || runtimePassword === 'CHANGE_ME_VIA_ALTER_ROLE') {
   throw new Error('RLS_DATABASE_URL must contain a provisioned runtime credential')
 }
 
+const runtimeConnection = new URL(runtimeUrl)
+if (runtimeConnection.port === '6543' || runtimeConnection.searchParams.has('pgbouncer')) {
+  throw new Error('RLS_DATABASE_URL must use Supavisor session mode on port 5432 for the persistent PM2 backend; transaction mode (6543) is rejected')
+}
+
 const admin = new Client({ connectionString: adminUrl })
 const runtime = new Client({ connectionString: runtimeUrl })
 

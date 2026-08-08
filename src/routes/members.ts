@@ -9,6 +9,10 @@ import {
 } from '../contracts/schemas/member'
 import { requireRole } from '../middleware/requireRole'
 import { forTenant } from '../db/tenantClient'
+import {
+  requireOperatorOnPairedDevice,
+  requireOperatorOrFirstPinSetup,
+} from '../middleware/requireOperatorOnPairedDevice'
 
 const router = Router()
 
@@ -73,7 +77,7 @@ router.get('/', requireRole('manager'), async (req, res) => {
  * with this four-digit PIN. A manager may create cashiers; only an owner may
  * create another manager through this local-PIN path.
  */
-router.post('/', requireRole('manager'), async (req, res) => {
+router.post('/', requireOperatorOrFirstPinSetup, requireRole('manager'), async (req, res) => {
   const parsed = CreateStaffSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Enter a name, role, and a four-digit temporary PIN.' })
@@ -120,7 +124,7 @@ router.post('/', requireRole('manager'), async (req, res) => {
  * custom_access_token_hook resolve role/tenant_id on the invited member's
  * very first token.
  */
-router.post('/invite', requireRole('owner'), async (req, res) => {
+router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), async (req, res) => {
   const parsed = InviteMemberSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request' })
@@ -165,7 +169,7 @@ router.post('/invite', requireRole('owner'), async (req, res) => {
 
 /** Reset a local staff PIN. Resetting also requires the next login to choose
  * a new personal PIN, so the temporary value is never a long-term secret. */
-router.post('/:memberId/reset-pin', requireRole('manager'), async (req, res) => {
+router.post('/:memberId/reset-pin', requireOperatorOrFirstPinSetup, requireRole('manager'), async (req, res) => {
   const parsed = ResetStaffPinSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits.' })
@@ -208,7 +212,7 @@ router.post('/:memberId/reset-pin', requireRole('manager'), async (req, res) => 
  * forTenant(req.user.tenantId) still scopes the query to the caller's own
  * tenant — a memberId from another tenant simply 404s, never leaked/modified.
  */
-router.patch('/:memberId/role', requireRole('owner'), async (req, res) => {
+router.patch('/:memberId/role', requireOperatorOnPairedDevice, requireRole('owner'), async (req, res) => {
   const parsed = UpdateMemberRoleSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request' })
@@ -253,7 +257,7 @@ router.patch('/:memberId/role', requireRole('owner'), async (req, res) => {
  * Never hard-deletes — preserves historical attribution for future
  * sales/shift records per CLAUDE.md's append-only/attribution discipline.
  */
-router.delete('/:memberId', requireRole('owner'), async (req, res) => {
+router.delete('/:memberId', requireOperatorOnPairedDevice, requireRole('owner'), async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
 
   try {

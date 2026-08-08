@@ -9,6 +9,7 @@ import cors from 'cors'
 import routes from './routes'
 import { errorHandler } from './middleware/errorHandler'
 import { razorpayWebhookHandler } from './routes/razorpayWebhook'
+import { basePrisma } from './db/prisma'
 
 const app = express()
 
@@ -48,6 +49,20 @@ app.use(express.json({ limit: '8mb' }))
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' })
+})
+
+// Liveness stays independent of Postgres so a process supervisor can tell
+// whether Node is alive. Readiness is the signal a load balancer/deploy script
+// should use: it exercises the same restricted runtime pool used by API
+// requests and fails closed instead of routing traffic into a DB outage.
+app.get('/health/ready', async (_req, res) => {
+  try {
+    await basePrisma.$queryRaw`SELECT 1`
+    return res.json({ status: 'ok', database: 'ok' })
+  } catch (error) {
+    console.error(`[health:ready] database check failed: ${error instanceof Error ? error.message : String(error)}`)
+    return res.status(503).json({ status: 'degraded', database: 'unavailable' })
+  }
 })
 
 // operatorContext (CR-01 fix) now requires req.user to already be populated

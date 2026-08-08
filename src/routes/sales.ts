@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client'
 import { CreateSaleSchema, ResendReceiptInputSchema, SaleListQuerySchema } from '../contracts/schemas/sale'
 import { PaymentReadQuerySchema } from '../contracts/schemas/payment'
 import { allowsFractionalQuantity } from '../contracts/schemas/product'
-import { ROLE_RANK } from '../middleware/requireRole'
+import { requireRole, ROLE_RANK } from '../middleware/requireRole'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { computeCheckout } from '../lib/money'
 import { findOrCreateCustomer, searchCustomers } from '../lib/customers'
@@ -143,6 +143,7 @@ router.post('/', async (req, res) => {
   try {
     const deviceClient = forTenant(tenantId) as any
     const pairedTerminal = await findPairedTerminal(deviceClient, req)
+    const actingRole = req.actingStaff?.role ?? req.user!.role
 
     // OFFLINE-01 fast path. A retried or queue-redelivered sale must record
     // exactly once, so a client_sale_id we have already committed short-circuits
@@ -172,7 +173,7 @@ router.post('/', async (req, res) => {
           body: { error: 'This shift has already been closed and cannot accept new sales.' },
         }
       }
-      if (req.actingStaff?.role === 'cashier' && !pairedTerminal) {
+      if (actingRole === 'cashier' && !pairedTerminal) {
         return { status: 409, body: { error: 'This device is not paired to a counter.' } }
       }
       if (pairedTerminal && shift.terminal_id && shift.terminal_id !== pairedTerminal.id) {
@@ -444,7 +445,7 @@ router.post('/', async (req, res) => {
  * payments, matching SaleSchema — 03-04's returns route and 03-08's returns
  * page both need this shape.
  */
-router.get('/payments', async (req, res) => {
+router.get('/payments', requireRole('manager'), async (req, res) => {
   const parsed = PaymentReadQuerySchema.safeParse(req.query)
   if (!parsed.success) return res.status(400).json({ error: 'Invalid payment query' })
 
@@ -496,6 +497,21 @@ router.get('/records', async (req, res) => {
   const parsed = SaleListQuerySchema.safeParse(req.query)
   if (!parsed.success) return res.status(400).json({ error: 'Invalid sale query' })
   const where: any = {}
+
+  // Cashiers may browse the sales currently being rung up on this physical
+  // counter, but never the organisation-wide ledger. Historical lookup stays
+  // available below only through an explicit receipt number or customer phone.
+  const actingRole = req.actingStaff?.role ?? req.user!.role
+  if (actingRole === 'cashier') {
+    const terminal = await findPairedTerminal(client, req)
+    if (!terminal) return res.status(409).json({ error: 'This device is not paired to a counter.' })
+    const currentShift = await client.shifts.findFirst({
+      where: { terminal_id: terminal.id, closed_at: null },
+      select: { id: true },
+    })
+    if (!currentShift) return res.json({ items: [], total: 0, nextCursor: null })
+    where.shift_id = currentShift.id
+  }
   if (parsed.data.status) where.status = parsed.data.status
   if (parsed.data.from || parsed.data.to || parsed.data.cursor) {
     where.created_at = {
@@ -542,6 +558,7 @@ router.get('/', async (req, res) => {
     return res.status(400).json({ error: 'receiptNumber or customerSearch query parameter is required' })
   }
   const client = forTenant(req.user!.tenantId) as any
+  const actingRole = req.actingStaff?.role ?? req.user!.role
   let sales: any[] = []
   if (receiptNumber) {
     if (!z.string().uuid().safeParse(receiptNumber).success) {
@@ -550,8 +567,14 @@ router.get('/', async (req, res) => {
     const sale = await client.sales.findFirst({ where: { id: receiptNumber } })
     sales = sale ? [sale] : []
   } else if (customerSearch) {
-    const customers = await searchCustomers(client, customerSearch)
-    const customerIds = customers.map((c) => c.id)
+    const customers = actingRole === 'cashier'
+      ? await client.customers.findMany({
+          where: { phone: { contains: customerSearch.trim() } },
+          orderBy: { created_at: 'desc' },
+          take: 20,
+        })
+      : await searchCustomers(client, customerSearch)
+    const customerIds = customers.map((c: { id: string }) => c.id)
     sales = customerIds.length > 0 ? await client.sales.findMany({ where: { customer_id: { in: customerIds } }, orderBy: { created_at: 'desc' } }) : []
   }
   const result = []

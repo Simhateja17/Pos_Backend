@@ -21,8 +21,9 @@ import {
   unixSecondsToDate,
   verifyRazorpayCheckoutSignature,
 } from './razorpay'
+import { OPEN_SUBSCRIPTION_STATUSES, subscriptionAccessForRow } from './billingAccess'
 
-const OPEN_STATUSES = ['created', 'authenticated', 'active', 'pending', 'halted']
+const OPEN_STATUSES = [...OPEN_SUBSCRIPTION_STATUSES]
 
 export class BillingHttpError extends Error {
   public readonly expose = true
@@ -78,18 +79,8 @@ function providerSnapshotDates(provider: RazorpaySubscription) {
   }
 }
 
-function accessForRow(row: any, now = new Date()): { entitlement: 'active' | 'grace' | 'blocked'; accessAllowed: boolean; graceUntil: Date | null } {
-  if (!row) return { entitlement: 'blocked', accessAllowed: false, graceUntil: null }
-  if (row.entitlement_status === 'active') return { entitlement: 'active', accessAllowed: true, graceUntil: null }
-  const graceUntil = dateOrNull(row.grace_until_at)
-  if (row.entitlement_status === 'grace' && graceUntil && graceUntil > now) {
-    return { entitlement: 'grace', accessAllowed: true, graceUntil }
-  }
-  return { entitlement: 'blocked', accessAllowed: false, graceUntil: null }
-}
-
 function statusPayload(row: any) {
-  const access = accessForRow(row)
+  const access = subscriptionAccessForRow(row)
   return {
     hasSubscription: Boolean(row),
     entitlement: access.entitlement,
@@ -113,18 +104,25 @@ function statusPayload(row: any) {
 }
 
 export async function getBillingStatus(tenantId: string) {
-  const row = await findOpenSubscription(tenantId)
-  const access = accessForRow(row)
-  if (row && row.entitlement_status === 'grace' && !access.accessAllowed) {
-    const client = forTenant(tenantId) as any
-    await client.billing_subscriptions.update({
-      where: { id: row.id },
-      data: { entitlement_status: 'blocked' },
+  // This middleware runs on nearly every authenticated request. Keep the
+  // read and possible grace-expiry write in one short transaction so a single
+  // request acquires one connection, not one transaction per model operation.
+  return forTenantTransaction(tenantId, async (tx) => {
+    const row = await tx.billing_subscriptions.findFirst({
+      where: { tenant_id: tenantId, status: { in: OPEN_STATUSES } },
+      orderBy: { updated_at: 'desc' },
     })
-    row.entitlement_status = 'blocked'
-    row.grace_until_at = null
-  }
-  return statusPayload(row)
+    const access = subscriptionAccessForRow(row)
+    if (row && row.entitlement_status === 'grace' && !access.accessAllowed) {
+      await tx.billing_subscriptions.update({
+        where: { id: row.id },
+        data: { entitlement_status: 'blocked' },
+      })
+      row.entitlement_status = 'blocked'
+      row.grace_until_at = null
+    }
+    return statusPayload(row)
+  })
 }
 
 function subscriptionResponse(attempt: any, region: BillingRegion) {
