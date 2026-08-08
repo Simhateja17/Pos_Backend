@@ -156,7 +156,7 @@ describe('products routes — variants (CATALOG-01)', () => {
     const app = await buildApp()
     const res = await request(app)
       .post('/products')
-      .set('Authorization', `Bearer ${tokenFor('cashier')}`)
+      .set('Authorization', `Bearer ${tokenFor('manager')}`)
       .send({ name: 'One Size Scarf', variants: [{ price: 19.99 }] })
 
     expect(res.status).toBe(201)

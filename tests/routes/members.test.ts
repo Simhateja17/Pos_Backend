@@ -44,9 +44,14 @@ vi.mock('../../src/db/tenantClient', () => ({
       count: staffMembersCountMock,
     },
   })),
-  forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
+  forTenantTransaction: vi.fn(async (tenantId: string, fn: (tx: any) => Promise<any>) =>
     fn({
-      staff_members: { findFirst: membershipFindFirstMock },
+      staff_members: {
+        findFirst: async (args: any) => {
+          const membership = await membershipFindFirstMock(args)
+          return membership ? { ...membership, tenant_id: tenantId } : null
+        },
+      },
       billing_subscriptions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       terminals: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
