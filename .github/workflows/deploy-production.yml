@@ -38,6 +38,10 @@ jobs:
     steps:
       - name: Check out backend
         uses: actions/checkout@v4
+        with:
+          # The migration decision compares this commit with its immediate
+          # predecessor. A shallow one-commit checkout cannot make that safe.
+          fetch-depth: 2
 
       - name: Set up Node.js 24
         uses: actions/setup-node@v4
@@ -48,7 +52,20 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Detect checked-in migration changes
+        id: migration_changes
+        run: |
+          if git rev-parse --verify HEAD^ >/dev/null 2>&1 \
+            && git diff --quiet HEAD^ HEAD -- supabase/migrations; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No SQL migration changed; skipping db push for this code-only release."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "SQL migration change detected; db push is required."
+          fi
+
       - name: Apply checked-in Supabase migrations
+        if: steps.migration_changes.outputs.changed == 'true'
         run: npm exec --yes supabase@latest -- db push --db-url "$DATABASE_URL" --include-all
 
       - name: Verify production schema and runtime identity
