@@ -55,7 +55,7 @@ app.get('/health', (_req, res) => {
 // whether Node is alive. Readiness is the signal a load balancer/deploy script
 // should use: it exercises the same restricted runtime pool used by API
 // requests and fails closed instead of routing traffic into a DB outage.
-app.get('/health/ready', async (_req, res) => {
+async function readinessHandler(_req: express.Request, res: express.Response) {
   try {
     await basePrisma.$queryRaw`SELECT 1`
     return res.json({ status: 'ok', database: 'ok' })
@@ -63,7 +63,14 @@ app.get('/health/ready', async (_req, res) => {
     console.error(`[health:ready] database check failed: ${error instanceof Error ? error.message : String(error)}`)
     return res.status(503).json({ status: 'degraded', database: 'unavailable' })
   }
-})
+}
+
+app.get('/health/ready', readinessHandler)
+
+// Browser readiness uses the same /api proxy path as operational requests.
+// Keeping it here (before the authenticated router) makes the probe public,
+// while the database query still exercises the restricted runtime pool.
+app.get('/api/status', readinessHandler)
 
 // operatorContext (CR-01 fix) now requires req.user to already be populated
 // (it verifies the token's tenant_id against req.user.tenantId), so it is no
