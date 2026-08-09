@@ -10,9 +10,9 @@ export const PinSwitchSchema = z
   .object({
     staffId: z.string(),
     pin: z.string(),
-    /** Approval tokens are one-sale sessions and must not interrupt the
-     * cashier currently operating the counter. */
-    sessionType: z.enum(['register', 'approval']).default('register'),
+    /** Approval and management sessions must not interrupt the cashier
+     * currently operating the counter. */
+    sessionType: z.enum(['register', 'approval', 'management']).default('register'),
   })
   .openapi('PinSwitchRequest')
 

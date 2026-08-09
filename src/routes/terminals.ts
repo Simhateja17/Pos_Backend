@@ -8,6 +8,7 @@ import {
   getCounterDeviceToken,
   hashCounterDeviceToken,
   setCounterDeviceCookie,
+  isRegisterLocked,
 } from '../lib/counterDevice'
 import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
 
@@ -75,13 +76,14 @@ router.get('/', async (req, res) => {
 router.get('/device', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const terminal = await findPairedTerminal(client, req)
-  if (!terminal) return res.json({ terminal: null })
+  if (!terminal) return res.json({ terminal: null, isRegisterLocked: isRegisterLocked(req) })
 
   const openShift = await client.shifts.findFirst({
     where: { terminal_id: terminal.id, closed_at: null },
     select: { id: true },
   })
   return res.json({
+    isRegisterLocked: isRegisterLocked(req),
     terminal: toTerminalJson(
       terminal,
       Boolean(openShift),

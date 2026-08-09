@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Request, Response } from 'express'
 
 vi.mock('../../src/db/tenantClient', () => ({ forTenant: vi.fn(() => ({})) }))
-vi.mock('../../src/lib/counterDevice', () => ({ findPairedTerminal: vi.fn() }))
+vi.mock('../../src/lib/counterDevice', () => ({
+  findPairedTerminal: vi.fn(),
+  isRegisterLocked: vi.fn(() => false),
+}))
 
-import { findPairedTerminal } from '../../src/lib/counterDevice'
+import { findPairedTerminal, isRegisterLocked } from '../../src/lib/counterDevice'
 import { forTenant } from '../../src/db/tenantClient'
 import {
   requireOperatorOnPairedDevice,
@@ -19,7 +22,10 @@ function response(): Response {
 }
 
 describe('requireOperatorOnPairedDevice', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(isRegisterLocked).mockReturnValue(false)
+  })
 
   it('allows an unpaired owner browser to perform setup', async () => {
     vi.mocked(findPairedTerminal).mockResolvedValue(null)
@@ -31,6 +37,20 @@ describe('requireOperatorOnPairedDevice', () => {
 
     expect(next).toHaveBeenCalledOnce()
     expect(res.status).not.toHaveBeenCalled()
+  })
+
+  it('keeps an explicitly locked register protected even when its counter pairing is missing', async () => {
+    vi.mocked(findPairedTerminal).mockResolvedValue(null)
+    vi.mocked(isRegisterLocked).mockReturnValue(true)
+    const req = { user: { id: 'owner', tenantId: 'tenant', role: 'owner' } } as Request
+    const res = response()
+    const next = vi.fn()
+
+    await requireOperatorOnPairedDevice(req, res, next)
+
+    expect(next).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(423)
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'REGISTER_LOCKED' }))
   })
 
   it('locks a paired browser when no staff PIN session is active', async () => {

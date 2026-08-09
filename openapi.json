@@ -2265,7 +2265,8 @@
             "type": "string",
             "enum": [
               "register",
-              "approval"
+              "approval",
+              "management"
             ],
             "default": "register"
           }
@@ -6055,6 +6056,31 @@
         }
       }
     },
+    "/terminal/pin/lock": {
+      "post": {
+        "description": "Lock this browser as a shared register while keeping the organisation session connected.",
+        "responses": {
+          "200": {
+            "description": "Register locked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/terminal/pin/switch": {
       "post": {
         "description": "PIN-switch the acting operator on a shared terminal. Requires an existing authenticated session (authMiddleware); does not create a new Supabase Auth session — issues a short-lived signed operator token instead (D-09/D-10).",
@@ -6080,6 +6106,9 @@
           },
           "401": {
             "description": "Incorrect PIN, locked out, or unauthenticated"
+          },
+          "409": {
+            "description": "The browser must be paired before a register or approval session can start"
           }
         }
       }
@@ -6809,10 +6838,14 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "isRegisterLocked": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
-                    "terminal"
+                    "terminal",
+                    "isRegisterLocked"
                   ]
                 }
               }

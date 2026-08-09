@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express'
 import { forTenant } from '../db/tenantClient'
-import { findPairedTerminal } from '../lib/counterDevice'
+import { findPairedTerminal, isRegisterLocked } from '../lib/counterDevice'
 import { ROLE_RANK } from './requireRole'
 
 function locked(res: Response) {
@@ -34,7 +34,7 @@ export async function requireOperatorOnPairedDevice(
     ? req.accessContext.pairedTerminalId
     : (await findPairedTerminal(forTenant(req.user.tenantId) as any, req))?.id ?? null
 
-  if (pairedTerminalId && !req.actingStaff) {
+  if ((pairedTerminalId || isRegisterLocked(req)) && !req.actingStaff) {
     return locked(res)
   }
 
@@ -59,7 +59,7 @@ export async function requireOperatorOrFirstPinSetup(
   const pairedTerminalId = req.accessContext
     ? req.accessContext.pairedTerminalId
     : (await findPairedTerminal(client, req))?.id ?? null
-  if (!pairedTerminalId) return next()
+  if (!pairedTerminalId && !isRegisterLocked(req)) return next()
   if (ROLE_RANK[req.user.role] < ROLE_RANK.manager) return locked(res)
 
   const pinReadyStaff = await client.staff_members.count({

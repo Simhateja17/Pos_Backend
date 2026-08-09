@@ -4,13 +4,34 @@ import { validatePin, signOperatorToken } from '../middleware/pinSwitch'
 import { ChangeOperatorPinSchema, PinSwitchSchema } from '../contracts/schemas/pin'
 import { requireRole } from '../middleware/requireRole'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
-import { findPairedTerminal } from '../lib/counterDevice'
+import { findPairedTerminal, setRegisterLockedCookie } from '../lib/counterDevice'
 import { consumeRateLimit } from '../lib/rateLimit'
+import { pinSessionRequiresTerminal } from '../lib/pinSessionPolicy'
 
 const router = Router()
 const PIN_SWITCH_WINDOW_MS = 15 * 60 * 1000
 const PIN_SWITCH_TARGET_LIMIT = 10
 const PIN_SWITCH_ACTOR_LIMIT = 30
+
+/**
+ * Persist the fact that this browser is operating as a shared register. The
+ * organisation login remains alive underneath, but cannot be used to escape
+ * the lock screen without a PIN-verified operator session.
+ */
+router.post('/lock', async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' })
+
+  if (req.actingStaff?.sessionId) {
+    const client = forTenant(req.user.tenantId) as any
+    await client.staff_sessions.updateMany({
+      where: { id: req.actingStaff.sessionId, logged_out_at: null },
+      data: { logged_out_at: new Date(), logout_reason: 'explicit', last_seen_at: new Date() },
+    })
+  }
+
+  setRegisterLockedCookie(res)
+  return res.json({ ok: true })
+})
 
 /**
  * POST /switch — PIN-switch the acting operator on a shared terminal.
@@ -52,6 +73,13 @@ router.post('/switch', async (req, res) => {
   const client = forTenant(req.user.tenantId) as any
   const terminal = await findPairedTerminal(client, req)
 
+  // A cashier session without a counter has no valid shift, drawer, or sales
+  // attribution. Only management authentication is allowed before pairing so
+  // an owner/manager can assign this browser to a counter.
+  if (!terminal && pinSessionRequiresTerminal(sessionType)) {
+    return res.status(409).json({ error: 'Assign this device to a counter before staff can sign in.' })
+  }
+
   const result = await validatePin(req.user.tenantId, staffId, pin)
 
   if (!result.ok) {
@@ -60,6 +88,10 @@ router.post('/switch', async (req, res) => {
         ? 'Too many attempts. Ask a manager to unlock this terminal.'
         : 'Incorrect PIN — try again.'
     return res.status(401).json({ error: message })
+  }
+
+  if (sessionType === 'management' && result.staff.role === 'cashier') {
+    return res.status(403).json({ error: 'Owner or manager PIN required.' })
   }
 
   const openShift = terminal

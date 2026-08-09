@@ -438,6 +438,15 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'post',
+  path: '/terminal/pin/lock',
+  description: 'Lock this browser as a shared register while keeping the organisation session connected.',
+  responses: {
+    200: { description: 'Register locked', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
   path: '/terminal/pin/switch',
   description: 'PIN-switch the acting operator on a shared terminal. Requires an existing authenticated session (authMiddleware); does not create a new Supabase Auth session — issues a short-lived signed operator token instead (D-09/D-10).',
   request: {
@@ -446,6 +455,7 @@ registry.registerPath({
   responses: {
     200: { description: 'PIN-switch successful', content: { 'application/json': { schema: PinSwitchResponseSchema } } },
     401: { description: 'Incorrect PIN, locked out, or unauthenticated' },
+    409: { description: 'The browser must be paired before a register or approval session can start' },
   },
 })
 
@@ -662,7 +672,14 @@ registry.registerPath({
   responses: {
     200: {
       description: 'Current counter pairing',
-      content: { 'application/json': { schema: z.object({ terminal: z.union([TerminalSchema, z.null()]) }) } },
+      content: {
+        'application/json': {
+          schema: z.object({
+            terminal: z.union([TerminalSchema, z.null()]),
+            isRegisterLocked: z.boolean(),
+          }),
+        },
+      },
     },
   },
 })

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { Request, Response } from 'express'
 
 export const COUNTER_DEVICE_COOKIE = 'couture_counter_device'
+export const REGISTER_LOCK_COOKIE = 'couture_register_locked'
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 60_000
 
 function positiveEnvInt(name: string, fallback: number): number {
@@ -32,6 +33,10 @@ export function getCounterDeviceToken(req: Request): string | undefined {
   return parseCookies(req.headers.cookie)[COUNTER_DEVICE_COOKIE]
 }
 
+export function isRegisterLocked(req: Request): boolean {
+  return parseCookies(req.headers.cookie)[REGISTER_LOCK_COOKIE] === '1'
+}
+
 export function hashCounterDeviceToken(token: string): string {
   return createHash('sha256').update(token).digest('hex')
 }
@@ -40,23 +45,35 @@ export function createCounterDeviceToken(): string {
   return randomBytes(32).toString('hex')
 }
 
-export function setCounterDeviceCookie(res: Response, token: string) {
-  const sameSite = (process.env.AUTH_COOKIE_SAME_SITE ?? 'lax').toLowerCase()
+function cookieAttributes(maxAge: number) {
+  // Production currently serves the frontend and API from different origins.
+  // SameSite=None is required for the device/lock cookies to survive those
+  // credentialed API requests; local development remains Lax.
+  const defaultSameSite = process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+  const sameSite = (process.env.AUTH_COOKIE_SAME_SITE || defaultSameSite).toLowerCase()
   const normalizedSameSite = sameSite === 'strict' || sameSite === 'none' ? sameSite : 'lax'
   const secure = process.env.NODE_ENV === 'production' || normalizedSameSite === 'none'
-  const attributes = [
+  return [
     'Path=/',
     'HttpOnly',
     `SameSite=${normalizedSameSite[0].toUpperCase()}${normalizedSameSite.slice(1)}`,
-    'Max-Age=31536000',
+    `Max-Age=${maxAge}`,
     ...(secure ? ['Secure'] : []),
   ].join('; ')
+}
+
+export function setCounterDeviceCookie(res: Response, token: string) {
+  const attributes = cookieAttributes(31_536_000)
 
   res.append('Set-Cookie', `${COUNTER_DEVICE_COOKIE}=${encodeURIComponent(token)}; ${attributes}`)
 }
 
 export function clearCounterDeviceCookie(res: Response) {
-  res.append('Set-Cookie', `${COUNTER_DEVICE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
+  res.append('Set-Cookie', `${COUNTER_DEVICE_COOKIE}=; ${cookieAttributes(0)}`)
+}
+
+export function setRegisterLockedCookie(res: Response) {
+  res.append('Set-Cookie', `${REGISTER_LOCK_COOKIE}=1; ${cookieAttributes(31_536_000)}`)
 }
 
 export async function findPairedTerminal(client: any, req: Request) {
