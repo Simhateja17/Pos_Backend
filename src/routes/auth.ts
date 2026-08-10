@@ -185,9 +185,31 @@ router.post('/signup', async (req, res) => {
       },
     })
 
+    // Phase 8: a tenant is a BUSINESS and must own at least one store. Migration
+    // 0041 backfilled every pre-existing tenant; this is the equivalent for new
+    // signups. Without it a fresh tenant would have no store, and every
+    // store-scoped write (sale, stock movement, shift) would fail on the NOT
+    // NULL store_id added in 0043/0044.
+    //
+    // Named and addressed from the business itself, exactly as 0041's backfill
+    // does, so a single-shop owner never sees a shop they didn't create.
+    const store = await tenantScoped.stores.create({
+      data: {
+        tenant_id: tenantId,
+        name: tradeName ?? businessName,
+        address_line1: addressLine1,
+        address_line2: addressLine2 ?? null,
+        city,
+        state,
+        postal_code: postalCode,
+        country,
+      },
+    })
+
     await tenantScoped.staff_members.create({
       data: {
         tenant_id: tenantId,
+        store_id: store.id,
         user_id: newUser.id,
         name: ownerName,
         role: 'owner',
