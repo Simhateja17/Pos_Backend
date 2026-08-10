@@ -52,6 +52,7 @@ describe('GET /stock-movements/low-stock (INV-03)', () => {
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
       tenant_id: 'tenant-abc',
+      store_id: 'store-1',
     }))
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
     productsFindManyMock.mockResolvedValue([{ id: 'product-1', name: 'Blue Dress' }])
@@ -59,10 +60,14 @@ describe('GET /stock-movements/low-stock (INV-03)', () => {
 
   async function buildApp() {
     const { authMiddleware } = await import('../../src/middleware/auth')
+  // Mirrors routes/index.ts's appAccess chain: without storeContextMiddleware
+  // the route has no req.storeContext, and storeScopeWhere() deliberately
+  // throws rather than silently reading every shop.
+  const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
     const { default: stockMovementsRouter } = await import('../../src/routes/stockMovements')
     const app = express()
     app.use(express.json())
-    app.use('/stock-movements', authMiddleware, stockMovementsRouter)
+    app.use('/stock-movements', authMiddleware, storeContextMiddleware, stockMovementsRouter)
     return app
   }
 

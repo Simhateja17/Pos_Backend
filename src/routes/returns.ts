@@ -1,3 +1,4 @@
+import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { CreateReturnSchema } from '../contracts/schemas/return'
@@ -138,6 +139,11 @@ router.post('/', async (req, res) => {
         const movement = await tx.stock_movements.create({
           data: {
             tenant_id: tenantId,
+            // Phase 8: attributed to the shop that ACCEPTED the return, which
+            // may not be the shop that made the sale — a customer can return at
+            // any outlet. The goods land on this shop's shelf and the refund
+            // leaves this shop's till, so this is where the movement belongs.
+            store_id: activeStoreId(req),
             variant_id: refundLine.saleLineItem.variant_id,
             movement_type: 'return',
             quantity_delta: refundLine.quantity,

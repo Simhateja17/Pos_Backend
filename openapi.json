@@ -1226,7 +1226,6 @@
           "skuCount",
           "importMethod",
           "unitOfMeasure",
-          "barcodeFormat",
           "hsnAutoLookup",
           "mrpRequired",
           "variantTracking",
@@ -1524,6 +1523,30 @@
         "required": [
           "email",
           "purpose"
+        ]
+      },
+      "OwnerPinRecoveryRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "SetPinRequest": {
+        "type": "object",
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^\\d{4}$"
+          }
+        },
+        "required": [
+          "pin"
         ]
       },
       "AuthResponse": {
@@ -2202,18 +2225,6 @@
           "quantity",
           "reorderThreshold",
           "unitOfMeasure"
-        ]
-      },
-      "SetPinRequest": {
-        "type": "object",
-        "properties": {
-          "pin": {
-            "type": "string",
-            "pattern": "^\\d{4}$"
-          }
-        },
-        "required": [
-          "pin"
         ]
       },
       "PinSwitchResponse": {
@@ -3175,6 +3186,222 @@
           "countedCash"
         ]
       },
+      "Store": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "addressLine1": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addressLine2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postalCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "isOwnStore": {
+            "type": "boolean"
+          },
+          "taxRateState": {
+            "type": "string"
+          },
+          "taxRateCounty": {
+            "type": "string"
+          },
+          "taxRateCity": {
+            "type": "string"
+          },
+          "taxRateDistrict": {
+            "type": "string"
+          },
+          "placeOfSupply": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "addressLine1",
+          "addressLine2",
+          "city",
+          "state",
+          "postalCode",
+          "country",
+          "isActive",
+          "createdAt",
+          "isOwnStore",
+          "taxRateState",
+          "taxRateCounty",
+          "taxRateCity",
+          "taxRateDistrict",
+          "placeOfSupply"
+        ]
+      },
+      "CreateStoreRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "addressLine1": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "addressLine2": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "postalCode": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "country": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2
+          },
+          "taxRateState": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "taxRateCounty": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "taxRateCity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "taxRateDistrict": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "placeOfSupply": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateStoreRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "addressLine1": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "addressLine2": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "postalCode": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "country": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "taxRateState": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "taxRateCounty": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "taxRateCity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "taxRateDistrict": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "placeOfSupply": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateTerminalRequest": {
         "type": "object",
         "properties": {
@@ -3447,6 +3674,9 @@
           },
           "discountThresholdPercent": {
             "type": "string"
+          },
+          "barcodeLabelFormat": {
+            "$ref": "#/components/schemas/BarcodeLabelFormat"
           }
         },
         "required": [
@@ -3463,7 +3693,17 @@
           "placeOfSupply",
           "businessType",
           "combinedTaxRatePercent",
-          "discountThresholdPercent"
+          "discountThresholdPercent",
+          "barcodeLabelFormat"
+        ]
+      },
+      "BarcodeLabelFormat": {
+        "type": "string",
+        "enum": [
+          "code128",
+          "ean13",
+          "upca",
+          "qr"
         ]
       },
       "UpdateStoreSettingsRequest": {
@@ -3550,6 +3790,9 @@
             "type": "number",
             "minimum": 0,
             "maximum": 100
+          },
+          "barcodeLabelFormat": {
+            "$ref": "#/components/schemas/BarcodeLabelFormat"
           }
         },
         "additionalProperties": false
@@ -5526,6 +5769,89 @@
         }
       }
     },
+    "/auth/owner-pin-recovery/request": {
+      "post": {
+        "description": "Request a one-time email link to recover an owner counter PIN. Always returns the same success response for existing and non-existing accounts.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnerPinRecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recovery email requested when applicable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid email address"
+          },
+          "502": {
+            "description": "Recovery email provider unavailable"
+          }
+        }
+      }
+    },
+    "/auth/owner-pin-recovery/confirm": {
+      "post": {
+        "description": "Use the authenticated Supabase recovery-link session to replace the current active owner's 4-digit counter PIN and revoke their active PIN sessions.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner PIN recovered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid PIN"
+          },
+          "401": {
+            "description": "Invalid or expired recovery link"
+          },
+          "403": {
+            "description": "Owner role required"
+          }
+        }
+      }
+    },
     "/auth/signup": {
       "post": {
         "description": "Real self-serve signup — verifies the emailed OTP (creating the Supabase Auth user if needed), then creates a tenants row with the full business/tax profile and an owner staff_members row.",
@@ -6764,6 +7090,116 @@
           },
           "409": {
             "description": "Shift already closed"
+          }
+        }
+      }
+    },
+    "/stores": {
+      "get": {
+        "description": "The business's shops (Phase 8). An owner receives every store; a manager or cashier receives only their own, since they have no Stores module and no reason to enumerate the business's other outlets.",
+        "responses": {
+          "200": {
+            "description": "Stores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stores": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Store"
+                      }
+                    }
+                  },
+                  "required": [
+                    "stores"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Open a new shop. Owner only — adding an outlet is a business decision and a billing event. Names are unique per business, case-insensitively.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Store created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Store"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "409": {
+            "description": "A store with that name already exists"
+          }
+        }
+      }
+    },
+    "/stores/{storeId}": {
+      "patch": {
+        "description": "Rename, re-address, retax or deactivate a shop. Owner only. Stores are deactivated rather than deleted because historical sales, shifts and Z reports must keep naming the shop they happened at, and a business must always retain at least one active store.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "storeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Store updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Store"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "404": {
+            "description": "Store not found"
+          },
+          "409": {
+            "description": "Name taken, or this is the last active store"
           }
         }
       }

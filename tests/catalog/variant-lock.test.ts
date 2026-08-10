@@ -25,6 +25,12 @@ vi.mock('../../src/db/tenantClient', () => ({
     },
     variant_stock_levels: {
       findFirst: variantStockLevelsFindFirstMock,
+      // Phase 8: stock is per (variant, store), so the route reads via
+      // stockForVariant() -> findMany and sums, rather than findFirst.
+      findMany: vi.fn(async () => {
+        const row = await variantStockLevelsFindFirstMock()
+        return row ? [row] : []
+      }),
     },
   })),
   forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
@@ -70,15 +76,17 @@ describe('products routes — variant identity lock (CATALOG-01/D-04)', () => {
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
       tenant_id: 'tenant-abc',
+      store_id: 'store-1',
     }))
   })
 
   async function buildApp() {
     const { authMiddleware } = await import('../../src/middleware/auth')
+    const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
     const { default: productsRouter } = await import('../../src/routes/products')
     const app = express()
     app.use(express.json())
-    app.use('/products', authMiddleware, productsRouter)
+    app.use('/products', authMiddleware, storeContextMiddleware, productsRouter)
     return app
   }
 

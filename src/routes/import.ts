@@ -1,3 +1,4 @@
+import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { forTenant } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
@@ -185,6 +186,7 @@ router.post('/batches/:id/commit', requireRole('owner'), async (req, res) => {
   try {
     const result = await commitImport({
       tenantId: req.user!.tenantId,
+      storeId: activeStoreId(req),
       batchId: batch.id,
       kind: batch.kind as ImportKind,
       fileHash: batch.file_hash,

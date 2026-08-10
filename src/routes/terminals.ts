@@ -1,3 +1,4 @@
+import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
@@ -104,6 +105,7 @@ router.post('/', requireOperatorOnPairedDevice, requireRole('manager'), async (r
     const created = await client.terminals.create({
       data: {
         tenant_id: req.user!.tenantId,
+        store_id: activeStoreId(req),
         name: parsed.data.name,
         cash_mode: parsed.data.cashMode,
       },

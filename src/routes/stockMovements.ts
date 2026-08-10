@@ -1,8 +1,10 @@
+import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import { CreateStockMovementSchema } from '../contracts/schemas/stockMovement'
 import { allowsFractionalQuantity } from '../contracts/schemas/product'
 import { ROLE_RANK } from '../middleware/requireRole'
+import { stockByVariant as stockLevelsFor } from '../lib/stockLevels'
 import { forTenant } from '../db/tenantClient'
 
 const router = Router()
@@ -95,6 +97,7 @@ router.post('/', async (req, res) => {
     const movement = await client.stock_movements.create({
       data: {
         tenant_id: req.user!.tenantId,
+        store_id: activeStoreId(req),
         variant_id: parsed.data.variantId,
         movement_type: parsed.data.movementType,
         quantity_delta: parsed.data.quantityDelta,
@@ -139,8 +142,10 @@ router.get('/', async (req, res) => {
 router.get('/low-stock', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const variants = await client.variants.findMany({})
-  const stockLevels = await client.variant_stock_levels.findMany({})
-  const stockByVariant = new Map(stockLevels.map((s: any) => [s.variant_id, s.quantity]))
+  // Low stock is a PER-SHOP fact: Andheri being out matters even when Bandra
+  // is full, so this must not aggregate unless the owner explicitly asked for
+  // business scope.
+  const stockByVariant = await stockLevelsFor(client, req)
   const productIds = [...new Set(variants.map((v: any) => v.product_id))]
   const products = await client.products.findMany({ where: { id: { in: productIds } } })
   const productNameById = new Map(products.map((p: any) => [p.id, p.name]))

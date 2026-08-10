@@ -55,9 +55,13 @@ function tokenFor(tenantId = '11111111-1111-4111-8111-111111111111') {
 
 async function buildApp() {
   const { authMiddleware } = await import('../../src/middleware/auth')
+  // Mirrors routes/index.ts's appAccess chain: without storeContextMiddleware
+  // the route has no req.storeContext, and storeScopeWhere() deliberately
+  // throws rather than silently reading every shop.
+  const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
   const { default: dashboardRouter } = await import('../../src/routes/dashboard')
   const app = express()
-  app.use('/dashboard', authMiddleware, dashboardRouter)
+  app.use('/dashboard', authMiddleware, storeContextMiddleware, dashboardRouter)
   return app
 }
 

@@ -25,8 +25,9 @@ describe('OFFLINE-01 sale idempotency (real Supabase project)', () => {
   let productId: string
   let variantId: string
 
-  const baseSale = (tenantId: string, clientSaleId: string) => ({
+  const baseSale = (tenantId: string, clientSaleId: string, storeId: string) => ({
     tenant_id: tenantId,
+    store_id: storeId,
     client_sale_id: clientSaleId,
     subtotal: '100.00',
     discount_amount: '0',
@@ -64,11 +65,11 @@ describe('OFFLINE-01 sale idempotency (real Supabase project)', () => {
 
   it('rejects a second sale with the same (tenant_id, client_sale_id)', async () => {
     const clientSaleId = randomUUID()
-    await superClient.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId) })
+    await superClient.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId, seed.tenantA.storeId) })
 
     // The retry. Postgres must refuse it — this is the whole guarantee.
     await expect(
-      superClient.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId) }),
+      superClient.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId, seed.tenantA.storeId) }),
     ).rejects.toMatchObject({ code: 'P2002' })
 
     const rows = await superClient.sales.findMany({
@@ -85,7 +86,7 @@ describe('OFFLINE-01 sale idempotency (real Supabase project)', () => {
     // races to insert. Serial retries would not exercise the constraint.
     const attempts = Array.from({ length: 50 }, () =>
       superClient.sales
-        .create({ data: baseSale(seed.tenantA.id, clientSaleId) })
+        .create({ data: baseSale(seed.tenantA.id, clientSaleId, seed.tenantA.storeId) })
         .then(() => 'created' as const)
         .catch((err: any) => (err?.code === 'P2002' ? ('conflict' as const) : Promise.reject(err))),
     )
@@ -105,8 +106,8 @@ describe('OFFLINE-01 sale idempotency (real Supabase project)', () => {
     // a tenant. Two tenants colliding must NOT block each other.
     const clientSaleId = randomUUID()
 
-    const a = await superClient.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId) })
-    const b = await superClient.sales.create({ data: baseSale(seed.tenantB.id, clientSaleId) })
+    const a = await superClient.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId, seed.tenantA.storeId) })
+    const b = await superClient.sales.create({ data: baseSale(seed.tenantB.id, clientSaleId, seed.tenantA.storeId) })
 
     expect(a.id).not.toEqual(b.id)
 
@@ -115,7 +116,7 @@ describe('OFFLINE-01 sale idempotency (real Supabase project)', () => {
 
   it('leaves no orphaned lines, payments or stock movements when a replay is rejected', async () => {
     const clientSaleId = randomUUID()
-    const sale = await superClient.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId) })
+    const sale = await superClient.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId, seed.tenantA.storeId) })
 
     await superClient.sale_line_items.create({
       data: {
@@ -135,10 +136,11 @@ describe('OFFLINE-01 sale idempotency (real Supabase project)', () => {
     // partially-applied retry is the exact harm OFFLINE-01 exists to prevent.
     await expect(
       superClient.$transaction(async (tx) => {
-        await tx.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId) })
+        await tx.sales.create({ data: baseSale(seed.tenantA.id, clientSaleId, seed.tenantA.storeId) })
         await tx.stock_movements.create({
           data: {
             tenant_id: seed.tenantA.id,
+            store_id: seed.tenantA.storeId,
             variant_id: variantId,
             movement_type: 'sale',
             quantity_delta: -1,

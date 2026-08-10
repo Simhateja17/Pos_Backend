@@ -19,7 +19,7 @@ type VerifiedIdentity = {
 }
 
 type ResolvedRequestAccess = {
-  membership: { role: StaffRole; tenant_id: string } | null
+  membership: { role: StaffRole; tenant_id: string; store_id: string } | null
   accessContext: RequestAccessContext | null
 }
 
@@ -60,7 +60,11 @@ export async function resolveRequestAccess(
   return forTenantTransaction(identity.tenantId, async (tx) => {
     const membership = await tx.staff_members.findFirst({
       where: { user_id: identity.userId, role: identity.role, is_active: true },
-      select: { role: true, tenant_id: true },
+      // store_id (Phase 8) comes from the membership row, not the JWT claim.
+      // The claim is a cache written at token-issue time; moving a staff member
+      // to another shop must take effect on their next request, not on their
+      // next token refresh.
+      select: { role: true, tenant_id: true, store_id: true },
     })
 
     if (
@@ -152,7 +156,11 @@ export async function resolveRequestAccess(
     }
 
     return {
-      membership: { role: membership.role as StaffRole, tenant_id: membership.tenant_id },
+      membership: {
+        role: membership.role as StaffRole,
+        tenant_id: membership.tenant_id,
+        store_id: membership.store_id,
+      },
       accessContext: {
         subscription,
         pairedTerminalId: pairedTerminal?.id ?? null,

@@ -156,6 +156,12 @@ type CommitInput = {
   sourceText: string
   mappings: ConfirmedMapping[]
   createdBy: string | null
+  /**
+   * Phase 8: which shop the imported history belongs to. Imported stock lands
+   * on one shop's shelves and imported sales happened at one shop — there is no
+   * meaningful business-wide import, so this is required rather than optional.
+   */
+  storeId: string
 }
 
 export async function commitImport(input: CommitInput): Promise<ImportResult> {
@@ -325,6 +331,7 @@ async function commitCatalog(
       await tx.stock_movements.create({
         data: {
           tenant_id: input.tenantId,
+          store_id: input.storeId,
           variant_id: variantId,
           movement_type: 'receive',
           // Not rounded: 12.5 kg of opening stock must land as 12.5 (0031).
@@ -480,6 +487,7 @@ async function commitSales(
     const created = await tx.sales.create({
       data: {
         tenant_id: input.tenantId,
+        store_id: input.storeId,
         client_sale_id: clientSaleId,
         subtotal: subtotal.toFixed(2),
         discount_amount: discount.toFixed(2),

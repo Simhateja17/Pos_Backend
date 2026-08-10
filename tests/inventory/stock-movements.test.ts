@@ -62,6 +62,7 @@ describe('stock-movements routes (INV-01)', () => {
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
       tenant_id: 'tenant-abc',
+      store_id: 'store-1',
     }))
     variantsFindFirstMock.mockReset()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
@@ -74,10 +75,11 @@ describe('stock-movements routes (INV-01)', () => {
 
   async function buildApp() {
     const { authMiddleware } = await import('../../src/middleware/auth')
+    const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
     const { default: stockMovementsRouter } = await import('../../src/routes/stockMovements')
     const app = express()
     app.use(express.json())
-    app.use('/stock-movements', authMiddleware, stockMovementsRouter)
+    app.use('/stock-movements', authMiddleware, storeContextMiddleware, stockMovementsRouter)
     return app
   }
 

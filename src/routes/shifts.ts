@@ -1,3 +1,4 @@
+import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
@@ -228,6 +229,7 @@ router.post('/', async (req, res) => {
     const shift = await client.shifts.create({
       data: {
         tenant_id: req.user!.tenantId,
+        store_id: activeStoreId(req),
         staff_id: staffId,
         terminal_id: terminal.id,
         starting_cash: startingCash,

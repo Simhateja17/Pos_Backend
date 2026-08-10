@@ -1,3 +1,4 @@
+import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
@@ -139,6 +140,10 @@ router.post('/', async (req, res) => {
   }
 
   const tenantId = req.user!.tenantId
+  // Phase 8: a sale belongs to the shop that rang it up. activeStoreId() throws
+  // under business scope rather than guessing, so a checkout can never be
+  // recorded against an arbitrary shop.
+  const storeId = activeStoreId(req)
 
   try {
     const deviceClient = forTenant(tenantId) as any
@@ -287,6 +292,7 @@ router.post('/', async (req, res) => {
       const sale = await tx.sales.create({
         data: {
           tenant_id: tenantId,
+          store_id: storeId,
           client_sale_id: parsed.data.clientSaleId,
           shift_id: parsed.data.shiftId,
           customer_id: customer?.id ?? null,
@@ -343,6 +349,7 @@ router.post('/', async (req, res) => {
         await tx.stock_movements.create({
           data: {
             tenant_id: tenantId,
+            store_id: storeId,
             variant_id: line.variantId,
             movement_type: 'sale',
             quantity_delta: -line.quantity,

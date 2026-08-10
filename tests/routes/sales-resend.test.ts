@@ -24,7 +24,7 @@ function buildApp(role: 'owner' | 'manager' | 'cashier' = 'cashier') {
   const app = express()
   app.use(express.json())
   app.use((req, _res, next) => {
-    req.user = { id: 'user-1', role, tenantId: 'tenant-1' }
+    req.user = { id: 'user-1', role, tenantId: 'tenant-1', storeId: 'store-1', }
     next()
   })
   return import('../../src/routes/sales').then(({ default: salesRouter }) => {

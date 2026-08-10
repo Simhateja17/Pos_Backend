@@ -39,6 +39,15 @@ export interface SeededStaff {
 export interface SeededTenant {
   id: string
   businessName: string
+  /** The tenant's primary store. Staff belong here; most fixtures use only this. */
+  storeId: string
+  /**
+   * A second store in the SAME tenant. Phase 8 needs this to prove per-store
+   * behaviour that a single store cannot: that selling at one shop does not
+   * draw down the other's stock, and that a cashier pinned to one shop is
+   * refused at the other. Harmless to tests that ignore it.
+   */
+  secondStoreId: string
   owner: SeededStaff
   manager: SeededStaff
   cashier: SeededStaff
@@ -77,6 +86,32 @@ async function seedOneTenant(label: 'a' | 'b', runId: string): Promise<SeededTen
     },
   })
 
+  // Phase 8: a tenant is a business and owns stores. Two of them, so per-store
+  // isolation is testable rather than assumed.
+  const store = await superPrisma.stores.create({
+    data: {
+      tenant_id: tenantId,
+      name: `${businessName} Main`,
+      address_line1: '123 Test St',
+      city: 'Testville',
+      state: 'CA',
+      postal_code: '90001',
+      country: 'US',
+    },
+  })
+
+  const secondStore = await superPrisma.stores.create({
+    data: {
+      tenant_id: tenantId,
+      name: `${businessName} Second`,
+      address_line1: '456 Test Rd',
+      city: 'Testville',
+      state: 'CA',
+      postal_code: '90002',
+      country: 'US',
+    },
+  })
+
   const pinHash = await bcrypt.hash(KNOWN_TEST_PIN, 10)
 
   const ownerEmail = `test-${label}-owner-${runId}@example.com`
@@ -84,6 +119,7 @@ async function seedOneTenant(label: 'a' | 'b', runId: string): Promise<SeededTen
   const ownerRow = await superPrisma.staff_members.create({
     data: {
       tenant_id: tenantId,
+      store_id: store.id,
       user_id: ownerUserId,
       name: `Owner ${label.toUpperCase()}`,
       role: 'owner',
@@ -97,6 +133,7 @@ async function seedOneTenant(label: 'a' | 'b', runId: string): Promise<SeededTen
   const managerRow = await superPrisma.staff_members.create({
     data: {
       tenant_id: tenantId,
+      store_id: store.id,
       user_id: managerUserId,
       name: `Manager ${label.toUpperCase()}`,
       role: 'manager',
@@ -111,6 +148,7 @@ async function seedOneTenant(label: 'a' | 'b', runId: string): Promise<SeededTen
   const cashierRow = await superPrisma.staff_members.create({
     data: {
       tenant_id: tenantId,
+      store_id: store.id,
       user_id: null,
       name: `Cashier ${label.toUpperCase()}`,
       role: 'cashier',
@@ -122,6 +160,8 @@ async function seedOneTenant(label: 'a' | 'b', runId: string): Promise<SeededTen
   return {
     id: tenantId,
     businessName,
+    storeId: store.id,
+    secondStoreId: secondStore.id,
     owner: {
       id: ownerRow.id,
       name: ownerRow.name,

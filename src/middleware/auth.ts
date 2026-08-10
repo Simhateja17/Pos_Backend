@@ -121,7 +121,12 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     return res.status(403).json({ error: 'No tenant membership found' })
   }
 
-  req.user = { id: data.user.id, role: resolved.membership.role, tenantId }
+  req.user = {
+    id: data.user.id,
+    role: resolved.membership.role,
+    tenantId,
+    storeId: resolved.membership.store_id,
+  }
   req.accessContext = resolved.accessContext
   next()
 }

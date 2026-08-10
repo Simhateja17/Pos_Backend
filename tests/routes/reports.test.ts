@@ -9,7 +9,8 @@ describe('report SQL stays aligned with the category schema', () => {
       { $queryRawUnsafe: queryRawUnsafe },
       {
         kind: 'sales-by-category',
-        tenantId: '11111111-1111-4111-8111-111111111111',
+        storeId: null,
+      tenantId: '11111111-1111-4111-8111-111111111111',
         zone: 'UTC',
         from: '2026-08-01',
         to: '2026-08-07',

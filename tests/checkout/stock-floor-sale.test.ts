@@ -56,6 +56,7 @@ describe('D-17 stock-floor-guard sale carve-out (real Supabase project, app_runt
       await tx.stock_movements.create({
         data: {
           tenant_id: seed.tenantA.id,
+          store_id: seed.tenantA.storeId,
           variant_id: variantId,
           movement_type: 'sale',
           quantity_delta: -1,
@@ -67,7 +68,8 @@ describe('D-17 stock-floor-guard sale carve-out (real Supabase project, app_runt
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`
       return tx.variant_stock_levels.findFirst({ where: { variant_id: variantId } })
     })
-    expect(level?.quantity).toBe(-1)
+    // quantity is numeric(12,3) -> Prisma Decimal, never a JS number.
+    expect(Number(level?.quantity)).toBe(-1)
   })
 
   it('Test 2: an `adjustment` movement that would take the same variant further negative is still rejected by the floor guard', async () => {
@@ -77,6 +79,7 @@ describe('D-17 stock-floor-guard sale carve-out (real Supabase project, app_runt
         await tx.stock_movements.create({
           data: {
             tenant_id: seed.tenantA.id,
+            store_id: seed.tenantA.storeId,
             variant_id: variantId,
             movement_type: 'adjustment',
             quantity_delta: -5,

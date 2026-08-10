@@ -82,12 +82,15 @@ describe('purchase order routes', () => {
       const token = req.headers.authorization?.replace('Bearer ', '')
       if (token) {
         const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
-        ;(req as any).user = { tenantId: payload.tenant_id, role: payload.role }
+        ;(req as any).user = { tenantId: payload.tenant_id, role: payload.role, storeId: 'store-1' }
       }
       next()
     })
     const { default: router } = await import('../../src/routes/purchase-orders')
-    app.use('/purchase-orders', router)
+    // Mirrors routes/index.ts's appAccess: the route calls activeStoreId(),
+    // which throws rather than guessing when store context is absent.
+    const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
+    app.use('/purchase-orders', storeContextMiddleware, router)
     return app
   }
 

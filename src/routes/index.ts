@@ -25,9 +25,11 @@ import importRouter from './import'
 import reportsRouter from './reports'
 import emailRouter from './email'
 import billingRouter from './billing'
+import storesRouter from './stores'
 import { requireSubscription } from '../middleware/requireSubscription'
 import { requireRole } from '../middleware/requireRole'
 import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
+import { storeContextMiddleware } from '../middleware/storeContext'
 
 const router = Router()
 
@@ -50,7 +52,13 @@ router.use('/terminals', authMiddleware, requireSubscription, operatorContext, t
 // Once a browser is paired to a counter, the organisation login remains the
 // durable device session but cannot authorize app work by itself. A verified
 // staff PIN session is required before any operational or admin API below.
-const appAccess = [authMiddleware, requireSubscription, operatorContext, requireOperatorOnPairedDevice]
+// storeContextMiddleware resolves WHICH SHOP the request acts on (Phase 8).
+// It sits in appAccess so every operational route below gets req.storeContext
+// without opting in — a store-scoped route that forgot to mount it would read
+// or write against the wrong shop, which is the worst failure this phase can
+// produce. activeStoreId() throws rather than defaulting, for the same reason.
+const appAccess = [authMiddleware, requireSubscription, operatorContext, requireOperatorOnPairedDevice, storeContextMiddleware]
+router.use('/stores', ...appAccess, storesRouter)
 router.use('/products', ...appAccess, productsRouter)
 router.use('/categories', ...appAccess, categoriesRouter)
 router.use('/sales', ...appAccess, salesRouter)

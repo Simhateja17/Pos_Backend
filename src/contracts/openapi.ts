@@ -10,7 +10,14 @@ import {
 } from './schemas/category'
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi'
 import { z } from 'zod'
-import { SignupSchema, LoginSchema, OtpRequestSchema, AuthResponseSchema, SetPinSchema } from './schemas/auth'
+import {
+  SignupSchema,
+  LoginSchema,
+  OtpRequestSchema,
+  OwnerPinRecoveryRequestSchema,
+  AuthResponseSchema,
+  SetPinSchema,
+} from './schemas/auth'
 import {
   CreateStaffSchema,
   InviteMemberSchema,
@@ -37,6 +44,7 @@ import {
   ZReportSchema,
 } from './schemas/shift'
 import { TerminalSchema, CreateTerminalSchema, UpdateTerminalSchema } from './schemas/terminal'
+import { StoreSchema, CreateStoreSchema, UpdateStoreSchema } from './schemas/store'
 import {
   CompleteOnboardingSchema,
   OnboardingCompletionResponseSchema,
@@ -233,6 +241,35 @@ registry.registerPath({
   responses: {
     200: { description: 'Code sent (if applicable)', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
     400: { description: 'Invalid request' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/auth/owner-pin-recovery/request',
+  description: 'Request a one-time email link to recover an owner counter PIN. Always returns the same success response for existing and non-existing accounts.',
+  request: {
+    body: { content: { 'application/json': { schema: OwnerPinRecoveryRequestSchema } } },
+  },
+  responses: {
+    200: { description: 'Recovery email requested when applicable', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+    400: { description: 'Invalid email address' },
+    502: { description: 'Recovery email provider unavailable' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/auth/owner-pin-recovery/confirm',
+  description: 'Use the authenticated Supabase recovery-link session to replace the current active owner\'s 4-digit counter PIN and revoke their active PIN sessions.',
+  request: {
+    body: { content: { 'application/json': { schema: SetPinSchema } } },
+  },
+  responses: {
+    200: { description: 'Owner PIN recovered', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+    400: { description: 'Invalid PIN' },
+    401: { description: 'Invalid or expired recovery link' },
+    403: { description: 'Owner role required' },
   },
 })
 
@@ -653,6 +690,51 @@ registry.registerPath({
     200: { description: 'Shift closed', content: { 'application/json': { schema: ZReportSchema } } },
     404: { description: 'Shift not found' },
     409: { description: 'Shift already closed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/stores',
+  description:
+    "The business's shops (Phase 8). An owner receives every store; a manager or cashier receives only their own, since they have no Stores module and no reason to enumerate the business's other outlets.",
+  responses: {
+    200: {
+      description: 'Stores',
+      content: { 'application/json': { schema: z.object({ stores: z.array(StoreSchema) }) } },
+    },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/stores',
+  description:
+    'Open a new shop. Owner only — adding an outlet is a business decision and a billing event. Names are unique per business, case-insensitively.',
+  request: { body: { content: { 'application/json': { schema: CreateStoreSchema } } } },
+  responses: {
+    201: { description: 'Store created', content: { 'application/json': { schema: StoreSchema } } },
+    400: { description: 'Invalid request' },
+    403: { description: 'Owner role required' },
+    409: { description: 'A store with that name already exists' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/stores/{storeId}',
+  description:
+    'Rename, re-address, retax or deactivate a shop. Owner only. Stores are deactivated rather than deleted because historical sales, shifts and Z reports must keep naming the shop they happened at, and a business must always retain at least one active store.',
+  request: {
+    params: z.object({ storeId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdateStoreSchema } } },
+  },
+  responses: {
+    200: { description: 'Store updated', content: { 'application/json': { schema: StoreSchema } } },
+    400: { description: 'Invalid request' },
+    403: { description: 'Owner role required' },
+    404: { description: 'Store not found' },
+    409: { description: 'Name taken, or this is the last active store' },
   },
 })
 

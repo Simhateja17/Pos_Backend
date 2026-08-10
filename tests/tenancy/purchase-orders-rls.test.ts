@@ -41,7 +41,7 @@ describe('Purchase order RLS + receipt idempotency (real Supabase project, app_r
     supplierId = supplier.id
 
     const po = await superClient.purchase_orders.create({
-      data: { tenant_id: seed.tenantA.id, supplier_id: supplierId, po_number: 'PO-TEST-1', status: 'sent' },
+      data: { tenant_id: seed.tenantA.id, store_id: seed.tenantA.storeId, supplier_id: supplierId, po_number: 'PO-TEST-1', status: 'sent' },
     })
     poId = po.id
     const poLine = await superClient.purchase_order_lines.create({
@@ -59,7 +59,7 @@ describe('Purchase order RLS + receipt idempotency (real Supabase project, app_r
       data: { tenant_id: seed.tenantB.id, name: 'Tenant B Supplier', lead_time_days: 4 },
     })
     const tenantBPo = await superClient.purchase_orders.create({
-      data: { tenant_id: seed.tenantB.id, supplier_id: tenantBSupplier.id, po_number: 'PO-TEST-B', status: 'sent' },
+      data: { tenant_id: seed.tenantB.id, store_id: seed.tenantB.storeId, supplier_id: tenantBSupplier.id, po_number: 'PO-TEST-B', status: 'sent' },
     })
     tenantBPoId = tenantBPo.id
   }, 90000)
@@ -97,7 +97,7 @@ describe('Purchase order RLS + receipt idempotency (real Supabase project, app_r
     await client.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`
       const receipt = await tx.purchase_order_receipts.create({
-        data: { tenant_id: seed.tenantA.id, purchase_order_id: poId, client_receipt_id: clientReceiptId },
+        data: { tenant_id: seed.tenantA.id, store_id: seed.tenantA.storeId, purchase_order_id: poId, client_receipt_id: clientReceiptId },
       })
       await tx.purchase_order_receipt_lines.create({
         data: {
@@ -121,8 +121,10 @@ describe('Purchase order RLS + receipt idempotency (real Supabase project, app_r
       }
     })
 
-    expect(level?.quantity).toBe(40)
-    expect(line?.quantity_received).toBe(40)
+    // quantity is numeric(12,3) -> Prisma Decimal, never a JS number.
+    expect(Number(level?.quantity)).toBe(40)
+    // quantity_received is numeric(12,3) -> Prisma Decimal, never a JS number.
+    expect(Number(line?.quantity_received)).toBe(40)
     expect(po?.status).toBe('partial')
     // First receipt for this variant — no prior stock, so the average is the
     // receipt price outright (decision-cost-basis.md "Edge cases").
@@ -135,7 +137,7 @@ describe('Purchase order RLS + receipt idempotency (real Supabase project, app_r
       client.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`
         return tx.purchase_order_receipts.create({
-          data: { tenant_id: seed.tenantA.id, purchase_order_id: poId, client_receipt_id: clientReceiptId },
+          data: { tenant_id: seed.tenantA.id, store_id: seed.tenantA.storeId, purchase_order_id: poId, client_receipt_id: clientReceiptId },
         })
       })
 
@@ -148,14 +150,15 @@ describe('Purchase order RLS + receipt idempotency (real Supabase project, app_r
     })
     // Unchanged from Test 2 — the replayed receipt carried no lines and the
     // duplicate was rejected outright.
-    expect(level?.quantity).toBe(40)
+    // quantity is numeric(12,3) -> Prisma Decimal, never a JS number.
+    expect(Number(level?.quantity)).toBe(40)
   }, 60000)
 
   it('Test 4: the second receipt completes the order and moves the average to the weighted value', async () => {
     await client.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`
       const receipt = await tx.purchase_order_receipts.create({
-        data: { tenant_id: seed.tenantA.id, purchase_order_id: poId, client_receipt_id: randomUUID() },
+        data: { tenant_id: seed.tenantA.id, store_id: seed.tenantA.storeId, purchase_order_id: poId, client_receipt_id: randomUUID() },
       })
       await tx.purchase_order_receipt_lines.create({
         data: {
@@ -178,7 +181,8 @@ describe('Purchase order RLS + receipt idempotency (real Supabase project, app_r
       }
     })
 
-    expect(level?.quantity).toBe(100)
+    // quantity is numeric(12,3) -> Prisma Decimal, never a JS number.
+    expect(Number(level?.quantity)).toBe(100)
     expect(po?.status).toBe('received')
     // (40 * 520 + 60 * 500) / 100 = 508.00
     expect(Number(variant?.moving_average_cost)).toBe(508)

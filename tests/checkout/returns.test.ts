@@ -43,13 +43,14 @@ describe('Returns/refunds real-Supabase proof (CHECK-07, D-09 through D-12)', ()
     variantId = variant.id
 
     const shift = await superClient.shifts.create({
-      data: { tenant_id: seed.tenantA.id, staff_id: seed.tenantA.cashier.id, starting_cash: 100.0 },
+      data: { tenant_id: seed.tenantA.id, store_id: seed.tenantA.storeId, staff_id: seed.tenantA.cashier.id, starting_cash: 100.0 },
     })
     shiftId = shift.id
 
     const sale = await superClient.sales.create({
       data: {
         tenant_id: seed.tenantA.id,
+        store_id: seed.tenantA.storeId,
         client_sale_id: randomUUID(),
         shift_id: shiftId,
         subtotal: 40.0,
@@ -84,6 +85,7 @@ describe('Returns/refunds real-Supabase proof (CHECK-07, D-09 through D-12)', ()
       await tx.stock_movements.create({
         data: {
           tenant_id: seed.tenantA.id,
+          store_id: seed.tenantA.storeId,
           variant_id: variantId,
           movement_type: 'sale',
           quantity_delta: -2,
@@ -118,6 +120,7 @@ describe('Returns/refunds real-Supabase proof (CHECK-07, D-09 through D-12)', ()
       await tx.stock_movements.create({
         data: {
           tenant_id: seed.tenantA.id,
+          store_id: seed.tenantA.storeId,
           variant_id: variantId,
           movement_type: 'return',
           quantity_delta: 1,
@@ -131,7 +134,8 @@ describe('Returns/refunds real-Supabase proof (CHECK-07, D-09 through D-12)', ()
       return tx.variant_stock_levels.findFirst({ where: { variant_id: variantId } })
     })
     // Started at -2 (sale), +1 (return) = -1.
-    expect(level?.quantity).toBe(-1)
+    // quantity is numeric(12,3) -> Prisma Decimal, never a JS number.
+    expect(Number(level?.quantity)).toBe(-1)
 
     const refund = await client.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`

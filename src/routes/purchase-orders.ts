@@ -1,3 +1,4 @@
+import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import {
@@ -106,6 +107,7 @@ router.post('/', async (req, res) => {
           created = await tx.purchase_orders.create({
             data: {
               tenant_id: tenantId,
+              store_id: activeStoreId(req),
               supplier_id: parsed.data.supplierId,
               po_number: poNumber,
               status: 'draft',
@@ -232,6 +234,7 @@ router.post('/:poId/receive', async (req, res) => {
       const receipt = await tx.purchase_order_receipts.create({
         data: {
           tenant_id: tenantId,
+          store_id: activeStoreId(req),
           purchase_order_id: po.id,
           client_receipt_id: parsed.data.clientReceiptId,
           note: parsed.data.note ?? null,

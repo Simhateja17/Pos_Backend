@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { CreateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
+import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
 
@@ -77,51 +78,107 @@ async function generateSku(client: any, tenantId: string, productName: string, e
 }
 
 /**
+ * Cap on how many products a `?search=` may return. Only the substring
+ * fallback can reach it — an exact barcode/SKU hit short-circuits to a single
+ * product. Unsearched listing stays uncapped: the catalog, labels and
+ * inventory screens all render the full list and have no paging UI.
+ */
+const SEARCH_RESULT_LIMIT = 50
+
+/**
+ * Resolves a search string to the product ids it should return, exact match
+ * first. Returns [] for "searched, matched nothing" — the caller must not
+ * confuse that with `null`, which means "no search, return everything".
+ */
+async function matchingProductIds(client: any, search: string): Promise<string[]> {
+  // Step 1 — exact code, the path a barcode scan takes. Both
+  // (tenant_id, barcode) [0031] and (tenant_id, sku) [0006] are unique
+  // indexes, so this is a single index lookup at any catalog size.
+  //
+  // Barcode is compared before, and separately from, SKU: a scanned EAN is
+  // unambiguous and must not be diluted by a SKU that merely contains the
+  // same digits. It is also compared case-sensitively, being digits-only by
+  // schema (BarcodeSchema); SKU is not, so it needs an insensitive compare to
+  // preserve the old lowercase-both behaviour.
+  const exact = await client.variants.findFirst({
+    where: { OR: [{ barcode: search }, { sku: { equals: search, mode: 'insensitive' } }] },
+    select: { product_id: true },
+  })
+  if (exact) {
+    return [exact.product_id]
+  }
+
+  // Step 2 — substring fallback (CHECK-02: search by name when there is no
+  // barcode). ILIKE '%...%', served by 0050's pg_trgm GIN indexes.
+  const matches = await client.products.findMany({
+    where: {
+      OR: [
+        { name: { contains: search, mode: 'insensitive' } },
+        { variants: { some: { sku: { contains: search, mode: 'insensitive' } } } },
+      ],
+    },
+    orderBy: { created_at: 'asc' },
+    take: SEARCH_RESULT_LIMIT,
+    select: { id: true },
+  })
+  return matches.map((p: { id: string }) => p.id)
+}
+
+/**
  * GET /?search= — list the caller's tenant's products with variants +
- * current stock. An optional `search` param filters to an exact-sku match
- * (CHECK-01's barcode-scan target, the same `sku` field Phase 2 encodes into
- * printed labels) OR a partial product-name match (CHECK-02), matching in
- * memory after the existing findMany calls (small-shop catalog scale,
- * consistent with this route's existing in-memory-join style — no
- * $queryRaw, which forTenant()'s wrapper does not intercept).
+ * current stock.
+ *
+ * Filtering happens in SQL. The previous implementation pulled every product
+ * and variant for the tenant into Node and filtered with Array.filter, which
+ * made a barcode scan — the one interaction that has to feel instant —
+ * proportional to catalog size. At the 2,000-10,000 SKU tier the roadmap
+ * targets that is the wrong shape.
+ *
+ * Matching is BY PRODUCT: a product whose name matches returns all of its
+ * variants, not only the matching ones. That is the pre-existing contract and
+ * the checkout result list depends on it.
+ *
+ * Stock still goes through stockLevelsFor(), never a join. Since Phase 8
+ * `variant_stock_levels` holds one row per (variant, store), so joining it
+ * here would fan out one product row per shop — the bug that double-counted
+ * the stock-valuation report. The helper aggregates correctly for both store
+ * and business scope.
+ *
+ * Prisma model queries throughout, never $queryRaw: the tenant wrapper does
+ * not intercept raw SQL, so a raw query would run without app.tenant_id set
+ * and fall outside RLS.
+ *
  * No requireRole gate — catalog viewing/management is not gated per CONTEXT.md
  * (only stock adjustments are, D-13, enforced in stockMovements.ts).
  */
 router.get('/', async (req, res) => {
-  const search = (req.query.search as string | undefined)?.trim().toLowerCase()
+  const search = (req.query.search as string | undefined)?.trim()
   const client = forTenant(req.user!.tenantId) as any
-  const products = await client.products.findMany({ orderBy: { created_at: 'asc' } })
-  const variants = await client.variants.findMany({ orderBy: { created_at: 'asc' } })
-  const stockLevels = await client.variant_stock_levels.findMany({})
-  const stockByVariant = new Map(stockLevels.map((s: any) => [s.variant_id, s.quantity]))
+
+  const productIds = search ? await matchingProductIds(client, search) : null
+  if (productIds !== null && productIds.length === 0) {
+    return res.json([])
+  }
+
+  const products = await client.products.findMany({
+    ...(productIds !== null ? { where: { id: { in: productIds } } } : {}),
+    orderBy: { created_at: 'asc' },
+    include: { variants: { orderBy: { created_at: 'asc' } } },
+  })
+
+  const variantIds = products.flatMap((p: any) => p.variants.map((v: VariantRow) => v.id))
+  const stockByVariant = await stockLevelsFor(client, req, variantIds)
   const categoryNameById = await categoryNames(client)
 
-  const filteredVariants = search
-    ? variants.filter(
-        (v: any) =>
-          // Exact barcode match first: a scanned EAN is unambiguous and must not
-          // be diluted by substring SKU hits.
-          v.barcode === search ||
-          v.sku.toLowerCase() === search ||
-          v.sku.toLowerCase().includes(search),
-      )
-    : variants
-  const relevantProductIds = search
-    ? new Set([
-        ...filteredVariants.map((v: any) => v.product_id),
-        ...products.filter((p: any) => p.name.toLowerCase().includes(search)).map((p: any) => p.id),
-      ])
-    : null
-
-  const result = products
-    .filter((product: any) => !relevantProductIds || relevantProductIds.has(product.id))
-    .map((product: any) => {
-      const productVariants = variants
-        .filter((v: any) => v.product_id === product.id)
-        .map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0)))
-      return toProductJson(product, productVariants, categoryNameById)
-    })
-  res.json(result)
+  res.json(
+    products.map((product: any) =>
+      toProductJson(
+        product,
+        product.variants.map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0))),
+        categoryNameById,
+      ),
+    ),
+  )
 })
 
 /**
@@ -139,8 +196,7 @@ router.get('/:productId', async (req, res) => {
     return res.status(404).json({ error: 'Product not found' })
   }
   const variants = await client.variants.findMany({ where: { product_id: product.id } })
-  const stockLevels = await client.variant_stock_levels.findMany({ where: { variant_id: { in: variants.map((v: any) => v.id) } } })
-  const stockByVariant = new Map(stockLevels.map((s: any) => [s.variant_id, s.quantity]))
+  const stockByVariant = await stockLevelsFor(client, req, variants.map((v: any) => v.id))
   const variantJson = variants.map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0)))
   res.json(toProductJson(product, variantJson, await categoryNames(client)))
 })
@@ -290,8 +346,8 @@ router.patch('/:productId/variants/:variantId', requireRole('manager'), async (r
         ...(parsed.data.reorderThreshold !== undefined ? { reorder_threshold: parsed.data.reorderThreshold } : {}),
       },
     })
-    const stock = await client.variant_stock_levels.findFirst({ where: { variant_id: updated.id } })
-    return res.status(200).json(toVariantJson(updated, Number(stock?.quantity ?? 0)))
+    const quantity = await stockForVariant(client, req, updated.id)
+    return res.status(200).json(toVariantJson(updated, quantity))
   } catch {
     // Catches the DB trigger's raised exception too, as a defense-in-depth backstop.
     return res.status(409).json({ error: 'Variant identity is locked once stock has moved' })

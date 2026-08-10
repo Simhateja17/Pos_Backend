@@ -61,6 +61,7 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
       await tx.stock_movements.create({
         data: {
           tenant_id: seed.tenantA.id,
+          store_id: seed.tenantA.storeId,
           variant_id: vId,
           movement_type: movementType,
           quantity_delta: delta,
@@ -106,6 +107,7 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
       await tx.stock_movements.create({
         data: {
           tenant_id: seed.tenantA.id,
+          store_id: seed.tenantA.storeId,
           variant_id: variantId,
           movement_type: 'receive',
           quantity_delta: 10,
@@ -117,7 +119,8 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`
       return tx.variant_stock_levels.findFirst({ where: { variant_id: variantId } })
     })
-    expect(level?.quantity).toBe(10)
+    // quantity is numeric(12,3) -> Prisma Decimal, never a JS number.
+    expect(Number(level?.quantity)).toBe(10)
   })
 
   it('Test 2: a second movement (adjustment, -3) trigger-derives the running balance to 7, not a fresh overwrite', async () => {
@@ -126,6 +129,7 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
       await tx.stock_movements.create({
         data: {
           tenant_id: seed.tenantA.id,
+          store_id: seed.tenantA.storeId,
           variant_id: variantId,
           movement_type: 'adjustment',
           quantity_delta: -3,
@@ -138,7 +142,8 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`
       return tx.variant_stock_levels.findFirst({ where: { variant_id: variantId } })
     })
-    expect(level?.quantity).toBe(7)
+    // quantity is numeric(12,3) -> Prisma Decimal, never a JS number.
+    expect(Number(level?.quantity)).toBe(7)
   })
 
   it('Test 3: app_runtime cannot UPDATE variant_stock_levels directly — Postgres refuses (GRANT-level, not RLS)', async () => {

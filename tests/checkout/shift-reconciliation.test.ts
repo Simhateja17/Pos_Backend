@@ -45,7 +45,7 @@ describe('Shift reconciliation real-Supabase proof (CASH-01/CASH-02, D-13 throug
     // Test 1: opening a shift with startingCash=$100.00 persists a shifts row
     // with closed_at IS NULL.
     const shift = await superClient.shifts.create({
-      data: { tenant_id: seed.tenantA.id, staff_id: seed.tenantA.cashier.id, starting_cash: 100.0 },
+      data: { tenant_id: seed.tenantA.id, store_id: seed.tenantA.storeId, staff_id: seed.tenantA.cashier.id, starting_cash: 100.0 },
     })
     shiftId = shift.id
     expect(shift.closed_at).toBeNull()
@@ -56,6 +56,7 @@ describe('Shift reconciliation real-Supabase proof (CASH-01/CASH-02, D-13 throug
     const cashSale = await superClient.sales.create({
       data: {
         tenant_id: seed.tenantA.id,
+        store_id: seed.tenantA.storeId,
         client_sale_id: randomUUID(),
         shift_id: shiftId,
         subtotal: 50.0,
@@ -80,6 +81,7 @@ describe('Shift reconciliation real-Supabase proof (CASH-01/CASH-02, D-13 throug
     const cardSale = await superClient.sales.create({
       data: {
         tenant_id: seed.tenantA.id,
+        store_id: seed.tenantA.storeId,
         client_sale_id: randomUUID(),
         shift_id: shiftId,
         subtotal: 30.0,

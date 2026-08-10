@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { DashboardQuerySchema } from '../contracts/schemas/dashboard'
+import { storeScopeWhere } from '../middleware/storeContext'
 import { forTenantTransaction } from '../db/tenantClient'
 
 const router = Router()
@@ -35,6 +36,12 @@ router.get('/', async (req, res) => {
 
   const now = new Date()
   const startsAt = indiaDayBoundary(now, RANGE_DAYS[parsed.data.range])
+  // Phase 8: every fact below is per-shop. Under store scope this narrows to
+  // one shop; under an owner's explicit business scope (X-Store-Id: all) the
+  // fragment is empty and the dashboard genuinely covers the whole business.
+  // Without it, an owner drilled into Andheri would see the business's takings
+  // labelled as Andheri's.
+  const storeScope = storeScopeWhere(req)
   const { sales, saleLines, openShift, variants, stockLevels, products } = await forTenantTransaction(
     req.user!.tenantId,
     async (tx) => {
@@ -42,19 +49,21 @@ router.get('/', async (req, res) => {
       // transactions against the same tenant. Keep the transaction limited to
       // database reads; all calculations happen after commit below.
       const sales = await tx.sales.findMany({
-        where: { status: 'completed', created_at: { gte: startsAt, lte: now } },
+        where: { status: 'completed', created_at: { gte: startsAt, lte: now }, ...storeScope },
         select: { total_amount: true, created_at: true },
         orderBy: { created_at: 'asc' },
       })
       // Line-level detail is what makes margin computable: cost lives per
       // variant, so revenue has to be attributed per variant too.
       const saleLines = await tx.sale_line_items.findMany({
-        where: { sales: { status: 'completed', created_at: { gte: startsAt, lte: now } } },
+        // Scoped through the parent sale: a line item belongs to the shop that
+        // rang it up, and sale_line_items carries no store_id of its own.
+        where: { sales: { status: 'completed', created_at: { gte: startsAt, lte: now }, ...storeScope } },
         select: { variant_id: true, quantity: true, line_total: true },
       })
-      const openShift = await tx.shifts.findFirst({ where: { closed_at: null }, orderBy: { opened_at: 'desc' } })
+      const openShift = await tx.shifts.findFirst({ where: { closed_at: null, ...storeScope }, orderBy: { opened_at: 'desc' } })
       const variants = await tx.variants.findMany({})
-      const stockLevels = await tx.variant_stock_levels.findMany({})
+      const stockLevels = await tx.variant_stock_levels.findMany({ where: { ...storeScope } })
       const productIds = [...new Set(variants.map((variant: any) => variant.product_id))]
       const products = productIds.length > 0
         ? await tx.products.findMany({ where: { id: { in: productIds } } })
@@ -63,7 +72,12 @@ router.get('/', async (req, res) => {
     },
   )
 
-  const stockByVariant = new Map(stockLevels.map((level: any) => [level.variant_id, Number(level.quantity)]))
+  // Additive, not assignment: under business scope a variant has one row PER
+  // SHOP, and the old map shape silently kept only the last one.
+  const stockByVariant = new Map<string, number>()
+  for (const level of stockLevels as any[]) {
+    stockByVariant.set(level.variant_id, (stockByVariant.get(level.variant_id) ?? 0) + Number(level.quantity))
+  }
   const productNameById = new Map(products.map((product: any) => [product.id, product.name]))
   const lowStock = variants
     .map((variant: any) => ({ variant, quantity: stockByVariant.get(variant.id) ?? 0 }))

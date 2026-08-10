@@ -69,6 +69,7 @@ router.get('/', requireRole('manager'), async (req, res) => {
     return buildReport(tx, {
       kind: parsed.data.kind,
       tenantId,
+      storeId: req.storeContext?.activeStoreId ?? null,
       zone,
       from,
       to,
@@ -82,6 +83,12 @@ router.get('/', requireRole('manager'), async (req, res) => {
 type BuildArgs = {
   kind: ReportKind
   tenantId: string
+  /**
+   * Phase 8: the shop this report covers, or null for an owner's business-wide
+   * report. Reports are raw SQL, so they do not get store scoping for free from
+   * the Prisma helpers — each query has to filter explicitly.
+   */
+  storeId: string | null
   zone: string
   from: string
   to: string
@@ -248,6 +255,11 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
     case 'stock-valuation': {
       // Point-in-time: current stock, not a range. Said so in the description
       // rather than pretending the date filter applies.
+      // variant_stock_levels holds one row per (variant, STORE) since 0043.
+      // A plain `left join ... on sl.variant_id = v.id` therefore emits one row
+      // PER SHOP for every variant, so a shirt stocked in two shops appeared
+      // twice and the report's totals counted it twice. Aggregate before
+      // joining, filtered to the report's shop ($2 null = whole business).
       const rows = await tx.$queryRawUnsafe(
         `select p.name as product, v.sku, coalesce(sl.quantity, 0)::int as on_hand,
                 v.price as unit_price, v.moving_average_cost as unit_cost,
@@ -256,11 +268,17 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
                      else coalesce(sl.quantity, 0) * v.moving_average_cost end as cost_value
          from variants v
          join products p on p.id = v.product_id
-         left join variant_stock_levels sl on sl.variant_id = v.id
+         left join (
+           select variant_id, sum(quantity) as quantity
+           from variant_stock_levels
+           where ($2::uuid is null or store_id = $2::uuid)
+           group by variant_id
+         ) sl on sl.variant_id = v.id
          where v.tenant_id = $1::uuid
          order by 7 desc nulls last, 6 desc
          limit 1000`,
         args.tenantId,
+        args.storeId,
       )
 
       const uncosted = rows.filter((row: any) => row.unit_cost === null).length

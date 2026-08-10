@@ -15,7 +15,7 @@ function mockRes(): Response {
 
 describe('requireRole', () => {
   it('Test 1: req.user.role = manager, no actingStaff, requireRole(manager) -> next()', () => {
-    const req = mockReq({ user: { id: 'u1', role: 'manager', tenantId: 't1' } })
+    const req = mockReq({ user: { id: 'u1', role: 'manager', tenantId: 't1', storeId: 'store-1', } })
     const res = mockRes()
     const next = vi.fn()
 
@@ -27,7 +27,7 @@ describe('requireRole', () => {
 
   it('Test 2: req.user.role = owner but actingStaff = cashier, requireRole(manager) -> 403', () => {
     const req = mockReq({
-      user: { id: 'u1', role: 'owner', tenantId: 't1' },
+      user: { id: 'u1', role: 'owner', tenantId: 't1', storeId: 'store-1', },
       actingStaff: { id: 's1', role: 'cashier' },
     })
     const res = mockRes()
@@ -41,7 +41,7 @@ describe('requireRole', () => {
   })
 
   it('Test 3a: req.user.role = owner, no actingStaff, requireRole(owner) -> next()', () => {
-    const req = mockReq({ user: { id: 'u1', role: 'owner', tenantId: 't1' } })
+    const req = mockReq({ user: { id: 'u1', role: 'owner', tenantId: 't1', storeId: 'store-1', } })
     const res = mockRes()
     const next = vi.fn()
 
@@ -52,7 +52,7 @@ describe('requireRole', () => {
 
   it('Test 3b: actingStaff = manager, requireRole(owner) -> 403', () => {
     const req = mockReq({
-      user: { id: 'u1', role: 'owner', tenantId: 't1' },
+      user: { id: 'u1', role: 'owner', tenantId: 't1', storeId: 'store-1', },
       actingStaff: { id: 's1', role: 'manager' },
     })
     const res = mockRes()

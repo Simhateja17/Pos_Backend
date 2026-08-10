@@ -4,6 +4,34 @@ declare namespace Express {
       id: string
       role: 'owner' | 'manager' | 'cashier'
       tenantId: string
+      /**
+       * The store this staff member belongs to (Phase 8). One person, one shop
+       * — see migration 0042. For an owner this is their home shop and does NOT
+       * constrain them; owners may act in any store of their tenant. For a
+       * manager or cashier it is the only store they may act in.
+       *
+       * This is their MEMBERSHIP, not the store the current request acts on.
+       * For that, use req.storeContext.activeStoreId.
+       */
+      storeId: string
+    }
+    /**
+     * Which store this request acts on, resolved server-side by storeContext
+     * middleware from verified membership plus an authorization-checked
+     * X-Store-Id header. Never taken on trust from the client.
+     */
+    storeContext?: {
+      /**
+       * 'store'    — this request concerns exactly one shop (activeStoreId set).
+       * 'business' — an owner asked for every shop combined, via
+       *              `X-Store-Id: all`. READ-ONLY: activeStoreId is null, so
+       *              any write path calling activeStoreId() throws rather than
+       *              guessing which shop to write to.
+       */
+      scope: 'store' | 'business'
+      activeStoreId: string | null
+      /** True when an owner is operating inside a store that isn't their home shop. */
+      actingRemotely: boolean
     }
     actingStaff?: {
       id: string

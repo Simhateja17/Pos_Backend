@@ -1,3 +1,4 @@
+import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { generateReorderSuggestions, type SkippedVariant } from '../services/reorder-heuristic'
@@ -40,13 +41,20 @@ const lastSkipped = new Map<string, SkippedVariant[]>()
 router.get('/suggestions', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
 
-  const latest = await client.reorder_suggestions.findFirst({ orderBy: { generated_at: 'desc' } })
+  // Suggestions are per shop, so "the latest run" must mean the latest run FOR
+  // THIS SHOP — otherwise a shop that has not generated recently would show
+  // another shop's run timestamp and then an empty list.
+  const storeScope = storeScopeWhere(req)
+  const latest = await client.reorder_suggestions.findFirst({
+    where: { ...storeScope },
+    orderBy: { generated_at: 'desc' },
+  })
   if (!latest) {
     return res.json({ generatedAt: null, items: [], skipped: [] })
   }
 
   const rows = await client.reorder_suggestions.findMany({
-    where: { generated_at: latest.generated_at },
+    where: { generated_at: latest.generated_at, ...storeScope },
     include: { variants: { include: { products: true } }, suppliers: true },
     orderBy: { suggested_quantity: 'desc' },
   })
@@ -68,12 +76,12 @@ router.post('/generate', requireRole('manager'), async (req, res) => {
   const tenantId = req.user!.tenantId
 
   try {
-    const result = await forTenantTransaction(tenantId, async (tx) => generateReorderSuggestions(tx, tenantId))
+    const result = await forTenantTransaction(tenantId, async (tx) => generateReorderSuggestions(tx, tenantId, activeStoreId(req)))
     lastSkipped.set(tenantId, result.skipped)
 
     const client = forTenant(tenantId) as any
     const rows = await client.reorder_suggestions.findMany({
-      where: { generated_at: result.generatedAt },
+      where: { generated_at: result.generatedAt, store_id: activeStoreId(req) },
       include: { variants: { include: { products: true } }, suppliers: true },
       orderBy: { suggested_quantity: 'desc' },
     })
