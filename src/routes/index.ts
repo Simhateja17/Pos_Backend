@@ -26,6 +26,7 @@ import reportsRouter from './reports'
 import emailRouter from './email'
 import billingRouter from './billing'
 import storesRouter from './stores'
+import availabilityRouter from './availability'
 import { requireSubscription } from '../middleware/requireSubscription'
 import { requireRole } from '../middleware/requireRole'
 import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
@@ -66,6 +67,11 @@ router.use('/terminals', authMiddleware, requireSubscription, operatorContext, t
 // produce. activeStoreId() throws rather than defaulting, for the same reason.
 const appAccess = [authMiddleware, requireSubscription, operatorContext, requireOperatorOnPairedDevice, storeContextMiddleware]
 router.use('/stores', ...appAccess, storesRouter)
+// Cross-shop availability is open to EVERY role, cashiers included — it is
+// the point of being a chain. It returns quantity only; see the route.
+// Mounted on its own path rather than inside productsRouter because
+// products' own '/:productId' handler would otherwise swallow '/variants'.
+router.use('/variants/:variantId/availability', ...appAccess, availabilityRouter)
 router.use('/products', ...appAccess, productsRouter)
 router.use('/categories', ...appAccess, categoriesRouter)
 router.use('/sales', ...appAccess, salesRouter)

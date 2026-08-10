@@ -45,6 +45,7 @@ import {
 } from './schemas/shift'
 import { TerminalSchema, CreateTerminalSchema, UpdateTerminalSchema } from './schemas/terminal'
 import { StoreSchema, CreateStoreSchema, UpdateStoreSchema } from './schemas/store'
+import { VariantAvailabilitySchema } from './schemas/availability'
 import {
   CompleteOnboardingSchema,
   OnboardingCompletionResponseSchema,
@@ -690,6 +691,22 @@ registry.registerPath({
     200: { description: 'Shift closed', content: { 'application/json': { schema: ZReportSchema } } },
     404: { description: 'Shift not found' },
     409: { description: 'Shift already closed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/variants/{variantId}/availability',
+  description:
+    "Where else in the business this variant is in stock (Phase 8). Open to EVERY role, cashiers included — a customer asking for blue when this shop is out is the reason a chain is worth running. Returns QUANTITY ONLY: another shop's sales, takings and shift figures stay scoped to the shop a person works in. Active shops only, own shop first, then fullest shelf first.",
+  request: { params: z.object({ variantId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: 'Per-shop availability',
+      content: { 'application/json': { schema: VariantAvailabilitySchema } },
+    },
+    400: { description: 'Invalid variant id' },
+    404: { description: 'Variant not found' },
   },
 })
 

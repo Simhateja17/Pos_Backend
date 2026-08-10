@@ -1,9 +1,9 @@
 import { Router } from 'express'
-import { forTenant } from '../db/tenantClient'
+import { forTenantTransaction } from '../db/tenantClient'
 
 const router = Router()
 
-function toNotificationJson(row: any) {
+function toNotificationJson(row: any, storeNames: Map<string, string>) {
   return {
     id: row.id,
     type: row.type,
@@ -12,35 +12,98 @@ function toNotificationJson(row: any) {
     link: row.link,
     read: row.read_at !== null,
     createdAt: row.created_at.toISOString(),
+    // null store_id means the notification is about the BUSINESS, not one
+    // shop — a failed subscription payment belongs to the company, a low-stock
+    // alert belongs to a shelf (migration 0043).
+    storeId: row.store_id,
+    storeName: row.store_id ? storeNames.get(row.store_id) ?? null : null,
   }
 }
 
 /**
- * GET / — every notification for this tenant, newest first. No pagination:
- * V1's trigger set and small-shop event volume don't justify it yet, and
- * marking-all-read on every open (below) keeps the unread set naturally
- * small regardless of how much history accumulates.
+ * GET / — notifications for whoever is asking (Phase 8, task 11).
+ *
+ * A MANAGER SEES THEIR OWN SHOP, plus business-wide items. Alerts about a shop
+ * they cannot act on are noise: telling the Andheri manager that Bandra is low
+ * on a shirt invites them to do nothing about it, and teaches them to ignore
+ * the panel.
+ *
+ * AN OWNER SEES EVERYTHING, but grouped. `byStore` carries an unread count per
+ * shop so the UI can lead with "Andheri 12, Bandra 3" instead of fifteen
+ * separate rows. That grouping is the whole point: an owner with several shops
+ * gets one alert per low variant per shop, and a panel that lists them
+ * individually is muted within a week — at which point the feature is dead and
+ * nobody notices it died.
+ *
+ * The route deliberately does NOT filter by type. Grouping is what makes the
+ * volume manageable; hiding categories would make it incomplete.
  */
 router.get('/', async (req, res) => {
-  const client = forTenant(req.user!.tenantId) as any
-  const rows = await client.notifications.findMany({ orderBy: { created_at: 'desc' } })
+  const isOwner = req.user!.role === 'owner'
+  const ownStoreId = req.user!.storeId
+
+  const { rows, stores } = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+    const rows = await tx.notifications.findMany({
+      where: isOwner
+        ? {}
+        : // Own shop OR business-wide. A manager should still learn that the
+          // subscription failed; they just should not field another shop's
+          // stock alerts.
+          { OR: [{ store_id: ownStoreId }, { store_id: null }] },
+      orderBy: { created_at: 'desc' },
+    })
+    const stores = await tx.stores.findMany({ select: { id: true, name: true } })
+    return { rows, stores }
+  })
+
+  const storeNames = new Map<string, string>(
+    stores.map((store: any) => [store.id, store.name] as [string, string]),
+  )
+
+  const unread = rows.filter((row: any) => row.read_at === null)
+
+  // Only meaningful when the caller can see more than one shop. Sending it to
+  // a manager would imply a breakdown they are not scoped to act on.
+  const byStore = isOwner
+    ? stores
+        .map((store: any) => ({
+          storeId: store.id,
+          storeName: store.name,
+          unreadCount: unread.filter((row: any) => row.store_id === store.id).length,
+        }))
+        .filter((entry: any) => entry.unreadCount > 0)
+        .sort((a: any, b: any) => b.unreadCount - a.unreadCount)
+    : []
+
   return res.json({
-    notifications: rows.map(toNotificationJson),
-    unreadCount: rows.filter((row: any) => row.read_at === null).length,
+    notifications: rows.map((row: any) => toNotificationJson(row, storeNames)),
+    unreadCount: unread.length,
+    byStore,
+    businessWideUnreadCount: unread.filter((row: any) => row.store_id === null).length,
   })
 })
 
 /**
- * POST /read — marks every currently-unread notification read in one call.
- * Matches the read semantics decided for V1: opening the panel clears it,
- * there is no per-item mark-as-read.
+ * POST /read — marks read exactly what the caller can see, and nothing more.
+ *
+ * Scoped for the same reason the read is: a manager clearing their panel must
+ * not silently clear another shop's unread alerts, which would hide a stockout
+ * from the person responsible for it.
  */
 router.post('/read', async (req, res) => {
-  const client = forTenant(req.user!.tenantId) as any
-  await client.notifications.updateMany({
-    where: { read_at: null },
-    data: { read_at: new Date() },
+  const isOwner = req.user!.role === 'owner'
+  const ownStoreId = req.user!.storeId
+
+  await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+    await tx.notifications.updateMany({
+      where: {
+        read_at: null,
+        ...(isOwner ? {} : { OR: [{ store_id: ownStoreId }, { store_id: null }] }),
+      },
+      data: { read_at: new Date() },
+    })
   })
+
   return res.status(200).json({ ok: true })
 })
 
