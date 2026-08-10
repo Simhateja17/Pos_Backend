@@ -27,6 +27,9 @@ function toSettingsJson(tenant: any) {
     businessType: tenant.business_type,
     combinedTaxRatePercent: combined.toFixed(4),
     discountThresholdPercent: Number(tenant.discount_threshold_percent).toFixed(2),
+    // 0050 default, restated here so a tenant row read before the migration
+    // lands still serialises a valid enum value rather than undefined.
+    barcodeLabelFormat: tenant.barcode_label_format ?? 'code128',
   }
 }
 
@@ -63,6 +66,9 @@ router.patch('/', requireRole('owner'), async (req, res) => {
     ...(rest.placeOfSupply !== undefined ? { place_of_supply: rest.placeOfSupply } : {}),
     ...(discountThresholdPercent !== undefined
       ? { discount_threshold_percent: discountThresholdPercent }
+      : {}),
+    ...(rest.barcodeLabelFormat !== undefined
+      ? { barcode_label_format: rest.barcodeLabelFormat }
       : {}),
   }
 

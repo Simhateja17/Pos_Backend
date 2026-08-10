@@ -4,6 +4,25 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 extendZodWithOpenApi(z)
 
 /**
+ * Symbology used when printing variant labels (0050).
+ *
+ * - code128 — encodes the owner-assigned `sku`. The default, and the only
+ *   option that works for every variant, since every variant has a SKU.
+ * - ean13 / upca — encode the MANUFACTURER `barcode`. These are fixed-length
+ *   numeric symbologies (13 and 12 digits), so a variant with no barcode, or
+ *   one of the wrong length, cannot be rendered in them at all. The label
+ *   renderer falls back to CODE128 per-variant rather than printing nothing.
+ * - qr — encodes the `sku` as a 2D code, for phone-camera scanning where no
+ *   laser scanner is present.
+ *
+ * The deleted onboarding wizard's fifth option, 'internal', is not carried
+ * over: it meant "our own codes", which is what code128 already does.
+ */
+export const BarcodeLabelFormatSchema = z
+  .enum(['code128', 'ean13', 'upca', 'qr'])
+  .openapi('BarcodeLabelFormat')
+
+/**
  * Store settings — the tenant fields signup captures once and nothing, until
  * now, could ever edit again.
  *
@@ -35,6 +54,7 @@ export const StoreSettingsSchema = z
     // not four jurisdiction-specific ones they'd have to add up themselves.
     combinedTaxRatePercent: z.string(),
     discountThresholdPercent: z.string(),
+    barcodeLabelFormat: BarcodeLabelFormatSchema,
   })
   .openapi('StoreSettings')
 
@@ -58,6 +78,7 @@ export const UpdateStoreSettingsSchema = z
     // somewhere unexpected.
     combinedTaxRatePercent: z.number().min(0).max(100).optional(),
     discountThresholdPercent: z.number().min(0).max(100).optional(),
+    barcodeLabelFormat: BarcodeLabelFormatSchema.optional(),
   })
   .strict()
   .openapi('UpdateStoreSettingsRequest')

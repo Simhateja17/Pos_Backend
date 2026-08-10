@@ -94,7 +94,19 @@ export const ProductCatalogStepSchema = z
     skuCount: z.enum(['under100', '100-500', '500-2000', '2000-10000', '10000plus']),
     importMethod: z.enum(['csv', 'barcode', 'tally', 'manual']),
     unitOfMeasure: z.enum(['piece', 'kg', 'gram', 'litre', 'ml', 'metre', 'box', 'pack', 'set', 'pair']),
-    barcodeFormat: z.enum(['ean13', 'code128', 'qr', 'upca', 'internal']),
+    /**
+     * @deprecated Superseded by tenants.barcode_label_format (0050), which is
+     * editable in store settings and is what the label renderer actually
+     * reads. Nothing writes this key any more — the wizard that collected it
+     * was deleted when onboarding moved to signup + in-context setup.
+     *
+     * Kept as an accepted-but-ignored optional key rather than removed: this
+     * object is `.strict()`, and `isStepComplete()` re-validates persisted
+     * onboarding_data on every read. Dropping it outright would make step 6
+     * fail validation for any tenant that already stored it, silently
+     * reopening a completed step.
+     */
+    barcodeFormat: z.enum(['ean13', 'code128', 'qr', 'upca', 'internal']).optional(),
     hsnAutoLookup: z.boolean(),
     mrpRequired: z.boolean(),
     variantTracking: z.boolean(),
