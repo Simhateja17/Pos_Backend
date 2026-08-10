@@ -38,6 +38,17 @@ export const REVIEW_PERIOD_DAYS = 7
 
 export type ReorderReason = {
   formula: 'velocity_x_lead_time'
+  /**
+   * WHERE the demand numbers came from (Phase 8):
+   *   'this_store'   — this shop's own sales history.
+   *   'other_stores' — borrowed from the rest of the business and scaled to
+   *                    this shop's size, because this shop is too new to have
+   *                    a history of its own.
+   *
+   * The screen must say which. A borrowed number presented as the shop's own
+   * is precisely the overclaiming ML-01 forbids.
+   */
+  basis: 'this_store' | 'other_stores'
   windowDays: number
   /** Days between the variant's first recorded sale and today, capped at windowDays. */
   historyDays: number
@@ -66,6 +77,7 @@ export type ReorderOutcome =
   | { kind: 'sufficient_stock'; reason: ReorderReason }
 
 export type VariantInputs = {
+  basis?: 'this_store' | 'other_stores'
   unitsSoldInWindow: number
   returnsInWindow: number
   historyDays: number
@@ -83,7 +95,11 @@ function round2(value: number): number {
  * Confidence is a coarse band tied to how much history backs the velocity, not
  * a probability. A heuristic has no basis for claiming a precise number.
  */
-function confidenceFor(historyDays: number): 'low' | 'medium' | 'high' {
+function confidenceFor(historyDays: number, basis: 'this_store' | 'other_stores' = 'this_store'): 'low' | 'medium' | 'high' {
+  // A borrowed pattern is never better than 'low', however much history the
+  // OTHER shops have. The uncertainty being reported is "does this shop behave
+  // like the others", and nothing in the data answers that yet.
+  if (basis === 'other_stores') return 'low'
   if (historyDays >= 60) return 'high'
   if (historyDays >= 30) return 'medium'
   return 'low'
@@ -95,6 +111,7 @@ function confidenceFor(historyDays: number): 'low' | 'medium' | 'high' {
  */
 export function computeReorder(inputs: VariantInputs): ReorderOutcome {
   const {
+    basis = 'this_store',
     unitsSoldInWindow,
     returnsInWindow,
     historyDays,
@@ -120,6 +137,7 @@ export function computeReorder(inputs: VariantInputs): ReorderOutcome {
 
   const reason: ReorderReason = {
     formula: 'velocity_x_lead_time',
+    basis,
     windowDays: VELOCITY_WINDOW_DAYS,
     historyDays,
     unitsSoldInWindow,
@@ -151,7 +169,7 @@ export function computeReorder(inputs: VariantInputs): ReorderOutcome {
   return {
     kind: 'suggest',
     quantity: Math.ceil(rawSuggestion),
-    confidence: confidenceFor(historyDays),
+    confidence: confidenceFor(historyDays, basis),
     reason,
   }
 }
@@ -175,7 +193,7 @@ export type SkippedVariant = {
   historyDays: number | null
 }
 
-export async function generateReorderSuggestions(tx: any, tenantId: string): Promise<{
+export async function generateReorderSuggestions(tx: any, tenantId: string, storeId: string): Promise<{
   generatedAt: Date
   suggested: number
   skipped: SkippedVariant[]
@@ -184,9 +202,29 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
   const windowStart = new Date(generatedAt)
   windowStart.setDate(windowStart.getDate() - VELOCITY_WINDOW_DAYS)
 
-  const variants = await tx.variants.findMany({ include: { variant_stock_levels: true, products: true } })
+  // Phase 8: reorder is a PER-SHOP question. Andheri needs Andheri's stock,
+  // Andheri's sales history and Andheri's outstanding orders — a suggestion
+  // computed from the business's combined numbers would over-order for a small
+  // shop and under-order for a busy one.
+  const variants = await tx.variants.findMany({
+    include: { variant_stock_levels: { where: { store_id: storeId } }, products: true },
+  })
 
-  const rollups = await tx.daily_sales_rollup.findMany({ where: { date: { gte: windowStart } } })
+  const rollups = await tx.daily_sales_rollup.findMany({
+    where: { date: { gte: windowStart }, store_id: storeId },
+  })
+
+  // A shop that opened last week has no history of its own, and that is exactly
+  // when an owner most needs help deciding what to stock. Rather than showing
+  // "not enough data" for two months, borrow the BUSINESS's selling pattern for
+  // the same variant and scale it by how busy this shop is relative to the rest.
+  //
+  // Every borrowed suggestion is labelled `basis: 'other_stores'` so the screen
+  // can say where the number came from. An unlabelled borrowed number would be
+  // the exact overclaiming this product exists to correct.
+  const businessRollups = await tx.daily_sales_rollup.findMany({
+    where: { date: { gte: windowStart } },
+  })
   const byVariant = new Map<string, { units: number; returns: number; firstDate: Date; lastDate: Date }>()
   for (const row of rollups) {
     const existing = byVariant.get(row.variant_id)
@@ -205,9 +243,47 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
     }
   }
 
+  // Business-wide totals per variant, and this shop's share of overall activity.
+  const businessByVariant = new Map<string, { units: number; returns: number; firstDate: Date }>()
+  let businessUnits = 0
+  let storeUnits = 0
+  for (const row of businessRollups) {
+    const units = Number(row.units_sold)
+    businessUnits += units
+    if (row.store_id === storeId) storeUnits += units
+    const existing = businessByVariant.get(row.variant_id)
+    if (!existing) {
+      businessByVariant.set(row.variant_id, {
+        units,
+        returns: Number(row.returns_units),
+        firstDate: row.date,
+      })
+    } else {
+      existing.units += units
+      existing.returns += Number(row.returns_units)
+      if (row.date < existing.firstDate) existing.firstDate = row.date
+    }
+  }
+
+  // How busy this shop is relative to the business. A shop with no sales at all
+  // yet cannot compute a share, so it is treated as an even split across the
+  // shops that do trade — a deliberately conservative starting point rather
+  // than assuming the new shop matches the busiest one.
+  const otherStoreIds = new Set(
+    businessRollups.filter((row: any) => row.store_id !== storeId).map((row: any) => row.store_id),
+  )
+  const storeShare =
+    businessUnits > 0 && storeUnits > 0
+      ? storeUnits / businessUnits
+      : otherStoreIds.size > 0
+        ? 1 / (otherStoreIds.size + 1)
+        : 1
+
   // on_order, per variant, across every order actually placed with a supplier.
   const openOrders = await tx.purchase_orders.findMany({
-    where: { status: { in: ['sent', 'partial'] } },
+    // Stock already on its way to THIS shop. Another shop's inbound order does
+    // not help this one's shelves, so counting it would under-order here.
+    where: { status: { in: ['sent', 'partial'] }, store_id: storeId },
     include: { purchase_order_lines: true },
   })
   const onOrderByVariant = new Map<string, number>()
@@ -240,7 +316,10 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
   const activeSuppliers = await tx.suppliers.findMany({ where: { is_active: true }, orderBy: { name: 'asc' } })
   const fallbackSupplier = activeSuppliers[0]
 
-  await tx.reorder_suggestions.deleteMany({})
+  // Scoped to THIS shop. An unscoped deleteMany would wipe every other shop's
+  // suggestions each time one shop regenerated — the owner would open Bandra
+  // and find it empty because Andheri ran last.
+  await tx.reorder_suggestions.deleteMany({ where: { store_id: storeId } })
 
   const skipped: SkippedVariant[] = []
   let suggested = 0
@@ -261,18 +340,52 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
       continue
     }
 
-    const historyDays = sales
+    const ownHistoryDays = sales
       ? Math.min(
           VELOCITY_WINDOW_DAYS,
           Math.floor((generatedAt.getTime() - new Date(sales.firstDate).getTime()) / 86400000) + 1,
         )
       : 0
 
+    // Borrow only when this shop genuinely cannot answer for itself AND the
+    // rest of the business can. A shop with its own history always uses it,
+    // even a short one — its own data beats a scaled guess.
+    const business = businessByVariant.get(variant.id)
+    const businessHistoryDays = business
+      ? Math.min(
+          VELOCITY_WINDOW_DAYS,
+          Math.floor((generatedAt.getTime() - new Date(business.firstDate).getTime()) / 86400000) + 1,
+        )
+      : 0
+    const borrow =
+      ownHistoryDays < MIN_HISTORY_DAYS &&
+      businessHistoryDays >= MIN_HISTORY_DAYS &&
+      business !== undefined &&
+      business.units > 0
+
+    const basis: 'this_store' | 'other_stores' = borrow ? 'other_stores' : 'this_store'
+    const historyDays = borrow ? businessHistoryDays : ownHistoryDays
+
     const outcome = computeReorder({
-      unitsSoldInWindow: sales?.units ?? 0,
-      returnsInWindow: sales?.returns ?? 0,
+      basis,
+      // Scaled to this shop's size. Handing a new shop the whole business's
+      // volume would have it order as if it were every outlet at once.
+      unitsSoldInWindow: borrow
+        ? Math.round(business!.units * storeShare)
+        : sales?.units ?? 0,
+      returnsInWindow: borrow
+        ? Math.round(business!.returns * storeShare)
+        : sales?.returns ?? 0,
       historyDays,
-      currentStock: Number(variant.variant_stock_levels?.quantity ?? 0),
+      // variant_stock_levels is one row per (variant, store) since 0043, and
+      // the include above is filtered to this shop — so this sums a single
+      // row. It stays a reduce rather than `[0]?.quantity` because a variant
+      // that has never moved at this shop has no row at all, and 0 is the
+      // right answer there.
+      currentStock: (variant.variant_stock_levels ?? []).reduce(
+        (total: number, level: { quantity: unknown }) => total + Number(level.quantity ?? 0),
+        0,
+      ),
       onOrder: onOrderByVariant.get(variant.id) ?? 0,
       leadTimeDays: supplier.leadTimeDays,
       supplierName: supplier.name,
@@ -290,6 +403,7 @@ export async function generateReorderSuggestions(tx: any, tenantId: string): Pro
     await tx.reorder_suggestions.create({
       data: {
         tenant_id: tenantId,
+        store_id: storeId,
         variant_id: variant.id,
         supplier_id: supplier.id,
         suggested_quantity: outcome.quantity,

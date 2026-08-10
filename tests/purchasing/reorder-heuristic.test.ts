@@ -182,4 +182,43 @@ describe('rule-based reorder heuristic', () => {
     expect(outcome.reason.leadTimeDays).toBe(5)
     expect(outcome.reason.currentStock).toBe(12)
   })
+
+  it('Test 11 (Phase 8): a suggestion defaults to this shop\'s own history', () => {
+    const outcome = computeReorder({
+      unitsSoldInWindow: 60, returnsInWindow: 0, historyDays: 90,
+      currentStock: 0, onOrder: 0, leadTimeDays: 5, supplierName: 'S',
+    })
+    if (outcome.kind !== 'suggest') throw new Error('expected a suggestion')
+
+    expect(outcome.reason.basis).toBe('this_store')
+    expect(outcome.confidence).toBe('high')
+  })
+
+  it('Test 12 (Phase 8): a borrowed pattern is labelled and can never be high confidence', () => {
+    // Same inputs as Test 11 — 90 days of history — but the history belongs to
+    // the business's OTHER shops. The uncertainty being reported is "does this
+    // new shop behave like the others", which no amount of their data answers.
+    const outcome = computeReorder({
+      basis: 'other_stores',
+      unitsSoldInWindow: 60, returnsInWindow: 0, historyDays: 90,
+      currentStock: 0, onOrder: 0, leadTimeDays: 5, supplierName: 'S',
+    })
+    if (outcome.kind !== 'suggest') throw new Error('expected a suggestion')
+
+    expect(outcome.reason.basis).toBe('other_stores')
+    expect(outcome.confidence).toBe('low')
+  })
+
+  it('Test 13 (Phase 8): borrowing changes only the label and confidence, not the arithmetic', () => {
+    const inputs = {
+      unitsSoldInWindow: 60, returnsInWindow: 0, historyDays: 90,
+      currentStock: 10, onOrder: 5, leadTimeDays: 5, supplierName: 'S',
+    } as const
+    const own = computeReorder({ ...inputs })
+    const borrowed = computeReorder({ ...inputs, basis: 'other_stores' })
+    if (own.kind !== 'suggest' || borrowed.kind !== 'suggest') throw new Error('expected suggestions')
+
+    expect(borrowed.quantity).toBe(own.quantity)
+    expect(borrowed.reason.rawSuggestion).toBe(own.reason.rawSuggestion)
+  })
 })
