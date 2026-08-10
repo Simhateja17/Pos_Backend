@@ -29,7 +29,7 @@ router.post('/lock', async (req, res) => {
     })
   }
 
-  setRegisterLockedCookie(res)
+  setRegisterLockedCookie(res, req.user.tenantId)
   return res.json({ ok: true })
 })
 

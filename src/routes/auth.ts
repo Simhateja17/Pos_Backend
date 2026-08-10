@@ -7,6 +7,7 @@ import { STARTER_CATEGORIES } from '../contracts/schemas/category'
 import { authMiddleware, decodeJwtPayload, getStaffRoleClaim } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
 import { clearAuthCookies, getAuthCookies, setAuthCookies } from '../lib/authCookies'
+import { clearRegisterLockedCookie } from '../lib/counterDevice'
 
 const router = Router()
 
@@ -253,6 +254,9 @@ router.post('/signup', async (req, res) => {
     console.log(`[auth:signup] tenant=${tenantId} userId=${newUser.id} complete — 201`)
     res.set('Cache-Control', 'no-store')
     setAuthCookies(res, refreshed.session.access_token, refreshed.session.refresh_token)
+    // Older releases wrote a tenant-agnostic register-lock cookie. It must
+    // never make this new store look like a locked counter before setup.
+    clearRegisterLockedCookie(res)
 
     return res.status(201).json({
       user: {
@@ -333,6 +337,10 @@ router.post('/login', async (req, res) => {
 
   res.set('Cache-Control', 'no-store')
   setAuthCookies(res, data.session.access_token, data.session.refresh_token)
+  // A successful login may replace a prior tenant on this browser. Pairing is
+  // still enforced from the database, but an old unscoped lock must not
+  // strand the newly authenticated tenant at /context.
+  clearRegisterLockedCookie(res)
 
   return res.status(200).json({
     user: {

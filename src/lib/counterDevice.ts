@@ -33,8 +33,12 @@ export function getCounterDeviceToken(req: Request): string | undefined {
   return parseCookies(req.headers.cookie)[COUNTER_DEVICE_COOKIE]
 }
 
-export function isRegisterLocked(req: Request): boolean {
-  return parseCookies(req.headers.cookie)[REGISTER_LOCK_COOKIE] === '1'
+export function isRegisterLocked(req: Request, tenantId: string): boolean {
+  // A browser can sign out of one business and sign up for (or sign in to)
+  // another. A bare `=1` lock therefore cannot safely be treated as a lock
+  // for every tenant on this origin: it would block a new store's first
+  // authenticated /context request before it can even enter setup.
+  return parseCookies(req.headers.cookie)[REGISTER_LOCK_COOKIE] === tenantId
 }
 
 export function hashCounterDeviceToken(token: string): string {
@@ -72,8 +76,12 @@ export function clearCounterDeviceCookie(res: Response) {
   res.append('Set-Cookie', `${COUNTER_DEVICE_COOKIE}=; ${cookieAttributes(0)}`)
 }
 
-export function setRegisterLockedCookie(res: Response) {
-  res.append('Set-Cookie', `${REGISTER_LOCK_COOKIE}=1; ${cookieAttributes(31_536_000)}`)
+export function setRegisterLockedCookie(res: Response, tenantId: string) {
+  res.append('Set-Cookie', `${REGISTER_LOCK_COOKIE}=${encodeURIComponent(tenantId)}; ${cookieAttributes(31_536_000)}`)
+}
+
+export function clearRegisterLockedCookie(res: Response) {
+  res.append('Set-Cookie', `${REGISTER_LOCK_COOKIE}=; ${cookieAttributes(0)}`)
 }
 
 export async function findPairedTerminal(client: any, req: Request) {

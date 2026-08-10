@@ -34,7 +34,7 @@ export async function requireOperatorOnPairedDevice(
     ? req.accessContext.pairedTerminalId
     : (await findPairedTerminal(forTenant(req.user.tenantId) as any, req))?.id ?? null
 
-  if ((pairedTerminalId || isRegisterLocked(req)) && !req.actingStaff) {
+  if ((pairedTerminalId || isRegisterLocked(req, req.user.tenantId)) && !req.actingStaff) {
     return locked(res)
   }
 
@@ -59,7 +59,7 @@ export async function requireOperatorOrFirstPinSetup(
   const pairedTerminalId = req.accessContext
     ? req.accessContext.pairedTerminalId
     : (await findPairedTerminal(client, req))?.id ?? null
-  if (!pairedTerminalId && !isRegisterLocked(req)) return next()
+  if (!pairedTerminalId && !isRegisterLocked(req, req.user.tenantId)) return next()
   if (ROLE_RANK[req.user.role] < ROLE_RANK.manager) return locked(res)
 
   const pinReadyStaff = await client.staff_members.count({

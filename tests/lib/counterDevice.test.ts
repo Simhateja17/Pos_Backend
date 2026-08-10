@@ -13,9 +13,10 @@ function response() {
 describe('counter device cookies', () => {
   afterEach(() => vi.unstubAllEnvs())
 
-  it('recognises the durable browser register lock', () => {
-    const req = { headers: { cookie: 'another=value; couture_register_locked=1' } } as Request
-    expect(isRegisterLocked(req)).toBe(true)
+  it('recognises a durable browser register lock only for its own tenant', () => {
+    const req = { headers: { cookie: 'another=value; couture_register_locked=tenant-a' } } as Request
+    expect(isRegisterLocked(req, 'tenant-a')).toBe(true)
+    expect(isRegisterLocked(req, 'tenant-b')).toBe(false)
   })
 
   it('uses credentialed cross-origin cookie attributes in production', () => {
@@ -24,7 +25,7 @@ describe('counter device cookies', () => {
     const res = response()
 
     setCounterDeviceCookie(res, 'device-token')
-    setRegisterLockedCookie(res)
+    setRegisterLockedCookie(res, 'tenant-a')
 
     const headers = vi.mocked(res.append).mock.calls.map((call) => String(call[1]))
     expect(headers).toHaveLength(2)
@@ -33,5 +34,6 @@ describe('counter device cookies', () => {
       expect(header).toContain('SameSite=None')
       expect(header).toContain('Secure')
     }
+    expect(headers[1]).toContain('couture_register_locked=tenant-a')
   })
 })

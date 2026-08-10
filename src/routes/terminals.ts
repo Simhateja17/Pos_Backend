@@ -77,14 +77,14 @@ router.get('/', async (req, res) => {
 router.get('/device', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const terminal = await findPairedTerminal(client, req)
-  if (!terminal) return res.json({ terminal: null, isRegisterLocked: isRegisterLocked(req) })
+  if (!terminal) return res.json({ terminal: null, isRegisterLocked: isRegisterLocked(req, req.user!.tenantId) })
 
   const openShift = await client.shifts.findFirst({
     where: { terminal_id: terminal.id, closed_at: null },
     select: { id: true },
   })
   return res.json({
-    isRegisterLocked: isRegisterLocked(req),
+    isRegisterLocked: isRegisterLocked(req, req.user!.tenantId),
     terminal: toTerminalJson(
       terminal,
       Boolean(openShift),
