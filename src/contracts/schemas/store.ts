@@ -77,3 +77,26 @@ export const UpdateStoreSchema = z
 export type Store = z.infer<typeof StoreSchema>
 export type CreateStoreInput = z.infer<typeof CreateStoreSchema>
 export type UpdateStoreInput = z.infer<typeof UpdateStoreSchema>
+
+/**
+ * How many shops a business may run, and how many it has (Phase 8 task 12).
+ * Owner-only: null for anyone else, since only an owner can open a shop.
+ */
+export const StoreAllowanceSchema = z
+  .object({
+    used: z.number().int(),
+    limit: z.number().int(),
+    canAddStore: z.boolean(),
+    includedInPlan: z.number().int(),
+    additionalPurchased: z.number().int(),
+  })
+  .openapi('StoreAllowance')
+
+export const StoreListSchema = z
+  .object({
+    stores: z.array(StoreSchema),
+    storeAllowance: StoreAllowanceSchema.nullable(),
+  })
+  .openapi('StoreList')
+
+export type StoreAllowance = z.infer<typeof StoreAllowanceSchema>

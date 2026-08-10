@@ -6,6 +6,7 @@ import {
   getPeriod,
   getPlan,
   providerPlanId,
+  includedStoresForPlan,
   type BillingPlanDefinition,
 } from './billingCatalog'
 import {
@@ -168,6 +169,11 @@ async function projectSubscription(tenantId: string, attempt: any, provider: Raz
       tax_amount_minor: attempt.tax_amount_minor,
       total_amount_minor: attempt.total_amount_minor,
       tax_rate_bps: attempt.tax_rate_bps,
+      // Denormalised from the catalog at purchase time (0053). An owner who
+      // bought a 3-shop plan keeps 3 shops even if that tier is later
+      // redefined — repricing an existing customer by editing a config file
+      // should not be possible by accident.
+      included_store_count: includedStoresForPlan(attempt.plan_key),
       status: provider.status === 'active' ? 'active' : 'created',
       entitlement_status: provider.status === 'active' ? 'active' : 'blocked',
       ...providerSnapshotDates(provider),

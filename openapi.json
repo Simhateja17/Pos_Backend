@@ -3237,6 +3237,24 @@
           "isOwnStore"
         ]
       },
+      "StoreList": {
+        "type": "object",
+        "properties": {
+          "stores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Store"
+            }
+          },
+          "storeAllowance": {
+            "$ref": "#/components/schemas/StoreAllowance"
+          }
+        },
+        "required": [
+          "stores",
+          "storeAllowance"
+        ]
+      },
       "Store": {
         "type": "object",
         "properties": {
@@ -3325,6 +3343,36 @@
           "taxRateCity",
           "taxRateDistrict",
           "placeOfSupply"
+        ]
+      },
+      "StoreAllowance": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "used": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "canAddStore": {
+            "type": "boolean"
+          },
+          "includedInPlan": {
+            "type": "integer"
+          },
+          "additionalPurchased": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used",
+          "limit",
+          "canAddStore",
+          "includedInPlan",
+          "additionalPurchased"
         ]
       },
       "CreateStoreRequest": {
@@ -7234,18 +7282,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "stores": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Store"
-                      }
-                    }
-                  },
-                  "required": [
-                    "stores"
-                  ]
+                  "$ref": "#/components/schemas/StoreList"
                 }
               }
             }
@@ -7281,7 +7318,7 @@
             "description": "Owner role required"
           },
           "409": {
-            "description": "A store with that name already exists"
+            "description": "A store with that name already exists, or the plan's store allowance is used up (response carries storeAllowance and an upgrade message)"
           }
         }
       }

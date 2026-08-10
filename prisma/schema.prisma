@@ -748,7 +748,9 @@ model billing_subscriptions {
   base_amount_minor             BigInt
   tax_amount_minor              BigInt
   total_amount_minor            BigInt
-  tax_rate_bps                  Int                            @default(0)
+  tax_rate_bps                  Int
+  included_store_count          Int                            @default(1)
+  additional_store_count        Int                            @default(0)
   status                        String                         @default("created")
   entitlement_status            String                         @default("blocked")
   cancel_at_cycle_end           Boolean                        @default(false)

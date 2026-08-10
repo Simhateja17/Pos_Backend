@@ -44,7 +44,7 @@ import {
   ZReportSchema,
 } from './schemas/shift'
 import { TerminalSchema, CreateTerminalSchema, UpdateTerminalSchema } from './schemas/terminal'
-import { StoreSchema, CreateStoreSchema, UpdateStoreSchema } from './schemas/store'
+import { StoreSchema, CreateStoreSchema, UpdateStoreSchema, StoreListSchema } from './schemas/store'
 import { VariantAvailabilitySchema } from './schemas/availability'
 import {
   CompleteOnboardingSchema,
@@ -718,7 +718,7 @@ registry.registerPath({
   responses: {
     200: {
       description: 'Stores',
-      content: { 'application/json': { schema: z.object({ stores: z.array(StoreSchema) }) } },
+      content: { 'application/json': { schema: StoreListSchema } },
     },
   },
 })
@@ -733,7 +733,10 @@ registry.registerPath({
     201: { description: 'Store created', content: { 'application/json': { schema: StoreSchema } } },
     400: { description: 'Invalid request' },
     403: { description: 'Owner role required' },
-    409: { description: 'A store with that name already exists' },
+    409: {
+      description:
+        'A store with that name already exists, or the plan\'s store allowance is used up (response carries storeAllowance and an upgrade message)',
+    },
   },
 })
 

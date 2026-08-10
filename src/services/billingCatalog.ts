@@ -8,6 +8,19 @@ type CatalogPeriod = {
 
 export type BillingPlanDefinition = {
   key: string
+  /**
+   * Shops this plan covers before add-ons (Phase 8 task 12).
+   *
+   * Charged PER SHOP, never per counter — terminals stay unlimited and free,
+   * because per-till pricing is a known negative in this market.
+   *
+   * Tiered rather than linear because the market prices multi-outlet as a
+   * different product, not the same one multiplied. These numbers are a
+   * starting point, not a settled decision: change them here, and existing
+   * subscribers keep whatever they bought (their allowance is denormalised
+   * onto the subscription row by migration 0053).
+   */
+  includedStores: number
   region: BillingRegion
   currency: BillingCurrency
   name: string
@@ -30,6 +43,7 @@ export type BillingQuote = {
 const DEFAULT_CATALOG: BillingPlanDefinition[] = [
   {
     key: 'starter',
+    includedStores: 1,
     region: 'IN',
     currency: 'INR',
     name: 'Starter',
@@ -41,6 +55,7 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
   },
   {
     key: 'growth',
+    includedStores: 3,
     region: 'IN',
     currency: 'INR',
     name: 'Growth',
@@ -52,6 +67,7 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
   },
   {
     key: 'essentials',
+    includedStores: 1,
     region: 'US',
     currency: 'USD',
     name: 'Essentials',
@@ -63,6 +79,7 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
   },
   {
     key: 'professional',
+    includedStores: 5,
     region: 'US',
     currency: 'USD',
     name: 'Professional',
@@ -200,6 +217,7 @@ export function toPlanOption(plan: BillingPlanDefinition) {
   const annualQuote = calculateQuote(plan, 'annual')
   return {
     key: plan.key,
+    includedStores: plan.includedStores,
     region: plan.region,
     currency: plan.currency,
     name: plan.name,
@@ -219,4 +237,17 @@ export function toPlanOption(plan: BillingPlanDefinition) {
 
 export function providerPlanId(plan: BillingPlanDefinition, billingCycle: BillingCycle): string | undefined {
   return getPeriod(plan, billingCycle).providerPlanId
+}
+
+/**
+ * Shops a plan key covers, defaulting to 1 for an unknown key.
+ *
+ * Defaults DOWN rather than up: an unrecognised plan should leave a customer
+ * able to run the shop they have, not silently grant unlimited outlets. A
+ * too-low limit produces a support conversation; a too-high one produces
+ * unbilled shops nobody notices for months.
+ */
+export function includedStoresForPlan(planKey: string): number {
+  const plan = DEFAULT_CATALOG.find((entry) => entry.key === planKey)
+  return plan?.includedStores ?? 1
 }

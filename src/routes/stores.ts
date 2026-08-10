@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { forTenant } from '../db/tenantClient'
+import { forTenant, forTenantTransaction } from '../db/tenantClient'
+import { storeAllowance, storeLimitMessage } from '../services/storeLimit'
 import { requireRole } from '../middleware/requireRole'
 import { CreateStoreSchema, UpdateStoreSchema } from '../contracts/schemas/store'
 
@@ -38,18 +39,32 @@ function toStoreJson(row: any, ownStoreId: string) {
  * needs to name the shop they are standing in.
  */
 router.get('/', async (req, res) => {
-  const client = forTenant(req.user!.tenantId) as any
   const ownStoreId = req.user!.storeId
+  const isOwner = req.user!.role === 'owner'
 
-  const where = req.user!.role === 'owner' ? {} : { id: ownStoreId }
-  const stores = await client.stores.findMany({ where, orderBy: [{ created_at: 'asc' }] })
+  const { stores, allowance } = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+    const stores = await tx.stores.findMany({
+      where: isOwner ? {} : { id: ownStoreId },
+      orderBy: [{ created_at: 'asc' }],
+    })
+    // Only the owner can open a shop, so only the owner is told how many are
+    // left. Showing a manager an allowance they cannot spend is noise.
+    const allowance = isOwner ? await storeAllowance(tx, req.user!.tenantId) : null
+    return { stores, allowance }
+  })
 
-  res.json({ stores: stores.map((row: any) => toStoreJson(row, ownStoreId)) })
+  res.json({
+    stores: stores.map((row: any) => toStoreJson(row, ownStoreId)),
+    // Lets the Stores screen say "2 of 3 used" and disable Add before the
+    // owner fills in a form that is going to be refused. The server still
+    // enforces it on POST — this is a courtesy, not the check.
+    storeAllowance: allowance,
+  })
 })
 
 /**
- * POST / — open a new shop. Owner only: adding an outlet is a business decision
- * and, once task 12 lands, a billing event.
+ * POST / — open a new shop. Owner only: adding an outlet is a business
+ * decision and a billing event.
  */
 router.post('/', requireRole('owner'), async (req, res) => {
   const parsed = CreateStoreSchema.safeParse(req.body)
@@ -60,9 +75,24 @@ router.post('/', requireRole('owner'), async (req, res) => {
   const input = parsed.data
   const client = forTenant(req.user!.tenantId) as any
 
-  // TODO(task 12): refuse when the subscription's included-shop count is
-  // reached, with an upgrade path. Deliberately NOT silently allowed — an
-  // unbilled shop is worse than a blocked one.
+  // Task 12: refuse past the plan's shop allowance, with an upgrade path.
+  // Deliberately NOT silently allowed — an unbilled shop is worse than a
+  // blocked one, and an owner who discovers months later that three outlets
+  // were never charged for has a worse conversation than one told today.
+  //
+  // 409 rather than 402: the request is well-formed and the caller is
+  // entitled to use the API. What is exhausted is an allowance, which is a
+  // conflict with current state rather than a payment failure — a 402 would
+  // also collide with requireSubscription's meaning of "you are not paid up".
+  const allowance = await forTenantTransaction(req.user!.tenantId, async (tx: any) =>
+    storeAllowance(tx, req.user!.tenantId),
+  )
+  if (!allowance.canAddStore) {
+    return res.status(409).json({
+      error: storeLimitMessage(allowance),
+      storeAllowance: allowance,
+    })
+  }
 
   try {
     const created = await client.stores.create({
