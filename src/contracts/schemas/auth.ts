@@ -75,8 +75,20 @@ export const SetPinSchema = z
   })
   .openapi('SetPinRequest')
 
+/**
+ * A deliberately small, anonymous request body for owner PIN recovery. The
+ * endpoint always returns the same success shape so it never confirms whether
+ * an email belongs to an Ambel POS account.
+ */
+export const OwnerPinRecoveryRequestSchema = z
+  .object({
+    email: z.string().email(),
+  })
+  .openapi('OwnerPinRecoveryRequest')
+
 export type SignupInput = z.infer<typeof SignupSchema>
 export type LoginInput = z.infer<typeof LoginSchema>
 export type OtpRequestInput = z.infer<typeof OtpRequestSchema>
 export type AuthResponse = z.infer<typeof AuthResponseSchema>
 export type SetPinInput = z.infer<typeof SetPinSchema>
+export type OwnerPinRecoveryRequestInput = z.infer<typeof OwnerPinRecoveryRequestSchema>

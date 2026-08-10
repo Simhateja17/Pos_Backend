@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcrypt'
-import { SignupSchema, LoginSchema, OtpRequestSchema, SetPinSchema } from '../contracts/schemas/auth'
+import { SignupSchema, LoginSchema, OtpRequestSchema, SetPinSchema, OwnerPinRecoveryRequestSchema } from '../contracts/schemas/auth'
 import { STARTER_CATEGORIES } from '../contracts/schemas/category'
 import { authMiddleware, decodeJwtPayload, getStaffRoleClaim } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
@@ -439,6 +439,84 @@ router.post('/set-pin', authMiddleware, async (req, res) => {
       },
     })
   }
+
+  return res.status(200).json({ ok: true })
+})
+
+/**
+ * POST /owner-pin-recovery/request — sends a Supabase Auth recovery link to
+ * an owner who has forgotten their counter PIN. Uses
+ * resetPasswordForEmail (not the OTP flow above) because the link itself,
+ * not a typed code, is what /reset-owner-pin exchanges for a session.
+ *
+ * SECURITY: always 200 with the same body regardless of whether the email
+ * belongs to an account — matches /otp/request and /login's enumeration
+ * defence. A 502 is the one exception, and is a real provider failure, not
+ * information about the account.
+ */
+router.post('/owner-pin-recovery/request', async (req, res) => {
+  const parsed = OwnerPinRecoveryRequestSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid email address' })
+  }
+
+  const { email } = parsed.data
+  console.log(`[auth:owner-pin-recovery:request] email=${maskEmail(email)}`)
+
+  const redirectTo = process.env.OWNER_PIN_RECOVERY_REDIRECT_URL
+  const { error } = await supabaseAnon.auth.resetPasswordForEmail(email, { redirectTo })
+
+  if (error) {
+    console.log(`[auth:owner-pin-recovery:request] Supabase resetPasswordForEmail error status=${error.status} message=${error.message}`)
+    // A real send failure (provider down) is distinguishable server-side
+    // and does not leak account existence — "we could not send anything"
+    // is true regardless of whether the address is registered.
+    return res.status(502).json({ error: 'Could not send recovery email' })
+  }
+
+  return res.status(200).json({ ok: true })
+})
+
+/**
+ * POST /owner-pin-recovery/confirm — the authenticated recovery-link session
+ * (exchanged client-side by /reset-owner-pin via supabase.auth.getSession(),
+ * same mechanism the Supabase JS client uses for any recovery link) sets a
+ * new 4-digit PIN for the CURRENT owner and revokes their other active PIN
+ * sessions, so a stolen-but-unused old session cannot ride along.
+ *
+ * authMiddleware resolves req.user from the verified JWT exactly as it does
+ * for every other route — role and tenantId come from the custom access
+ * token hook's claims, never from client input.
+ */
+router.post('/owner-pin-recovery/confirm', authMiddleware, async (req, res) => {
+  if (req.user!.role !== 'owner') {
+    return res.status(403).json({ error: 'Owner role required' })
+  }
+
+  const parsed = SetPinSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid PIN', details: parsed.error.flatten() })
+  }
+
+  const pinHash = await bcrypt.hash(parsed.data.pin, 10)
+  const client = forTenant(req.user!.tenantId) as any
+
+  const updated = await client.staff_members.updateMany({
+    where: { user_id: req.user!.id },
+    data: { pin_hash: pinHash, pin_must_change: false, pin_attempts: 0, pin_locked_until: null },
+  })
+
+  if (updated.count === 0) {
+    return res.status(404).json({ error: 'No staff record found for this account' })
+  }
+
+  // Revoke this owner's other active PIN-switch sessions — a recovery is a
+  // credential reset, and an old session minted under the forgotten PIN
+  // must not keep working after it.
+  await client.staff_sessions.updateMany({
+    where: { staff_id: req.user!.id, logged_out_at: null },
+    data: { logged_out_at: new Date() },
+  })
 
   return res.status(200).json({ ok: true })
 })

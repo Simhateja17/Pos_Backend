@@ -14,6 +14,7 @@ const signInWithOtpMock = vi.fn()
 const verifyOtpMock = vi.fn()
 const refreshSessionMock = vi.fn()
 const setSessionMock = vi.fn()
+const resetPasswordForEmailMock = vi.fn()
 // authMiddleware (src/middleware/auth.ts) also calls createClient(anon key)
 // and then supabase.auth.getUser(token) — same mock covers both this file's
 // routes and the authMiddleware it now imports for POST /set-pin.
@@ -31,6 +32,7 @@ vi.mock('@supabase/supabase-js', () => ({
         refreshSession: refreshSessionMock,
         setSession: setSessionMock,
         getUser: getUserMock,
+        resetPasswordForEmail: resetPasswordForEmailMock,
       },
     }
   }),
@@ -38,6 +40,7 @@ vi.mock('@supabase/supabase-js', () => ({
 
 const tenantsCreateMock = vi.fn()
 const staffMembersCreateMock = vi.fn()
+const staffSessionsUpdateManyMock = vi.fn()
 const staffMembersUpdateManyMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 // 0033: set-pin reads the row first to detect first-time activation.
@@ -63,6 +66,7 @@ vi.mock('../../src/db/tenantClient', () => ({
     },
     categories: { create: categoriesCreateMock },
     notifications: { create: notificationsCreateMock },
+    staff_sessions: { updateMany: staffSessionsUpdateManyMock },
   })),
   forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
     fn({
@@ -405,6 +409,149 @@ describe('POST /auth/set-pin', () => {
     expect(staffMembersUpdateManyMock).toHaveBeenCalledWith(
       expect.objectContaining({ where: { user_id: 'user-1' } }),
     )
+  })
+})
+
+// Regression coverage: OwnerPinRecoveryRequestSchema, and both
+// /owner-pin-recovery routes, were dropped from a working tree that never
+// committed them, while openapi.ts and the frontend's forgot-owner-pin /
+// reset-owner-pin pages still referenced them — a CI build break that these
+// tests exist to catch if it happens again.
+describe('POST /auth/owner-pin-recovery/request', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    resetPasswordForEmailMock.mockReset()
+  })
+
+  async function buildApp() {
+    const { default: authRouter } = await import('../../src/routes/auth')
+    const app = express()
+    app.use(express.json())
+    app.use('/auth', authRouter)
+    return app
+  }
+
+  it('Test 1: a valid email calls resetPasswordForEmail and responds 200 { ok: true }', async () => {
+    resetPasswordForEmailMock.mockResolvedValue({ data: {}, error: null })
+
+    const app = await buildApp()
+    const res = await request(app).post('/auth/owner-pin-recovery/request').send({ email: 'owner@example.com' })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true })
+    expect(resetPasswordForEmailMock).toHaveBeenCalledWith('owner@example.com', expect.any(Object))
+  })
+
+  it('Test 2: an email that does not belong to any account still responds 200 { ok: true } — same shape, no enumeration', async () => {
+    resetPasswordForEmailMock.mockResolvedValue({ data: {}, error: null })
+
+    const app = await buildApp()
+    const res = await request(app).post('/auth/owner-pin-recovery/request').send({ email: 'nobody@example.com' })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true })
+  })
+
+  it('Test 3: an invalid email fails schema validation with 400 and never calls Supabase', async () => {
+    const app = await buildApp()
+    const res = await request(app).post('/auth/owner-pin-recovery/request').send({ email: 'not-an-email' })
+
+    expect(res.status).toBe(400)
+    expect(resetPasswordForEmailMock).not.toHaveBeenCalled()
+  })
+
+  it('Test 4: a genuine provider failure responds 502, distinguishable from the always-200 enumeration-safe path', async () => {
+    resetPasswordForEmailMock.mockResolvedValue({ data: null, error: { status: 500, message: 'provider down' } })
+
+    const app = await buildApp()
+    const res = await request(app).post('/auth/owner-pin-recovery/request').send({ email: 'owner@example.com' })
+
+    expect(res.status).toBe(502)
+  })
+})
+
+describe('POST /auth/owner-pin-recovery/confirm', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    getUserMock.mockReset()
+    membershipFindFirstMock.mockReset().mockResolvedValue({
+      role: 'owner', tenant_id: 'tenant-1', is_active: true,
+    })
+    staffMembersUpdateManyMock.mockReset()
+    staffSessionsUpdateManyMock.mockReset()
+  })
+
+  function fakeJwt(payload: Record<string, unknown>) {
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
+    return `${header}.${body}.fake-signature`
+  }
+
+  async function buildApp() {
+    const { default: authRouter } = await import('../../src/routes/auth')
+    const app = express()
+    app.use(express.json())
+    app.use('/auth', authRouter)
+    return app
+  }
+
+  const ownerToken = fakeJwt({ role: 'owner', tenant_id: 'tenant-1' })
+
+  it('Test 1: an authenticated owner with a valid PIN gets it hashed and written, their other PIN sessions revoked, 200 { ok: true }', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'owner-1' } }, error: null })
+    staffMembersUpdateManyMock.mockResolvedValue({ count: 1 })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/auth/owner-pin-recovery/confirm')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ pin: '4321' })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true })
+    expect(staffMembersUpdateManyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { user_id: 'owner-1' } }),
+    )
+    expect(staffSessionsUpdateManyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { staff_id: 'owner-1', logged_out_at: null } }),
+    )
+  })
+
+  it('Test 2: a non-owner (manager) session is rejected 403, even with a well-formed PIN', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'manager-1' } }, error: null })
+    membershipFindFirstMock.mockResolvedValue({ role: 'manager', tenant_id: 'tenant-1', is_active: true })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/auth/owner-pin-recovery/confirm')
+      .set('Authorization', `Bearer ${fakeJwt({ role: 'manager', tenant_id: 'tenant-1' })}`)
+      .send({ pin: '4321' })
+
+    expect(res.status).toBe(403)
+    expect(staffMembersUpdateManyMock).not.toHaveBeenCalled()
+  })
+
+  it('Test 3: an invalid PIN fails schema validation with 400 and never reaches the DB write', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'owner-1' } }, error: null })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/auth/owner-pin-recovery/confirm')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ pin: 'abcd' })
+
+    expect(res.status).toBe(400)
+    expect(staffMembersUpdateManyMock).not.toHaveBeenCalled()
+  })
+
+  it('Test 4: no session at all (authMiddleware 401s) never reaches the handler', async () => {
+    getUserMock.mockResolvedValue({ data: { user: null }, error: { message: 'invalid token' } })
+
+    const app = await buildApp()
+    const res = await request(app).post('/auth/owner-pin-recovery/confirm').send({ pin: '4321' })
+
+    expect(res.status).toBe(401)
+    expect(staffMembersUpdateManyMock).not.toHaveBeenCalled()
   })
 })
 
