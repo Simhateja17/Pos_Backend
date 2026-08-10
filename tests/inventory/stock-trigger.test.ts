@@ -75,7 +75,21 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
   beforeAll(async () => {
     seed = await seedTwoTenants()
     const adapter = new PrismaPg({ connectionString: process.env.RLS_DATABASE_URL })
-    client = new PrismaClient({ adapter })
+    // Test 7 opens 20 interactive transactions at once against Supavisor in
+    // transaction mode, where they queue for a limited connection pool.
+    // Prisma's defaults (maxWait 2s to acquire, timeout 5s to finish) expire
+    // while a transaction is still waiting its turn, so the CLIENT gave up
+    // before the database had done anything wrong — the intermittent
+    // "cannot be executed on an expired transaction" failure.
+    //
+    // Raising the client's patience does not weaken the assertion: all 20
+    // decrements must still land and derived must still equal the ledger.
+    // It only stops the harness abandoning work Postgres was going to
+    // complete correctly.
+    client = new PrismaClient({
+      adapter,
+      transactionOptions: { maxWait: 30000, timeout: 30000 },
+    })
 
     // Fixture product/variant rows inserted via the superuser connection
     // (same pattern seed.ts itself uses for tenant/staff rows) since
