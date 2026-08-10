@@ -9,6 +9,7 @@ import {
 } from '../contracts/schemas/member'
 import { requireRole } from '../middleware/requireRole'
 import { forTenant } from '../db/tenantClient'
+import { activeStoreId } from '../middleware/storeContext'
 import {
   requireOperatorOnPairedDevice,
   requireOperatorOrFirstPinSetup,
@@ -88,6 +89,16 @@ router.post('/', requireOperatorOrFirstPinSetup, requireRole('manager'), async (
     return res.status(403).json({ error: 'Managers can create cashier profiles only.' })
   }
 
+  // A staff member belongs to exactly one shop (Phase 8, migration 0042), so
+  // creating one requires knowing which. Business-wide scope has no single
+  // answer and must be refused rather than guessed at.
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before adding staff.' })
+  }
+
   const client = forTenant(req.user!.tenantId) as any
   const pinHash = await bcrypt.hash(parsed.data.temporaryPin, 12)
 
@@ -95,6 +106,7 @@ router.post('/', requireOperatorOrFirstPinSetup, requireRole('manager'), async (
     const staff = await client.staff_members.create({
       data: {
         tenant_id: req.user!.tenantId,
+        store_id: storeId,
         user_id: null,
         email: null,
         name: parsed.data.name,
@@ -105,7 +117,8 @@ router.post('/', requireOperatorOrFirstPinSetup, requireRole('manager'), async (
       },
     })
     return res.status(201).json(toMemberJson(staff))
-  } catch {
+  } catch (error) {
+    console.error('[members:create] staff_members.create failed', error)
     return res.status(500).json({ error: 'Could not create staff profile' })
   }
 })
@@ -133,6 +146,16 @@ router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), asyn
   const { email, name, role } = parsed.data
   const tenantId = req.user!.tenantId
 
+  // Same one-person-one-shop rule as the PIN path above. Resolved BEFORE the
+  // Supabase invite so a business-scoped request cannot leave an orphaned auth
+  // user behind for a staff row that was never going to be creatable.
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before adding staff.' })
+  }
+
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
     redirectTo: process.env.INVITE_REDIRECT_URL,
   })
@@ -146,6 +169,7 @@ router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), asyn
     const staff = await (forTenant(tenantId) as any).staff_members.create({
       data: {
         tenant_id: tenantId,
+        store_id: storeId,
         user_id: data.user.id,
         email,
         name,
@@ -154,7 +178,8 @@ router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), asyn
       },
     })
     return res.status(201).json(toMemberJson(staff))
-  } catch {
+  } catch (createError) {
+    console.error('[members:invite] staff_members.create failed', createError)
     // Partial-failure cleanup: an orphaned invited-but-unlinked auth user is
     // worse than a failed invite — best-effort delete, same pattern as
     // routes/auth.ts's signup orphan cleanup.

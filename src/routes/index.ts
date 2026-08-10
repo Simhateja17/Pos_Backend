@@ -46,7 +46,14 @@ router.use('/auth', authRouter)
 // claim against req.user.tenantId, so it depends on req.user already being
 // populated from a trusted source.
 router.use('/terminal/pin', authMiddleware, requireSubscription, operatorContext, pinRouter)
-router.use('/members', authMiddleware, requireSubscription, operatorContext, membersRouter)
+// /members additionally needs storeContextMiddleware: creating a staff member
+// writes staff_members.store_id (NOT NULL since 0042), so the route must know
+// which shop it is acting in. It is added here rather than by adopting
+// `appAccess` wholesale because /members must stay reachable during
+// first-PIN-setup, i.e. before this browser is paired to a counter — which is
+// exactly what appAccess's requireOperatorOnPairedDevice forbids.
+// storeContextMiddleware itself only depends on req.user, so it is safe here.
+router.use('/members', authMiddleware, requireSubscription, operatorContext, storeContextMiddleware, membersRouter)
 router.use('/terminals', authMiddleware, requireSubscription, operatorContext, terminalsRouter)
 
 // Once a browser is paired to a counter, the organisation login remains the

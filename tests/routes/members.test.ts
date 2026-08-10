@@ -85,6 +85,9 @@ describe('members routes', () => {
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
       tenant_id: 'tenant-abc',
+      // Phase 8: resolveRequestAccess selects store_id, and storeContext
+      // resolves the request's active store from it.
+      store_id: 'store-abc',
     }))
     staffMembersCountMock.mockReset()
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
@@ -92,10 +95,13 @@ describe('members routes', () => {
 
   async function buildApp() {
     const { authMiddleware } = await import('../../src/middleware/auth')
+    const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
     const { default: membersRouter } = await import('../../src/routes/members')
     const app = express()
     app.use(express.json())
-    app.use('/members', authMiddleware, membersRouter)
+    // Mirrors the production chain in routes/index.ts: creating a staff member
+    // writes staff_members.store_id, so the router needs req.storeContext.
+    app.use('/members', authMiddleware, storeContextMiddleware, membersRouter)
     return app
   }
 
