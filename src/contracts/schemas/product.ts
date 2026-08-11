@@ -42,6 +42,7 @@ export const VariantSchema = z
     color: z.string().nullable(),
     material: z.string().nullable(),
     price: z.string(), // numeric(10,2) — serialized as a string to avoid float rounding, same convention to use in stockMovement.ts
+    isTaxable: z.boolean(),
     // numeric(12,3) since 0031 — a kg variant reorders at 5.5, not 5.
     reorderThreshold: z.number(),
     identityLocked: z.boolean(),

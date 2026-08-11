@@ -16,6 +16,14 @@ export const AppContextSchema = z
       businessName: z.string(),
       locality: z.string().nullable(),
     }),
+    store: z
+      .object({
+        id: z.string().uuid(),
+        name: z.string(),
+        locality: z.string().nullable(),
+        combinedTaxRatePercent: z.string(),
+      })
+      .nullable(),
     onboarding: z.object({
       step: z.number().int().min(0).max(8),
       completed: z.boolean(),

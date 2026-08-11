@@ -30,6 +30,17 @@ export const StoreUnreadCountSchema = z
   })
   .openapi('StoreUnreadCount')
 
+export const NotificationDigestSchema = z
+  .object({
+    date: z.string(),
+    storeId: z.string().uuid(),
+    storeName: z.string(),
+    totalCount: z.number().int(),
+    unreadCount: z.number().int(),
+    sampleTitles: z.array(z.string()),
+  })
+  .openapi('NotificationDigest')
+
 export const NotificationListSchema = z
   .object({
     notifications: z.array(NotificationSchema),
@@ -41,6 +52,8 @@ export const NotificationListSchema = z
      * an ungrouped panel is muted within a week.
      */
     byStore: z.array(StoreUnreadCountSchema),
+    /** Owner-only daily shop alert bundles; empty for managers. */
+    dailyDigest: z.array(NotificationDigestSchema),
     /** Unread notifications about the business rather than any one shop. */
     businessWideUnreadCount: z.number().int(),
   })

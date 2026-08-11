@@ -42,7 +42,7 @@ router.get('/', async (req, res) => {
   const isOwner = req.user!.role === 'owner'
   const ownStoreId = req.user!.storeId
 
-  const { rows, stores } = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+  const { rows, stores, tenant } = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
     const rows = await tx.notifications.findMany({
       where: isOwner
         ? {}
@@ -53,7 +53,8 @@ router.get('/', async (req, res) => {
       orderBy: { created_at: 'desc' },
     })
     const stores = await tx.stores.findMany({ select: { id: true, name: true } })
-    return { rows, stores }
+    const tenant = await tx.tenants.findFirst({ select: { timezone: true } })
+    return { rows, stores, tenant }
   })
 
   const storeNames = new Map<string, string>(
@@ -75,10 +76,43 @@ router.get('/', async (req, res) => {
         .sort((a: any, b: any) => b.unreadCount - a.unreadCount)
     : []
 
+  const dateFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tenant?.timezone ?? 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const digestMap = new Map<string, any>()
+  if (isOwner) {
+    for (const row of rows.filter((item: any) => item.store_id !== null)) {
+      const date = dateFormatter.format(row.created_at)
+      const key = `${date}:${row.store_id}`
+      const current = digestMap.get(key) ?? {
+        date,
+        storeId: row.store_id,
+        storeName: storeNames.get(row.store_id) ?? 'Store',
+        totalCount: 0,
+        unreadCount: 0,
+        sampleTitles: [],
+      }
+      current.totalCount += 1
+      if (row.read_at === null) current.unreadCount += 1
+      if (current.sampleTitles.length < 3) current.sampleTitles.push(row.title)
+      digestMap.set(key, current)
+    }
+  }
+  const dailyDigest = [...digestMap.values()].sort((a, b) => b.date.localeCompare(a.date))
+
   return res.json({
-    notifications: rows.map((row: any) => toNotificationJson(row, storeNames)),
+    // Owners get shop-specific alerts through dailyDigest, not one noisy row
+    // per item. Business-wide items remain individual because they are rare
+    // and may require immediate action. Managers retain their own-shop feed.
+    notifications: rows
+      .filter((row: any) => !isOwner || row.store_id === null)
+      .map((row: any) => toNotificationJson(row, storeNames)),
     unreadCount: unread.length,
     byStore,
+    dailyDigest,
     businessWideUnreadCount: unread.filter((row: any) => row.store_id === null).length,
   })
 })

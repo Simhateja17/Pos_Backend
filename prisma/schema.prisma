@@ -605,6 +605,7 @@ model stock_transfers {
   to_store_id          String                 @db.Uuid
   status               stock_transfer_status  @default(sent)
   client_transfer_id   String                 @db.Uuid
+  client_receive_id    String?                @db.Uuid
   note                 String?
   created_by           String?                @db.Uuid
   received_by          String?                @db.Uuid
@@ -613,6 +614,7 @@ model stock_transfers {
   stock_transfer_lines stock_transfer_lines[]
 
   @@unique([tenant_id, client_transfer_id], map: "idx_stock_transfers_client_id")
+  @@unique([tenant_id, client_receive_id], map: "idx_stock_transfers_client_receive_id")
   @@index([from_store_id, sent_at(sort: Desc)], map: "idx_stock_transfers_from_store")
   @@index([to_store_id, sent_at(sort: Desc)], map: "idx_stock_transfers_to_store")
   @@schema("public")
@@ -632,6 +634,7 @@ model stock_transfer_lines {
 
   @@unique([transfer_id, variant_id], map: "idx_stock_transfer_lines_unique_variant")
   @@index([tenant_id], map: "idx_stock_transfer_lines_tenant")
+  @@index([variant_id], map: "idx_stock_transfer_lines_variant_id")
   @@schema("public")
 }
 

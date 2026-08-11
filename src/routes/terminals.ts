@@ -30,12 +30,12 @@ function toTerminalJson(row: any, hasOpenShift: boolean, currentDeviceHash?: str
   }
 }
 
-async function listWithOpenShifts(client: any, currentDeviceHash?: string) {
+async function listWithOpenShifts(client: any, storeId: string, currentDeviceHash?: string) {
   const [terminals, openShifts, activeSessions, staff] = await Promise.all([
-    client.terminals.findMany({ orderBy: [{ name: 'asc' }] }),
-    client.shifts.findMany({ where: { closed_at: null }, select: { terminal_id: true } }),
+    client.terminals.findMany({ where: { store_id: storeId }, orderBy: [{ name: 'asc' }] }),
+    client.shifts.findMany({ where: { store_id: storeId, closed_at: null }, select: { terminal_id: true } }),
     client.staff_sessions.findMany({ where: { logged_out_at: null }, select: { terminal_id: true, staff_id: true } }),
-    client.staff_members.findMany({ select: { id: true, name: true } }),
+    client.staff_members.findMany({ where: { store_id: storeId }, select: { id: true, name: true } }),
   ])
   const busy = new Set(openShifts.map((row: any) => row.terminal_id).filter(Boolean))
   const staffNames = new Map<string, string>(staff.map((row: any) => [row.id, row.name] as [string, string]))
@@ -57,6 +57,7 @@ async function listWithOpenShifts(client: any, currentDeviceHash?: string) {
  */
 router.get('/', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
+  const storeId = activeStoreId(req)
   const token = getCounterDeviceToken(req)
   const currentDeviceHash = token ? hashCounterDeviceToken(token) : undefined
 
@@ -66,11 +67,11 @@ router.get('/', async (req, res) => {
   if (req.actingStaff?.role === 'cashier') {
     const current = await findPairedTerminal(client, req)
     if (!current) return res.json([])
-    const all = await listWithOpenShifts(client, currentDeviceHash)
+    const all = await listWithOpenShifts(client, storeId, currentDeviceHash)
     return res.json(all.filter((terminal: { id: string }) => terminal.id === current.id))
   }
 
-  return res.json(await listWithOpenShifts(client, currentDeviceHash))
+  return res.json(await listWithOpenShifts(client, storeId, currentDeviceHash))
 })
 
 /** Resolve the counter represented by this browser/device cookie. */
@@ -127,14 +128,16 @@ router.post('/', requireOperatorOnPairedDevice, requireRole('manager'), async (r
 router.post('/:terminalId/pair', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const pinReadyStaff = await client.staff_members.count({
-    where: { is_active: true, pin_hash: { not: null } },
+    where: { store_id: activeStoreId(req), is_active: true, pin_hash: { not: null } },
   })
   if (pinReadyStaff === 0) {
     return res.status(409).json({
       error: 'Set a counter PIN for at least one active staff member before pairing this device.',
     })
   }
-  const target = await client.terminals.findFirst({ where: { id: req.params.terminalId } })
+  const target = await client.terminals.findFirst({
+    where: { id: req.params.terminalId, store_id: activeStoreId(req) },
+  })
   if (!target) return res.status(404).json({ error: 'Counter not found' })
   if (!target.is_active) return res.status(409).json({ error: 'Turn that counter on before pairing a device.' })
 
@@ -192,7 +195,9 @@ router.patch('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager
 
   const client = forTenant(req.user!.tenantId) as any
   // RLS-scoped read first so another tenant's id cannot be renamed by guessing.
-  const existing = await client.terminals.findFirst({ where: { id: req.params.terminalId } })
+  const existing = await client.terminals.findFirst({
+    where: { id: req.params.terminalId, store_id: activeStoreId(req) },
+  })
   if (!existing) {
     return res.status(404).json({ error: 'Counter not found' })
   }
@@ -243,7 +248,9 @@ router.patch('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager
  */
 router.delete('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
-  const existing = await client.terminals.findFirst({ where: { id: req.params.terminalId } })
+  const existing = await client.terminals.findFirst({
+    where: { id: req.params.terminalId, store_id: activeStoreId(req) },
+  })
   if (!existing) {
     return res.status(404).json({ error: 'Counter not found' })
   }

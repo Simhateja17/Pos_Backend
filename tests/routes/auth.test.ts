@@ -39,6 +39,7 @@ vi.mock('@supabase/supabase-js', () => ({
 }))
 
 const tenantsCreateMock = vi.fn()
+const storesCreateMock = vi.fn(async () => ({ id: 'store-1' }))
 const staffMembersCreateMock = vi.fn()
 const staffSessionsUpdateManyMock = vi.fn()
 const staffMembersUpdateManyMock = vi.fn()
@@ -57,6 +58,7 @@ const notificationsCreateMock = vi.fn(async () => ({ id: 'notification-1' }))
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
     tenants: { create: tenantsCreateMock },
+    stores: { create: storesCreateMock },
     staff_members: {
       create: staffMembersCreateMock,
       updateMany: staffMembersUpdateManyMock,
@@ -123,6 +125,7 @@ describe('POST /auth/signup and /auth/login', () => {
     refreshSessionMock.mockReset()
     setSessionMock.mockReset()
     tenantsCreateMock.mockReset()
+    storesCreateMock.mockReset().mockResolvedValue({ id: 'store-1' })
     staffMembersCreateMock.mockReset()
     staffMembersFindFirstMock.mockReset()
     membershipFindFirstMock.mockReset().mockResolvedValue({

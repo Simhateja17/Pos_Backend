@@ -113,6 +113,8 @@ function isPlan(value: unknown): value is BillingPlanDefinition {
   if (!value || typeof value !== 'object') return false
   const plan = value as Record<string, unknown>
   return typeof plan.key === 'string'
+    && Number.isSafeInteger(plan.includedStores)
+    && Number(plan.includedStores) >= 1
     && isRegion(plan.region)
     && isCurrency(plan.currency)
     && typeof plan.name === 'string'
@@ -248,6 +250,6 @@ export function providerPlanId(plan: BillingPlanDefinition, billingCycle: Billin
  * unbilled shops nobody notices for months.
  */
 export function includedStoresForPlan(planKey: string): number {
-  const plan = DEFAULT_CATALOG.find((entry) => entry.key === planKey)
+  const plan = loadCatalog().find((entry) => entry.key === planKey)
   return plan?.includedStores ?? 1
 }

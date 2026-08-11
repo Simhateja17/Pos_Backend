@@ -424,6 +424,36 @@
               "locality"
             ]
           },
+          "store": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "locality": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "combinedTaxRatePercent": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "locality",
+              "combinedTaxRatePercent"
+            ]
+          },
           "onboarding": {
             "type": "object",
             "properties": {
@@ -445,6 +475,7 @@
         "required": [
           "staff",
           "tenant",
+          "store",
           "onboarding"
         ]
       },
@@ -1922,6 +1953,9 @@
           "price": {
             "type": "string"
           },
+          "isTaxable": {
+            "type": "boolean"
+          },
           "reorderThreshold": {
             "type": "number"
           },
@@ -1945,6 +1979,7 @@
           "color",
           "material",
           "price",
+          "isTaxable",
           "reorderThreshold",
           "identityLocked",
           "currentStock",
@@ -3375,6 +3410,225 @@
           "additionalPurchased"
         ]
       },
+      "StockTransferList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/StockTransfer"
+        }
+      },
+      "StockTransfer": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clientTransferId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "clientReceiveId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "fromStoreId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fromStoreName": {
+            "type": "string"
+          },
+          "toStoreId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toStoreName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "sent",
+              "received",
+              "cancelled"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sentAt": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "variantId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sku": {
+                  "type": "string"
+                },
+                "quantitySent": {
+                  "type": "string"
+                },
+                "quantityReceived": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "discrepancy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "variantId",
+                "sku",
+                "quantitySent",
+                "quantityReceived",
+                "discrepancy"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "clientTransferId",
+          "clientReceiveId",
+          "fromStoreId",
+          "fromStoreName",
+          "toStoreId",
+          "toStoreName",
+          "status",
+          "note",
+          "sentAt",
+          "receivedAt",
+          "lines"
+        ]
+      },
+      "TransferDestinationList": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "CreateStockTransferRequest": {
+        "type": "object",
+        "properties": {
+          "clientTransferId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toStoreId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "variantId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantitySent": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "variantId",
+                "quantitySent"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "clientTransferId",
+          "toStoreId",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
+      "ReceiveStockTransferRequest": {
+        "type": "object",
+        "properties": {
+          "clientReceiveId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "transferLineId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantityReceived": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "transferLineId",
+                "quantityReceived"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "clientReceiveId",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
       "CreateStoreRequest": {
         "type": "object",
         "properties": {
@@ -3647,6 +3901,12 @@
               "$ref": "#/components/schemas/StoreUnreadCount"
             }
           },
+          "dailyDigest": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationDigest"
+            }
+          },
           "businessWideUnreadCount": {
             "type": "integer"
           }
@@ -3655,6 +3915,7 @@
           "notifications",
           "unreadCount",
           "byStore",
+          "dailyDigest",
           "businessWideUnreadCount"
         ]
       },
@@ -3736,6 +3997,41 @@
           "storeId",
           "storeName",
           "unreadCount"
+        ]
+      },
+      "NotificationDigest": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeName": {
+            "type": "string"
+          },
+          "totalCount": {
+            "type": "integer"
+          },
+          "unreadCount": {
+            "type": "integer"
+          },
+          "sampleTitles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "date",
+          "storeId",
+          "storeName",
+          "totalCount",
+          "unreadCount",
+          "sampleTitles"
         ]
       },
       "StoreSettings": {
@@ -7319,6 +7615,122 @@
           },
           "409": {
             "description": "A store with that name already exists, or the plan's store allowance is used up (response carries storeAllowance and an upgrade message)"
+          }
+        }
+      }
+    },
+    "/transfers": {
+      "get": {
+        "description": "List transfers sent from or awaiting receipt at the active store. Manager or owner only.",
+        "responses": {
+          "200": {
+            "description": "Store transfers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockTransferList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Manager or owner role required"
+          }
+        }
+      },
+      "post": {
+        "description": "Send stock from the active store. The negative source ledger movements and transfer record commit atomically and are idempotent by clientTransferId.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStockTransferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transfer sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockTransfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid transfer"
+          },
+          "404": {
+            "description": "Store or variant not found"
+          },
+          "409": {
+            "description": "Insufficient stock"
+          }
+        }
+      }
+    },
+    "/transfers/destinations": {
+      "get": {
+        "description": "List other active shops in this business that can receive stock from the active store.",
+        "responses": {
+          "200": {
+            "description": "Transfer destinations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransferDestinationList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/transfers/{transferId}/receive": {
+      "post": {
+        "description": "Confirm the exact quantity that arrived at the active destination store. Positive destination movements and discrepancies commit atomically and are idempotent by clientReceiveId.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "transferId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiveStockTransferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transfer received",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockTransfer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Every line must be counted exactly once"
+          },
+          "404": {
+            "description": "Transfer not found at this destination store"
+          },
+          "409": {
+            "description": "Transfer already received or not receivable"
           }
         }
       }

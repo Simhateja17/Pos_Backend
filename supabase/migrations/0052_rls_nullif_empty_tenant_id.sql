@@ -151,4 +151,3 @@ alter policy tenant_isolation_variant_store_prices on public.variant_store_price
 alter policy tenant_isolation_variants on public.variants
   using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
   with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
-

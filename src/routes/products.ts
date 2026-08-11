@@ -4,6 +4,8 @@ import { CreateProductSchema, UpdateVariantSchema } from '../contracts/schemas/p
 import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
+import { activeStoreId } from '../middleware/storeContext'
+import { effectivePricesForVariants } from '../lib/storePricing'
 
 const uuidSchema = z.string().uuid()
 
@@ -19,12 +21,13 @@ type VariantRow = {
   color: string | null
   material: string | null
   price: unknown // Prisma Decimal
+  is_taxable: boolean
   reorder_threshold: unknown // Prisma Decimal since 0031
   identity_locked: boolean
   created_at: Date
 }
 
-function toVariantJson(row: VariantRow, currentStock: number) {
+function toVariantJson(row: VariantRow, currentStock: number, effectivePrice: unknown = row.price) {
   return {
     id: row.id,
     productId: row.product_id,
@@ -34,7 +37,8 @@ function toVariantJson(row: VariantRow, currentStock: number) {
     size: row.size,
     color: row.color,
     material: row.material,
-    price: row.price!.toString(),
+    price: effectivePrice!.toString(),
+    isTaxable: row.is_taxable,
     reorderThreshold: Number(row.reorder_threshold),
     identityLocked: row.identity_locked,
     currentStock,
@@ -166,15 +170,22 @@ router.get('/', async (req, res) => {
     include: { variants: { orderBy: { created_at: 'asc' } } },
   })
 
-  const variantIds = products.flatMap((p: any) => p.variants.map((v: VariantRow) => v.id))
+  const variantRows: VariantRow[] = products.flatMap((p: any) => p.variants as VariantRow[])
+  const variantIds = variantRows.map((variant) => variant.id)
   const stockByVariant = await stockLevelsFor(client, req, variantIds)
   const categoryNameById = await categoryNames(client)
+  const effectivePrices = req.storeContext?.scope === 'store'
+    ? await effectivePricesForVariants(client, activeStoreId(req), variantRows as any)
+    : variantRows.map((variant) => variant.price)
+  const effectivePriceByVariant = new Map(variantRows.map((variant, index) => [variant.id, effectivePrices[index]]))
 
   res.json(
     products.map((product: any) =>
       toProductJson(
         product,
-        product.variants.map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0))),
+        product.variants.map((v: VariantRow) =>
+          toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0), effectivePriceByVariant.get(v.id)),
+        ),
         categoryNameById,
       ),
     ),
@@ -197,7 +208,12 @@ router.get('/:productId', async (req, res) => {
   }
   const variants = await client.variants.findMany({ where: { product_id: product.id } })
   const stockByVariant = await stockLevelsFor(client, req, variants.map((v: any) => v.id))
-  const variantJson = variants.map((v: VariantRow) => toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0)))
+  const effectivePrices = req.storeContext?.scope === 'store'
+    ? await effectivePricesForVariants(client, activeStoreId(req), variants)
+    : variants.map((variant: any) => variant.price)
+  const variantJson = variants.map((v: VariantRow, index: number) =>
+    toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0), effectivePrices[index]),
+  )
   res.json(toProductJson(product, variantJson, await categoryNames(client)))
 })
 

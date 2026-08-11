@@ -27,6 +27,7 @@ import emailRouter from './email'
 import billingRouter from './billing'
 import storesRouter from './stores'
 import availabilityRouter from './availability'
+import transfersRouter from './transfers'
 import { requireSubscription } from '../middleware/requireSubscription'
 import { requireRole } from '../middleware/requireRole'
 import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
@@ -55,7 +56,7 @@ router.use('/terminal/pin', authMiddleware, requireSubscription, operatorContext
 // exactly what appAccess's requireOperatorOnPairedDevice forbids.
 // storeContextMiddleware itself only depends on req.user, so it is safe here.
 router.use('/members', authMiddleware, requireSubscription, operatorContext, storeContextMiddleware, membersRouter)
-router.use('/terminals', authMiddleware, requireSubscription, operatorContext, terminalsRouter)
+router.use('/terminals', authMiddleware, requireSubscription, operatorContext, storeContextMiddleware, terminalsRouter)
 
 // Once a browser is paired to a counter, the organisation login remains the
 // durable device session but cannot authorize app work by itself. A verified
@@ -85,6 +86,7 @@ router.use('/shifts', ...appAccess, shiftsRouter)
 router.use('/settings', ...appAccess, requireRole('manager'), settingsRouter)
 router.use('/notifications', ...appAccess, requireRole('manager'), notificationsRouter)
 router.use('/stock-movements', ...appAccess, requireRole('manager'), stockMovementsRouter)
+router.use('/transfers', ...appAccess, requireRole('manager'), transfersRouter)
 router.use('/dashboard', ...appAccess, requireRole('manager'), dashboardRouter)
 router.use('/suppliers', ...appAccess, requireRole('manager'), suppliersRouter)
 router.use('/variants/:variantId/supplier-products', ...appAccess, requireRole('manager'), supplierProductsRouter)
@@ -98,6 +100,6 @@ router.use('/onboarding', authMiddleware, operatorContext, requireOperatorOnPair
 router.use('/billing', authMiddleware, operatorContext, requireOperatorOnPairedDevice, billingRouter)
 // Context precedes read-model routers so the authenticated app shell can
 // establish its server-owned identity before record pages request data.
-router.use('/context', authMiddleware, operatorContext, requireOperatorOnPairedDevice, contextRouter)
+router.use('/context', authMiddleware, operatorContext, requireOperatorOnPairedDevice, storeContextMiddleware, contextRouter)
 
 export default router

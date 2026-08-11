@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { Prisma } from '@prisma/client'
 import { forTenantTransaction } from '../db/tenantClient'
 
 const router = Router()
@@ -14,7 +15,7 @@ router.get('/', async (req, res) => {
   // "which shift is mine" — must then read as that cashier, not the owner.
   const actingStaffId = req.actingStaff?.id ?? null
 
-  const { tenant, staff } = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+  const { tenant, staff, store } = await forTenantTransaction(req.user!.tenantId, async (tx) => {
     // These are intentionally sequential on one transaction client. Promise
     // parallelism against a single pg client does not reduce database work,
     // and using two independent tenant transactions was the direct source of
@@ -23,7 +24,10 @@ router.get('/', async (req, res) => {
     const staff = actingStaffId
       ? await tx.staff_members.findFirst({ where: { id: actingStaffId, is_active: true } })
       : await tx.staff_members.findFirst({ where: { user_id: req.user!.id, is_active: true } })
-    return { tenant, staff }
+    const store = req.storeContext?.activeStoreId
+      ? await tx.stores.findFirst({ where: { id: req.storeContext.activeStoreId, is_active: true } })
+      : null
+    return { tenant, staff, store }
   })
 
   if (!tenant) {
@@ -38,6 +42,19 @@ router.get('/', async (req, res) => {
       role: req.actingStaff?.role ?? req.user!.role,
     },
     tenant: { id: tenant.id, businessName: tenant.business_name, locality },
+    store: store
+      ? {
+          id: store.id,
+          name: store.name,
+          locality: [store.city, store.state].filter(Boolean).join(', ') || null,
+          combinedTaxRatePercent: new Prisma.Decimal(store.tax_rate_state)
+            .plus(store.tax_rate_county)
+            .plus(store.tax_rate_city)
+            .plus(store.tax_rate_district)
+            .times(100)
+            .toFixed(4),
+        }
+      : null,
     onboarding: {
       step: tenant.onboarding_step,
       completed: tenant.onboarding_completed_at !== null,

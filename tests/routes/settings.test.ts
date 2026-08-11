@@ -14,6 +14,8 @@ vi.mock('@supabase/supabase-js', () => ({
 
 const tenantsFindFirstMock = vi.fn()
 const tenantsUpdateMock = vi.fn()
+const storesFindFirstMock = vi.fn()
+const storesUpdateMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
@@ -23,6 +25,8 @@ vi.mock('../../src/db/tenantClient', () => ({
   })),
   forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
     fn({
+      tenants: { findFirst: tenantsFindFirstMock, update: tenantsUpdateMock },
+      stores: { findFirst: storesFindFirstMock, update: storesUpdateMock },
       staff_members: { findFirst: membershipFindFirstMock },
       billing_subscriptions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       terminals: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
@@ -38,6 +42,19 @@ function fakeJwt(payload: Record<string, unknown>): string {
 
 function tokenFor(role: 'owner' | 'manager' | 'cashier') {
   return fakeJwt({ sub: 'user-123', role, tenant_id: 'tenant-real' })
+}
+
+function storeRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'store-1',
+    name: 'Main store',
+    tax_rate_state: 0,
+    tax_rate_county: 0,
+    tax_rate_city: 0,
+    tax_rate_district: 0,
+    place_of_supply: null,
+    ...overrides,
+  }
 }
 
 function tenantRow(overrides: Record<string, unknown> = {}) {
@@ -70,9 +87,11 @@ describe('settings routes', () => {
     getUserMock.mockReset()
     tenantsFindFirstMock.mockReset()
     tenantsUpdateMock.mockReset()
+    storesFindFirstMock.mockReset().mockResolvedValue(storeRow())
+    storesUpdateMock.mockReset()
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
-      tenant_id: 'tenant-real',
+      tenant_id: 'tenant-real', store_id: 'store-1', is_active: true,
     }))
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
   })
@@ -80,16 +99,18 @@ describe('settings routes', () => {
   async function buildApp() {
     const { authMiddleware } = await import('../../src/middleware/auth')
     const { operatorContext } = await import('../../src/middleware/operatorContext')
+    const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
     const { default: settingsRouter } = await import('../../src/routes/settings')
     const app = express()
     app.use(express.json())
-    app.use('/settings', authMiddleware, operatorContext, settingsRouter)
+    app.use('/settings', authMiddleware, operatorContext, storeContextMiddleware, settingsRouter)
     return app
   }
 
   it('reads settings with the four tax jurisdictions collapsed into one combined rate', async () => {
-    tenantsFindFirstMock.mockResolvedValue(
-      tenantRow({ tax_rate_state: 2.5, tax_rate_county: 1, tax_rate_city: 0.5, tax_rate_district: 0 }),
+    tenantsFindFirstMock.mockResolvedValue(tenantRow())
+    storesFindFirstMock.mockResolvedValue(
+      storeRow({ tax_rate_state: 0.025, tax_rate_county: 0.01, tax_rate_city: 0.005, tax_rate_district: 0 }),
     )
     const app = await buildApp()
 
@@ -113,6 +134,7 @@ describe('settings routes', () => {
 
   it('lets the owner update settings, spreading a combined tax rate across all four columns', async () => {
     tenantsUpdateMock.mockImplementation(async ({ data }: { data: any }) => tenantRow(data))
+    storesUpdateMock.mockImplementation(async ({ data }: { data: any }) => storeRow(data))
     const app = await buildApp()
 
     const response = await request(app)
@@ -126,11 +148,18 @@ describe('settings routes', () => {
         where: { id: 'tenant-real' },
         data: expect.objectContaining({
           business_name: 'Renamed Store',
-          tax_rate_state: 2,
-          tax_rate_county: 2,
-          tax_rate_city: 2,
-          tax_rate_district: 2,
           discount_threshold_percent: 10,
+        }),
+      }),
+    )
+    expect(storesUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'store-1' },
+        data: expect.objectContaining({
+          tax_rate_state: 0.02,
+          tax_rate_county: 0.02,
+          tax_rate_city: 0.02,
+          tax_rate_district: 0.02,
         }),
       }),
     )
@@ -139,6 +168,7 @@ describe('settings routes', () => {
 
   it('maps gstin in the request to the tax_id column', async () => {
     tenantsUpdateMock.mockImplementation(async ({ data }: { data: any }) => tenantRow(data))
+    storesUpdateMock.mockImplementation(async ({ data }: { data: any }) => storeRow(data))
     const app = await buildApp()
 
     await request(app)

@@ -8,6 +8,7 @@ process.env.SUPABASE_ANON_KEY = 'anon-key'
 const getUserMock = vi.fn()
 const tenantsFindFirstMock = vi.fn()
 const staffFindFirstMock = vi.fn()
+const storesFindFirstMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 const customersFindManyMock = vi.fn()
 const customersCountMock = vi.fn()
@@ -37,6 +38,7 @@ vi.mock('../../src/db/tenantClient', () => ({
   forTenantTransaction: vi.fn(async (_tenantId: string, callback: (tx: any) => Promise<unknown>) =>
     callback({
       tenants: { findFirst: tenantsFindFirstMock },
+      stores: { findFirst: storesFindFirstMock },
       staff_members: {
         findFirst: (args: { where?: { role?: string } }) =>
           args.where?.role ? membershipFindFirstMock(args) : staffFindFirstMock(args),
@@ -59,12 +61,13 @@ function tokenFor(tenantId = 'tenant-real') {
 
 async function buildApp() {
   const { authMiddleware } = await import('../../src/middleware/auth')
+  const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
   const { default: contextRouter } = await import('../../src/routes/context')
   const { default: customersRouter } = await import('../../src/routes/customers')
   const { default: salesRouter } = await import('../../src/routes/sales')
   const app = express()
   app.use(express.json())
-  app.use('/context', authMiddleware, contextRouter)
+  app.use('/context', authMiddleware, storeContextMiddleware, contextRouter)
   app.use('/customers', authMiddleware, customersRouter)
   app.use('/sales', authMiddleware, salesRouter)
   return app
@@ -76,7 +79,11 @@ describe('context and tenant record read routes', () => {
     getUserMock.mockReset().mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
     tenantsFindFirstMock.mockReset()
     staffFindFirstMock.mockReset()
-    membershipFindFirstMock.mockReset().mockResolvedValue({ role: 'owner', tenant_id: 'tenant-real' })
+    membershipFindFirstMock.mockReset().mockResolvedValue({ role: 'owner', tenant_id: 'tenant-real', store_id: 'store-1', is_active: true })
+    storesFindFirstMock.mockReset().mockResolvedValue({
+      id: 'store-1', name: 'Bandra', city: 'Mumbai', state: 'Maharashtra',
+      tax_rate_state: 0.025, tax_rate_county: 0.01, tax_rate_city: 0.005, tax_rate_district: 0,
+    })
     customersFindManyMock.mockReset().mockResolvedValue([])
     customersCountMock.mockReset().mockResolvedValue(0)
     salesFindManyMock.mockReset().mockResolvedValue([])
@@ -104,6 +111,7 @@ describe('context and tenant record read routes', () => {
     expect(response.body).toEqual({
       staff: { id: 'staff-1', name: 'Real Owner', role: 'owner' },
       tenant: { id: 'tenant-real', businessName: 'Real Shop', locality: 'Mumbai, Maharashtra' },
+      store: { id: 'store-1', name: 'Bandra', locality: 'Mumbai, Maharashtra', combinedTaxRatePercent: '4.0000' },
       onboarding: { step: 3, completed: false },
     })
     const { forTenantTransaction } = await import('../../src/db/tenantClient')

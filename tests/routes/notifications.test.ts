@@ -32,6 +32,7 @@ vi.mock('../../src/db/tenantClient', () => ({
       staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       notifications: { findMany: notificationsFindManyMock, updateMany: notificationsUpdateManyMock },
       stores: { findMany: storesFindManyMock },
+      tenants: { findFirst: vi.fn(async () => ({ timezone: 'Asia/Kolkata' })) },
     }),
   ),
 }))
@@ -135,6 +136,10 @@ describe('GET /notifications — per-shop alert routing (Phase 8 task 11)', () =
     ])
     expect(res.body.businessWideUnreadCount).toBe(1)
     expect(res.body.unreadCount).toBe(4)
+    expect(res.body.dailyDigest).toEqual([
+      expect.objectContaining({ storeId: OTHER_STORE, storeName: 'Bandra', totalCount: 2, unreadCount: 2 }),
+      expect.objectContaining({ storeId: OWN_STORE, storeName: 'Andheri', totalCount: 1, unreadCount: 1 }),
+    ])
   })
 
   it('Test 4: a manager gets no byStore breakdown — it implies a scope they lack', async () => {
@@ -159,8 +164,8 @@ describe('GET /notifications — per-shop alert routing (Phase 8 task 11)', () =
       .get('/notifications')
       .set('Authorization', `Bearer ${tokenFor('owner')}`)
 
-    expect(res.body.notifications[0]).toMatchObject({ storeId: OWN_STORE, storeName: 'Andheri' })
-    expect(res.body.notifications[1]).toMatchObject({ storeId: null, storeName: null })
+    expect(res.body.dailyDigest[0]).toMatchObject({ storeId: OWN_STORE, storeName: 'Andheri' })
+    expect(res.body.notifications[0]).toMatchObject({ storeId: null, storeName: null })
   })
 
   it('Test 6: a manager marking read cannot clear another shop\'s alerts', async () => {

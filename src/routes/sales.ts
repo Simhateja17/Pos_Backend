@@ -12,6 +12,7 @@ import { findOrCreateCustomer, searchCustomers } from '../lib/customers'
 import { sendLoggedEmail } from '../services/email'
 import { findPairedTerminal } from '../lib/counterDevice'
 import { consumeRateLimit } from '../lib/rateLimit'
+import { effectivePricesForVariants } from '../lib/storePricing'
 
 const router = Router()
 
@@ -36,10 +37,10 @@ function isApprovedForDiscount(req: import('express').Request): boolean {
 // bypassable by choosing the field that isn't checked (Blocker 1 fix).
 function effectiveLinePercent(
   line: { discountPercent?: string; discountAmount?: string },
-  variant: { price: Prisma.Decimal },
+  price: Prisma.Decimal,
   quantity: number,
 ): Prisma.Decimal {
-  const lineSubtotal = variant.price.times(quantity)
+  const lineSubtotal = price.times(quantity)
   if (line.discountAmount) {
     return lineSubtotal.isZero()
       ? ZERO
@@ -127,7 +128,7 @@ async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string) {
 /**
  * POST / — complete a checkout sale (CHECK-01 through CHECK-05, PAY-01/02,
  * CUST-01). Server always recomputes the authoritative total from variant
- * prices + the tenant's tax profile via computeCheckout() (Pattern 2) — the
+ * prices + the active store's tax profile via computeCheckout() (Pattern 2) — the
  * client's own running total, if any, is never read. Writes
  * sale + sale_line_items + payments + stock_movements in exactly one
  * forTenantTransaction (CR-02) — a mid-transaction failure rolls back
@@ -220,24 +221,27 @@ router.post('/', async (req, res) => {
       }
 
       const tenant = await tx.tenants.findFirst({ where: { id: tenantId } })
-      if (!tenant) {
-        return { status: 404, body: { error: 'Tenant not found' } }
+      const store = await tx.stores.findFirst({ where: { id: storeId, is_active: true } })
+      if (!tenant || !store) {
+        return { status: 404, body: { error: !tenant ? 'Tenant not found' : 'Store not found' } }
       }
-      const combinedTaxRate = new Prisma.Decimal(tenant.tax_rate_state)
-        .plus(tenant.tax_rate_county)
-        .plus(tenant.tax_rate_city)
-        .plus(tenant.tax_rate_district)
+      const effectivePrices = await effectivePricesForVariants(tx, storeId, variants)
+      const combinedTaxRate = new Prisma.Decimal(store.tax_rate_state)
+        .plus(store.tax_rate_county)
+        .plus(store.tax_rate_city)
+        .plus(store.tax_rate_district)
 
       const checkoutLines = parsed.data.lines.map((line, i) => {
         const variant = variants[i]
+        const price = effectivePrices[i]
         let lineDiscount: Prisma.Decimal = ZERO
         if (line.discountAmount) {
           lineDiscount = new Prisma.Decimal(line.discountAmount)
         } else if (line.discountPercent) {
-          lineDiscount = variant.price.times(line.quantity).times(new Prisma.Decimal(line.discountPercent).dividedBy(100))
+          lineDiscount = price.times(line.quantity).times(new Prisma.Decimal(line.discountPercent).dividedBy(100))
         }
         return {
-          price: variant.price,
+          price,
           quantity: line.quantity,
           isTaxable: variant.is_taxable,
           lineDiscount,
@@ -257,7 +261,7 @@ router.post('/', async (req, res) => {
       // tenant's configured threshold.
       const effectiveCartPercent = subtotal.isZero() ? ZERO : cartDiscount.dividedBy(subtotal).times(100)
       const lineEffectivePercents = parsed.data.lines.map((l, i) =>
-        effectiveLinePercent(l, variants[i], l.quantity),
+        effectiveLinePercent(l, effectivePrices[i], l.quantity),
       )
       const maxDiscountPercent = Prisma.Decimal.max(effectiveCartPercent, ...lineEffectivePercents, ZERO)
 
@@ -308,15 +312,16 @@ router.post('/', async (req, res) => {
       for (let i = 0; i < parsed.data.lines.length; i++) {
         const line = parsed.data.lines[i]
         const variant = variants[i]
+        const price = effectivePrices[i]
         const checkoutLine = checkoutLines[i]
-        const lineTotal = variant.price.times(line.quantity).minus(checkoutLine.lineDiscount)
+        const lineTotal = price.times(line.quantity).minus(checkoutLine.lineDiscount)
         const createdLine = await tx.sale_line_items.create({
           data: {
             tenant_id: tenantId,
             sale_id: sale.id,
             variant_id: line.variantId,
             quantity: line.quantity,
-            unit_price: variant.price.toString(),
+            unit_price: price.toString(),
             discount_percent: line.discountPercent ?? null,
             discount_amount: checkoutLine.lineDiscount.toString(),
             is_taxable: variant.is_taxable,

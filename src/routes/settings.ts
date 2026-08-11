@@ -1,16 +1,17 @@
 import { Router } from 'express'
-import { forTenant } from '../db/tenantClient'
+import { forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
+import { activeStoreId } from '../middleware/storeContext'
 import { UpdateStoreSettingsSchema } from '../contracts/schemas/settings'
 
 const router = Router()
 
-function toSettingsJson(tenant: any) {
-  const combined =
-    Number(tenant.tax_rate_state) +
-    Number(tenant.tax_rate_county) +
-    Number(tenant.tax_rate_city) +
-    Number(tenant.tax_rate_district)
+function toSettingsJson(tenant: any, store: any) {
+  const combinedFraction =
+    Number(store.tax_rate_state) +
+    Number(store.tax_rate_county) +
+    Number(store.tax_rate_city) +
+    Number(store.tax_rate_district)
 
   return {
     businessName: tenant.business_name,
@@ -23,9 +24,9 @@ function toSettingsJson(tenant: any) {
     gstStatus: tenant.gst_status,
     gstin: tenant.tax_id,
     pan: tenant.pan,
-    placeOfSupply: tenant.place_of_supply,
+    placeOfSupply: store.place_of_supply,
     businessType: tenant.business_type,
-    combinedTaxRatePercent: combined.toFixed(4),
+    combinedTaxRatePercent: (combinedFraction * 100).toFixed(4),
     discountThresholdPercent: Number(tenant.discount_threshold_percent).toFixed(2),
     // 0050 default, restated here so a tenant row read before the migration
     // lands still serialises a valid enum value rather than undefined.
@@ -35,12 +36,15 @@ function toSettingsJson(tenant: any) {
 
 /** GET / — read is open to any staff role; only owners can change these. */
 router.get('/', async (req, res) => {
-  const client = forTenant(req.user!.tenantId) as any
-  const tenant = await client.tenants.findFirst({ where: { id: req.user!.tenantId } })
-  if (!tenant) {
-    return res.status(404).json({ error: 'Tenant not found' })
+  const [tenant, store] = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+    const tenant = await tx.tenants.findFirst({ where: { id: req.user!.tenantId } })
+    const store = await tx.stores.findFirst({ where: { id: activeStoreId(req), is_active: true } })
+    return [tenant, store]
+  })
+  if (!tenant || !store) {
+    return res.status(404).json({ error: !tenant ? 'Tenant not found' : 'Store not found' })
   }
-  return res.json(toSettingsJson(tenant))
+  return res.json(toSettingsJson(tenant, store))
 })
 
 router.patch('/', requireRole('owner'), async (req, res) => {
@@ -49,7 +53,6 @@ router.patch('/', requireRole('owner'), async (req, res) => {
     return res.status(400).json({ error: 'Invalid request' })
   }
 
-  const client = forTenant(req.user!.tenantId) as any
   const { combinedTaxRatePercent, discountThresholdPercent, gstin, ...rest } = parsed.data
 
   const data: Record<string, unknown> = {
@@ -63,7 +66,6 @@ router.patch('/', requireRole('owner'), async (req, res) => {
     ...(rest.gstStatus !== undefined ? { gst_status: rest.gstStatus } : {}),
     ...(gstin !== undefined ? { tax_id: gstin } : {}),
     ...(rest.pan !== undefined ? { pan: rest.pan } : {}),
-    ...(rest.placeOfSupply !== undefined ? { place_of_supply: rest.placeOfSupply } : {}),
     ...(discountThresholdPercent !== undefined
       ? { discount_threshold_percent: discountThresholdPercent }
       : {}),
@@ -71,20 +73,27 @@ router.patch('/', requireRole('owner'), async (req, res) => {
       ? { barcode_label_format: rest.barcodeLabelFormat }
       : {}),
   }
+  const storeData: Record<string, unknown> = {}
 
   if (combinedTaxRatePercent !== undefined) {
-    // Split evenly across the four jurisdiction columns (see the schema
-    // comment) — nothing reads them individually today; checkout only ever
-    // sums all four back into one rate.
-    const quarter = combinedTaxRatePercent / 4
-    data.tax_rate_state = quarter
-    data.tax_rate_county = quarter
-    data.tax_rate_city = quarter
-    data.tax_rate_district = quarter
+    // The UI speaks in human percentages (8 means 8%), while checkout expects
+    // a decimal fraction (0.08). Store that fraction evenly across the four
+    // jurisdiction columns; checkout sums them back into one rate.
+    const quarter = combinedTaxRatePercent / 100 / 4
+    storeData.tax_rate_state = quarter
+    storeData.tax_rate_county = quarter
+    storeData.tax_rate_city = quarter
+    storeData.tax_rate_district = quarter
   }
 
-  const updated = await client.tenants.update({ where: { id: req.user!.tenantId }, data })
-  return res.json(toSettingsJson(updated))
+  if (rest.placeOfSupply !== undefined) storeData.place_of_supply = rest.placeOfSupply
+
+  const [updatedTenant, updatedStore] = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+    const updatedTenant = await tx.tenants.update({ where: { id: req.user!.tenantId }, data })
+    const updatedStore = await tx.stores.update({ where: { id: activeStoreId(req) }, data: storeData })
+    return [updatedTenant, updatedStore]
+  })
+  return res.json(toSettingsJson(updatedTenant, updatedStore))
 })
 
 export default router

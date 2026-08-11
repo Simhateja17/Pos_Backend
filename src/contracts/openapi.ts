@@ -47,6 +47,13 @@ import { TerminalSchema, CreateTerminalSchema, UpdateTerminalSchema } from './sc
 import { StoreSchema, CreateStoreSchema, UpdateStoreSchema, StoreListSchema } from './schemas/store'
 import { VariantAvailabilitySchema } from './schemas/availability'
 import {
+  CreateStockTransferSchema,
+  ReceiveStockTransferSchema,
+  StockTransferListSchema,
+  StockTransferSchema,
+  TransferDestinationListSchema,
+} from './schemas/transfer'
+import {
   CompleteOnboardingSchema,
   OnboardingCompletionResponseSchema,
   OnboardingStateSchema,
@@ -720,6 +727,54 @@ registry.registerPath({
       description: 'Stores',
       content: { 'application/json': { schema: StoreListSchema } },
     },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/transfers',
+  description: 'List transfers sent from or awaiting receipt at the active store. Manager or owner only.',
+  responses: {
+    200: { description: 'Store transfers', content: { 'application/json': { schema: StockTransferListSchema } } },
+    403: { description: 'Manager or owner role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/transfers/destinations',
+  description: 'List other active shops in this business that can receive stock from the active store.',
+  responses: {
+    200: { description: 'Transfer destinations', content: { 'application/json': { schema: TransferDestinationListSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/transfers',
+  description: 'Send stock from the active store. The negative source ledger movements and transfer record commit atomically and are idempotent by clientTransferId.',
+  request: { body: { content: { 'application/json': { schema: CreateStockTransferSchema } } } },
+  responses: {
+    201: { description: 'Transfer sent', content: { 'application/json': { schema: StockTransferSchema } } },
+    400: { description: 'Invalid transfer' },
+    404: { description: 'Store or variant not found' },
+    409: { description: 'Insufficient stock' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/transfers/{transferId}/receive',
+  description: 'Confirm the exact quantity that arrived at the active destination store. Positive destination movements and discrepancies commit atomically and are idempotent by clientReceiveId.',
+  request: {
+    params: z.object({ transferId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: ReceiveStockTransferSchema } } },
+  },
+  responses: {
+    201: { description: 'Transfer received', content: { 'application/json': { schema: StockTransferSchema } } },
+    400: { description: 'Every line must be counted exactly once' },
+    404: { description: 'Transfer not found at this destination store' },
+    409: { description: 'Transfer already received or not receivable' },
   },
 })
 

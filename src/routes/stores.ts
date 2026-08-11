@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { forTenant, forTenantTransaction } from '../db/tenantClient'
+import { forTenantTransaction } from '../db/tenantClient'
 import { storeAllowance, storeLimitMessage } from '../services/storeLimit'
 import { requireRole } from '../middleware/requireRole'
 import { CreateStoreSchema, UpdateStoreSchema } from '../contracts/schemas/store'
@@ -73,7 +73,6 @@ router.post('/', requireRole('owner'), async (req, res) => {
   }
 
   const input = parsed.data
-  const client = forTenant(req.user!.tenantId) as any
 
   // Task 12: refuse past the plan's shop allowance, with an upgrade path.
   // Deliberately NOT silently allowed — an unbilled shop is worse than a
@@ -84,39 +83,46 @@ router.post('/', requireRole('owner'), async (req, res) => {
   // entitled to use the API. What is exhausted is an allowance, which is a
   // conflict with current state rather than a payment failure — a 402 would
   // also collide with requireSubscription's meaning of "you are not paid up".
-  const allowance = await forTenantTransaction(req.user!.tenantId, async (tx: any) =>
-    storeAllowance(tx, req.user!.tenantId),
-  )
-  if (!allowance.canAddStore) {
-    return res.status(409).json({
-      error: storeLimitMessage(allowance),
-      storeAllowance: allowance,
-    })
-  }
-
   try {
-    const created = await client.stores.create({
-      data: {
-        tenant_id: req.user!.tenantId,
-        name: input.name,
-        address_line1: input.addressLine1 ?? null,
-        address_line2: input.addressLine2 ?? null,
-        city: input.city ?? null,
-        state: input.state ?? null,
-        postal_code: input.postalCode ?? null,
-        ...(input.country ? { country: input.country } : {}),
-        ...(input.taxRateState !== undefined ? { tax_rate_state: input.taxRateState } : {}),
-        ...(input.taxRateCounty !== undefined ? { tax_rate_county: input.taxRateCounty } : {}),
-        ...(input.taxRateCity !== undefined ? { tax_rate_city: input.taxRateCity } : {}),
-        ...(input.taxRateDistrict !== undefined ? { tax_rate_district: input.taxRateDistrict } : {}),
-        place_of_supply: input.placeOfSupply ?? null,
-      },
+    const outcome = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+      const allowance = await storeAllowance(tx, req.user!.tenantId)
+      if (!allowance.canAddStore) return { allowance, created: null }
+      const created = await tx.stores.create({
+        data: {
+          tenant_id: req.user!.tenantId,
+          name: input.name,
+          address_line1: input.addressLine1 ?? null,
+          address_line2: input.addressLine2 ?? null,
+          city: input.city ?? null,
+          state: input.state ?? null,
+          postal_code: input.postalCode ?? null,
+          ...(input.country ? { country: input.country } : {}),
+          ...(input.taxRateState !== undefined ? { tax_rate_state: input.taxRateState } : {}),
+          ...(input.taxRateCounty !== undefined ? { tax_rate_county: input.taxRateCounty } : {}),
+          ...(input.taxRateCity !== undefined ? { tax_rate_city: input.taxRateCity } : {}),
+          ...(input.taxRateDistrict !== undefined ? { tax_rate_district: input.taxRateDistrict } : {}),
+          place_of_supply: input.placeOfSupply ?? null,
+        },
+      })
+      return { allowance, created }
     })
-    res.status(201).json(toStoreJson(created, req.user!.storeId))
+    if (!outcome.created) {
+      return res.status(409).json({
+        error: storeLimitMessage(outcome.allowance),
+        storeAllowance: outcome.allowance,
+      })
+    }
+    res.status(201).json(toStoreJson(outcome.created, req.user!.storeId))
   } catch (error: any) {
     // 0041's case-insensitive unique index on (tenant_id, lower(name)).
     if (error?.code === 'P2002') {
       return res.status(409).json({ error: 'A store with that name already exists' })
+    }
+    if (error?.message?.includes('All stores must be in the business registration state')) {
+      return res.status(409).json({ error: error.message })
+    }
+    if (error?.message?.includes('Store allowance reached')) {
+      return res.status(409).json({ error: 'Your store allowance was reached by another request. Refresh and try again.' })
     }
     throw error
   }
@@ -135,23 +141,7 @@ router.patch('/:storeId', requireRole('owner'), async (req, res) => {
   }
 
   const input = parsed.data
-  const client = forTenant(req.user!.tenantId) as any
   const storeId = req.params.storeId
-
-  const existing = await client.stores.findFirst({ where: { id: storeId } })
-  if (!existing) {
-    return res.status(404).json({ error: 'Store not found' })
-  }
-
-  // A business must always have at least one active shop. Without this an owner
-  // could deactivate their last store and lock every staff member out of a
-  // business that still has stock, staff and history in it.
-  if (input.isActive === false && existing.is_active) {
-    const activeCount = await client.stores.count({ where: { is_active: true } })
-    if (activeCount <= 1) {
-      return res.status(409).json({ error: 'A business must have at least one active store' })
-    }
-  }
 
   const data: Record<string, unknown> = {}
   if (input.name !== undefined) data.name = input.name
@@ -169,11 +159,40 @@ router.patch('/:storeId', requireRole('owner'), async (req, res) => {
   if (input.placeOfSupply !== undefined) data.place_of_supply = input.placeOfSupply
 
   try {
-    const updated = await client.stores.update({ where: { id: storeId }, data })
+    const result = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+      const existing = await tx.stores.findFirst({ where: { id: storeId } })
+      if (!existing) return { status: 404 as const, updated: null, allowance: null }
+      if (input.isActive === false && existing.is_active) {
+        const activeCount = await tx.stores.count({ where: { is_active: true } })
+        if (activeCount <= 1) return { status: 409 as const, updated: null, allowance: null }
+      }
+      if (input.isActive === true && !existing.is_active) {
+        const allowance = await storeAllowance(tx, req.user!.tenantId)
+        if (!allowance.canAddStore) return { status: 409 as const, updated: null, allowance }
+      }
+      const updated = await tx.stores.update({ where: { id: storeId }, data })
+      return { status: 200 as const, updated, allowance: null }
+    })
+    if (result.status === 404) return res.status(404).json({ error: 'Store not found' })
+    if (result.status === 409) {
+      return res.status(409).json({
+        error: result.allowance
+          ? storeLimitMessage(result.allowance)
+          : 'A business must have at least one active store',
+        ...(result.allowance ? { storeAllowance: result.allowance } : {}),
+      })
+    }
+    const updated = result.updated!
     res.json(toStoreJson(updated, req.user!.storeId))
   } catch (error: any) {
     if (error?.code === 'P2002') {
       return res.status(409).json({ error: 'A store with that name already exists' })
+    }
+    if (error?.message?.includes('All stores must be in the business registration state')) {
+      return res.status(409).json({ error: error.message })
+    }
+    if (error?.message?.includes('Store allowance reached')) {
+      return res.status(409).json({ error: 'Your store allowance was reached by another request. Refresh and try again.' })
     }
     throw error
   }
