@@ -30,6 +30,16 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  -- billing.ts still passes only plan_key to the legacy denormalised store
+  -- column. Keep the colliding US Professional key region-correct at the
+  -- database boundary so the older store trigger cannot persist India's
+  -- three-location allowance for a five-location US subscription.
+  IF TG_TABLE_NAME = 'billing_subscriptions' THEN
+    IF NEW.region = 'US' AND NEW.plan_key = 'professional' THEN
+      NEW.included_store_count := greatest(NEW.included_store_count, 5);
+    END IF;
+  END IF;
+
   IF TG_OP = 'UPDATE'
     AND OLD.entitlement_snapshot IS DISTINCT FROM '{}'::jsonb
     AND NEW.entitlement_snapshot IS DISTINCT FROM OLD.entitlement_snapshot THEN
@@ -153,6 +163,9 @@ SET entitlement_snapshot = jsonb_set(
   true
 )
 WHERE jsonb_typeof(entitlement_snapshot #> '{limits,maxLocations}') = 'number';
+UPDATE public.billing_subscriptions
+SET included_store_count = greatest(included_store_count, 5)
+WHERE region = 'US' AND plan_key = 'professional';
 ALTER TABLE public.billing_subscriptions ENABLE TRIGGER billing_subscriptions_set_entitlement_snapshot;
 
 -- Trials are intentionally separate from provider subscriptions. This keeps

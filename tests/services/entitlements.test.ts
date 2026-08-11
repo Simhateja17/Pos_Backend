@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   decideEntitlement,
+  ENTITLEMENT_VERSION,
   reservePosTransaction,
   snapshotForPlan,
   snapshotFromStoredRow,
@@ -103,6 +104,29 @@ describe('entitlement projection and enforcement', () => {
     }, 'IN')
     expect(malformed.planKey).toBe('free')
     expect(malformed.limits.maxLocations).toBe(1)
+
+    const retiredSnapshot = snapshotFromStoredRow({
+      plan_key: 'starter',
+      entitlement_snapshot: {
+        version: ENTITLEMENT_VERSION,
+        planKey: 'retired-india-plan',
+        region: 'IN',
+        limits: {
+          maxLocations: 2,
+          maxActiveUsers: 2,
+          maxActiveRegisters: 2,
+          monthlyPosTransactions: 100,
+          monthlySalesOrders: 100,
+          monthlyEcommerceOrders: 100,
+          monthlyPurchaseOrders: 50,
+          monthlyBills: 50,
+          dailyApiCalls: 2_000,
+          integrations: 0,
+        },
+      },
+    }, 'IN')
+    expect(retiredSnapshot.planKey).toBe('retired-india-plan')
+    expect(retiredSnapshot.limits.maxLocations).toBe(2)
   })
 
   it('blocks exactly at a finite boundary and leaves unlimited values open', () => {

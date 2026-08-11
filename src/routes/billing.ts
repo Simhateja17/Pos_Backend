@@ -28,7 +28,13 @@ router.get('/plans', async (req, res) => {
 router.get('/status', async (req, res) => {
   const billing = await getBillingStatus(req.user!.tenantId)
   const entitlements = await getEntitlementSummary(req.user!.tenantId)
-  return res.json({ ...billing, ...entitlementStatusFields(entitlements) })
+  return res.json({
+    ...billing,
+    entitlement: entitlements.access.entitlement,
+    accessAllowed: entitlements.access.accessAllowed,
+    graceUntil: entitlements.access.graceUntil?.toISOString() ?? null,
+    ...entitlementStatusFields(entitlements),
+  })
 })
 
 router.post('/subscription', requireRole('owner'), async (req, res) => {

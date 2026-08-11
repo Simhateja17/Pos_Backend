@@ -179,14 +179,9 @@ function parseStoredSnapshot(value: unknown, region: BillingRegion, fallbackPlan
     return snapshotForPlan(region, fallbackPlanKey)
   }
 
-  // A stored snapshot with an unknown plan key is not allowed to carry its
-  // arbitrary limits forward: an old typo must fail down, never up.
-  try {
-    if (!getPlan(region, candidate.planKey)) return snapshotForPlan(region, fallbackPlanKey)
-  } catch {
-    return snapshotForPlan(region, fallbackPlanKey)
-  }
-
+  // The stored snapshot is the authority for an existing subscriber. Its
+  // plan key may legitimately disappear from the mutable catalogue after a
+  // rename/retirement; the versioned, shape-validated limits must still win.
   return {
     version: candidate.version,
     planKey: candidate.planKey,
