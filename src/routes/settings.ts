@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type Request, type Response } from 'express'
 import { forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
 import { activeStoreId } from '../middleware/storeContext'
@@ -34,11 +34,28 @@ function toSettingsJson(tenant: any, store: any) {
   }
 }
 
+/**
+ * Settings are a single-store read/write surface. The owner can use
+ * `X-Store-Id: all` for combined dashboards and reports, but there is no
+ * unambiguous store to read or update here. Translate that scope mismatch into
+ * a client error rather than letting activeStoreId() throw a 500.
+ */
+function singleStoreId(req: Request, res: Response): string | null {
+  if (req.storeContext?.scope === 'business') {
+    res.status(400).json({ error: 'Choose a store before opening store settings' })
+    return null
+  }
+  return activeStoreId(req)
+}
+
 /** GET / — read is open to any staff role; only owners can change these. */
 router.get('/', async (req, res) => {
+  const storeId = singleStoreId(req, res)
+  if (!storeId) return
+
   const [tenant, store] = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
     const tenant = await tx.tenants.findFirst({ where: { id: req.user!.tenantId } })
-    const store = await tx.stores.findFirst({ where: { id: activeStoreId(req), is_active: true } })
+    const store = await tx.stores.findFirst({ where: { id: storeId, is_active: true } })
     return [tenant, store]
   })
   if (!tenant || !store) {
@@ -48,6 +65,9 @@ router.get('/', async (req, res) => {
 })
 
 router.patch('/', requireRole('owner'), async (req, res) => {
+  const storeId = singleStoreId(req, res)
+  if (!storeId) return
+
   const parsed = UpdateStoreSettingsSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({ error: 'Invalid request' })
@@ -90,7 +110,7 @@ router.patch('/', requireRole('owner'), async (req, res) => {
 
   const [updatedTenant, updatedStore] = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
     const updatedTenant = await tx.tenants.update({ where: { id: req.user!.tenantId }, data })
-    const updatedStore = await tx.stores.update({ where: { id: activeStoreId(req) }, data: storeData })
+    const updatedStore = await tx.stores.update({ where: { id: storeId }, data: storeData })
     return [updatedTenant, updatedStore]
   })
   return res.json(toSettingsJson(updatedTenant, updatedStore))

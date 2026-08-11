@@ -121,6 +121,20 @@ describe('settings routes', () => {
     expect(response.body.businessName).toBe('Example Retail')
   })
 
+  it('returns a clear scope error instead of a 500 for an all-stores request', async () => {
+    const app = await buildApp()
+
+    const response = await request(app)
+      .get('/settings')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .set('X-Store-Id', 'all')
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('Choose a store before opening store settings')
+    expect(tenantsFindFirstMock).not.toHaveBeenCalled()
+    expect(storesFindFirstMock).not.toHaveBeenCalled()
+  })
+
   it.each(['manager', 'cashier'] as const)('denies %s a settings write', async (role) => {
     const app = await buildApp()
     const response = await request(app)
