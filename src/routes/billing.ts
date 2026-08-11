@@ -8,7 +8,7 @@ import {
 import { requireRole } from '../middleware/requireRole'
 import { cancelSubscription, createSubscription, getBillingStatus, billingMode, regionForCountry, verifySubscription } from '../services/billing'
 import { getPlans, toPlanOption } from '../services/billingCatalog'
-import { entitlementStatusFields, getEntitlementSummary } from '../services/entitlements'
+import { activateFreeSubscription, entitlementStatusFields, getEntitlementSummary } from '../services/entitlements'
 import { forTenant } from '../db/tenantClient'
 
 const router = Router()
@@ -34,6 +34,9 @@ router.get('/status', async (req, res) => {
 router.post('/subscription', requireRole('owner'), async (req, res) => {
   const parsed = CreateSubscriptionSchema.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: 'Invalid subscription request' })
+  if (parsed.data.planKey === 'free') {
+    return res.status(201).json(await activateFreeSubscription(req.user!.tenantId, parsed.data))
+  }
   return res.status(201).json(await createSubscription(req.user!.tenantId, parsed.data))
 })
 

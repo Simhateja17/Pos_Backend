@@ -1,9 +1,11 @@
 import { forTenantTransaction } from '../db/tenantClient'
-import type { BillingRegion } from '../contracts/schemas/billing'
+import type { BillingCycle, BillingRegion } from '../contracts/schemas/billing'
 import {
   ENTITLEMENT_KEYS,
+  calculateQuote,
   getPlan,
   getPlans,
+  includedStoresForPlan,
   type BillingEntitlementLimits,
   type EntitlementKey,
   type EntitlementValue,
@@ -72,6 +74,15 @@ export class EntitlementAccessError extends Error {
   constructor() {
     super('An active subscription or trial is required to use this entitlement.')
     this.name = 'EntitlementAccessError'
+  }
+}
+
+export class EntitlementPlanError extends Error {
+  public readonly expose = true
+
+  constructor(public readonly status: number, message: string) {
+    super(message)
+    this.name = 'EntitlementPlanError'
   }
 }
 
@@ -385,6 +396,113 @@ export function entitlementStatusFields(summary: EntitlementSummary) {
     entitlementVersion: summary.snapshot.version,
     entitlements: summary.snapshot.limits,
     usage: summary.usage,
+  }
+}
+
+export type FreeSubscriptionInput = {
+  billingCycle: BillingCycle
+  idempotencyKey: string
+}
+
+/**
+ * Activate the zero-cost India plan without creating a provider attempt.
+ *
+ * The billing table still remains the access source of truth: using an active
+ * row lets the existing onboarding and request gates work unchanged, while
+ * the migration trigger gives the row the same durable entitlement snapshot
+ * as a paid subscription. Locking the tenant row makes two first-time Free
+ * clicks converge on one subscription instead of racing the open-subscription
+ * partial unique index.
+ */
+export async function activateFreeSubscription(tenantId: string, input: FreeSubscriptionInput) {
+  const plan = getPlan('IN', 'free')
+  if (!plan) throw new EntitlementPlanError(500, 'The India Free plan is not configured')
+  const quote = calculateQuote(plan, input.billingCycle)
+
+  return forTenantTransaction(tenantId, async (tx) => {
+    const tenants = await tx.$queryRaw<Array<{ id: string; country: string | null }>>`
+      SELECT id, country
+      FROM public.tenants
+      WHERE id = ${tenantId}::uuid
+      FOR UPDATE
+    `
+    if (tenants.length === 0) throw new EntitlementPlanError(404, 'Tenant not found')
+    if ((tenants[0].country ?? '').trim().toUpperCase() !== 'IN') {
+      throw new EntitlementPlanError(400, 'The Free plan is available only in the India catalogue')
+    }
+
+    const existing = await tx.$queryRaw<any[]>`
+      SELECT *
+      FROM public.billing_subscriptions
+      WHERE tenant_id = ${tenantId}::uuid
+        AND status IN (${OPEN_SUBSCRIPTION_STATUSES[0]}, ${OPEN_SUBSCRIPTION_STATUSES[1]}, ${OPEN_SUBSCRIPTION_STATUSES[2]}, ${OPEN_SUBSCRIPTION_STATUSES[3]}, ${OPEN_SUBSCRIPTION_STATUSES[4]})
+      ORDER BY updated_at DESC
+      LIMIT 1
+      FOR UPDATE
+    `
+    if (existing[0]) {
+      if (existing[0].region === 'IN' && existing[0].plan_key === 'free' && existing[0].entitlement_status === 'active') {
+        return freeSubscriptionResponse(existing[0], input, quote)
+      }
+      throw new EntitlementPlanError(409, 'This account already has an active subscription. Plan changes are scheduled for a future billing cycle.')
+    }
+
+    const providerSubscriptionId = `free_${tenantId}_${input.idempotencyKey}`
+    const created = await tx.$queryRaw<any[]>`
+      INSERT INTO public.billing_subscriptions (
+        tenant_id,
+        provider_subscription_id,
+        provider_plan_id,
+        region,
+        plan_key,
+        billing_cycle,
+        currency,
+        base_amount_minor,
+        tax_amount_minor,
+        total_amount_minor,
+        tax_rate_bps,
+        included_store_count,
+        additional_store_count,
+        status,
+        entitlement_status,
+        current_start_at,
+        provider_payload
+      ) VALUES (
+        ${tenantId}::uuid,
+        ${providerSubscriptionId},
+        'free',
+        'IN',
+        'free',
+        ${input.billingCycle},
+        'INR',
+        ${quote.baseAmountMinor},
+        ${quote.taxAmountMinor},
+        ${quote.totalAmountMinor},
+        ${quote.taxRateBps},
+        ${includedStoresForPlan('free')},
+        0,
+        'active',
+        'active',
+        now(),
+        jsonb_build_object('source', 'free_plan', 'idempotency_key', ${input.idempotencyKey})
+      )
+      RETURNING *
+    `
+    return freeSubscriptionResponse(created[0], input, quote)
+  })
+}
+
+function freeSubscriptionResponse(row: any, input: FreeSubscriptionInput, quote: ReturnType<typeof calculateQuote>) {
+  return {
+    attemptId: row.id,
+    razorpayKeyId: '',
+    razorpaySubscriptionId: row.provider_subscription_id,
+    status: row.status,
+    region: 'IN' as const,
+    planKey: 'free',
+    billingCycle: row.billing_cycle ?? input.billingCycle,
+    currency: 'INR' as const,
+    quote,
   }
 }
 
