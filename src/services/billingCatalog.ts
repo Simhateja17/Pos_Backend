@@ -6,13 +6,35 @@ type CatalogPeriod = {
   providerPlanId?: string
 }
 
+export const ENTITLEMENT_KEYS = [
+  'maxLocations',
+  'maxActiveUsers',
+  'maxActiveRegisters',
+  'monthlyPosTransactions',
+  'monthlySalesOrders',
+  'monthlyEcommerceOrders',
+  'monthlyPurchaseOrders',
+  'monthlyBills',
+  'dailyApiCalls',
+  'integrations',
+] as const
+
+export type EntitlementKey = (typeof ENTITLEMENT_KEYS)[number]
+export type EntitlementValue = number | 'unlimited'
+export type BillingEntitlementLimits = Record<EntitlementKey, EntitlementValue>
+
+const INDIA_PLAN_KEYS = ['free', 'standard', 'professional', 'premium'] as const
+
+export type IndiaPlanKey = (typeof INDIA_PLAN_KEYS)[number]
+
 export type BillingPlanDefinition = {
   key: string
   /**
    * Shops this plan covers before add-ons (Phase 8 task 12).
    *
-   * Charged PER SHOP, never per counter — terminals stay unlimited and free,
-   * because per-till pricing is a known negative in this market.
+   * Store capacity is snapshotted with the subscription. India register
+   * allowances are separate entitlement values; the catalogue never derives
+   * them from a per-till price.
    *
    * Tiered rather than linear because the market prices multi-outlet as a
    * different product, not the same one multiplied. These numbers are a
@@ -27,6 +49,7 @@ export type BillingPlanDefinition = {
   description: string
   popular: boolean
   features: string[]
+  entitlements: BillingEntitlementLimits
   monthly: CatalogPeriod
   annual: CatalogPeriod
 }
@@ -42,28 +65,56 @@ export type BillingQuote = {
 
 const DEFAULT_CATALOG: BillingPlanDefinition[] = [
   {
-    key: 'starter',
+    key: 'free',
     includedStores: 1,
     region: 'IN',
     currency: 'INR',
-    name: 'Starter',
-    description: 'Core billing and inventory for one retail store.',
+    name: 'Free',
+    description: 'Essential POS billing and inventory for one retail location.',
     popular: false,
-    features: ['GST-native billing & cart', 'UPI, card & cash payments', 'Inventory up to 2,000 SKUs', '5 staff accounts', 'GST reports & export'],
-    monthly: { amountMinor: 99_900, taxRateBps: 1_800 },
-    annual: { amountMinor: 958_800, taxRateBps: 1_800 },
+    features: ['POS billing and cart', 'Inventory management', 'GST-ready reports and CSV export', 'Offline billing and sync', 'Email support'],
+    entitlements: indiaEntitlements(1, 1, 1, 50, 50, 20, 20, 1_500),
+    monthly: { amountMinor: 0, taxRateBps: 0 },
+    annual: { amountMinor: 0, taxRateBps: 0 },
   },
   {
-    key: 'growth',
+    key: 'standard',
+    includedStores: 1,
+    region: 'IN',
+    currency: 'INR',
+    name: 'Standard',
+    description: 'Reliable POS operations for a growing single-location team.',
+    popular: false,
+    features: ['Everything in Free', 'Up to 3 active users', 'Up to 1 active register', 'Unlimited POS transactions', 'Email support'],
+    entitlements: indiaEntitlements(1, 3, 1, 'unlimited', 500, 500, 500, 2_500),
+    monthly: { amountMinor: 64_900, taxRateBps: 1_800 },
+    annual: { amountMinor: 778_800, taxRateBps: 1_800 },
+  },
+  {
+    key: 'professional',
     includedStores: 3,
     region: 'IN',
     currency: 'INR',
-    name: 'Growth',
-    description: 'Multi-store operations, loyalty, campaigns and AI assistance.',
+    name: 'Professional',
+    description: 'Multi-location POS operations for established retail teams.',
     popular: true,
-    features: ['Everything in Starter', 'Loyalty, gift cards & CRM', 'Sales channels', 'AI Copilot', 'WhatsApp campaigns', 'Priority support'],
-    monthly: { amountMinor: 249_900, taxRateBps: 1_800 },
-    annual: { amountMinor: 2_398_800, taxRateBps: 1_800 },
+    features: ['Everything in Standard', 'Up to 10 active users', 'Up to 3 active registers', 'Unlimited POS transactions', 'Priority support'],
+    entitlements: indiaEntitlements(3, 10, 3, 'unlimited', 5_000, 2_500, 2_500, 5_000),
+    monthly: { amountMinor: 129_900, taxRateBps: 1_800 },
+    annual: { amountMinor: 1_558_800, taxRateBps: 1_800 },
+  },
+  {
+    key: 'premium',
+    includedStores: 5,
+    region: 'IN',
+    currency: 'INR',
+    name: 'Premium',
+    description: 'The highest included capacity for multi-location retail operations.',
+    popular: false,
+    features: ['Everything in Professional', 'Up to 15 active users', 'Up to 5 active registers', 'Unlimited POS transactions', 'Priority support'],
+    entitlements: indiaEntitlements(5, 15, 5, 'unlimited', 10_000, 5_000, 5_000, 7_500),
+    monthly: { amountMinor: 209_900, taxRateBps: 1_800 },
+    annual: { amountMinor: 2_518_800, taxRateBps: 1_800 },
   },
   {
     key: 'essentials',
@@ -74,6 +125,7 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
     description: 'Essential sales, inventory and offline billing for one location.',
     popular: false,
     features: ['1 location · 2 registers', 'Sales tax configuration', 'Digital receipts', 'Offline billing', 'Email support'],
+    entitlements: usEntitlements(1),
     monthly: { amountMinor: 2_900 },
     annual: { amountMinor: 29_000 },
   },
@@ -86,10 +138,60 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
     description: 'Advanced retail operations for growing US teams.',
     popular: true,
     features: ['Everything in Essentials', 'Unlimited registers', 'Advanced reporting', 'Multi-location operations', 'Priority support'],
+    entitlements: usEntitlements(5),
     monthly: { amountMinor: 7_900 },
     annual: { amountMinor: 79_000 },
   },
 ]
+
+function indiaEntitlements(
+  maxLocations: number,
+  maxActiveUsers: number,
+  maxActiveRegisters: number,
+  monthlyPosTransactions: EntitlementValue,
+  monthlySalesOrders: number,
+  monthlyPurchaseOrders: number,
+  monthlyBills: number,
+  dailyApiCalls: number,
+): BillingEntitlementLimits {
+  return {
+    maxLocations,
+    maxActiveUsers,
+    maxActiveRegisters,
+    monthlyPosTransactions,
+    monthlySalesOrders,
+    monthlyEcommerceOrders: monthlySalesOrders,
+    monthlyPurchaseOrders,
+    monthlyBills,
+    dailyApiCalls,
+    // Integrations are deliberately stored as a future entitlement only. No
+    // integration module is enabled by this catalogue.
+    integrations: 0,
+  }
+}
+
+function usEntitlements(maxLocations: number): BillingEntitlementLimits {
+  return {
+    maxLocations,
+    maxActiveUsers: 'unlimited',
+    maxActiveRegisters: 'unlimited',
+    monthlyPosTransactions: 'unlimited',
+    monthlySalesOrders: 'unlimited',
+    monthlyEcommerceOrders: 'unlimited',
+    monthlyPurchaseOrders: 'unlimited',
+    monthlyBills: 'unlimited',
+    dailyApiCalls: 'unlimited',
+    integrations: 0,
+  }
+}
+
+function lowestIndiaEntitlements(): BillingEntitlementLimits {
+  return { ...DEFAULT_CATALOG.find((plan) => plan.key === 'free')!.entitlements }
+}
+
+function lowestUsEntitlements(): BillingEntitlementLimits {
+  return { ...DEFAULT_CATALOG.find((plan) => plan.key === 'essentials')!.entitlements }
+}
 
 function isRegion(value: unknown): value is BillingRegion {
   return value === 'IN' || value === 'US'
@@ -109,7 +211,17 @@ function isPeriod(value: unknown): value is CatalogPeriod {
   )
 }
 
-function isPlan(value: unknown): value is BillingPlanDefinition {
+function isEntitlementValue(value: unknown): value is EntitlementValue {
+  return value === 'unlimited' || (Number.isSafeInteger(value) && Number(value) >= 0)
+}
+
+function isEntitlementLimits(value: unknown): value is BillingEntitlementLimits {
+  if (!value || typeof value !== 'object') return false
+  const limits = value as Record<string, unknown>
+  return ENTITLEMENT_KEYS.every((key) => isEntitlementValue(limits[key]))
+}
+
+function isPlan(value: unknown): value is Omit<BillingPlanDefinition, 'entitlements'> & { entitlements?: BillingEntitlementLimits } {
   if (!value || typeof value !== 'object') return false
   const plan = value as Record<string, unknown>
   return typeof plan.key === 'string'
@@ -122,8 +234,27 @@ function isPlan(value: unknown): value is BillingPlanDefinition {
     && typeof plan.popular === 'boolean'
     && Array.isArray(plan.features)
     && plan.features.every((feature) => typeof feature === 'string')
+    && (plan.entitlements === undefined || isEntitlementLimits(plan.entitlements))
     && isPeriod(plan.monthly)
     && isPeriod(plan.annual)
+}
+
+function legacyEntitlements(plan: { key: string; region: BillingRegion; includedStores: number }): BillingEntitlementLimits {
+  if (plan.region === 'IN') {
+    const known = DEFAULT_CATALOG.find((entry) => entry.region === 'IN' && entry.key === plan.key)
+    if (known) return { ...known.entitlements }
+    return { ...lowestIndiaEntitlements(), maxLocations: plan.includedStores }
+  }
+  const known = DEFAULT_CATALOG.find((entry) => entry.region === 'US' && entry.key === plan.key)
+  if (known) return { ...known.entitlements }
+  return { ...lowestUsEntitlements(), maxLocations: plan.includedStores }
+}
+
+function normalisePlan(plan: Omit<BillingPlanDefinition, 'entitlements'> & { entitlements?: BillingEntitlementLimits }): BillingPlanDefinition {
+  return {
+    ...plan,
+    entitlements: plan.entitlements ? { ...plan.entitlements } : legacyEntitlements(plan),
+  }
 }
 
 function loadCatalog(): BillingPlanDefinition[] {
@@ -156,7 +287,50 @@ function loadCatalog(): BillingPlanDefinition[] {
   if (!Array.isArray(parsed) || !parsed.every(isPlan)) {
     throw new Error('BILLING_PLAN_CATALOG_JSON has an invalid plan shape')
   }
-  return parsed
+
+  const custom = parsed.map(normalisePlan)
+  const customUs = new Map(
+    custom
+      .filter((plan) => plan.region === 'US')
+      .map((plan) => [plan.key, plan]),
+  )
+  const customIndia = new Map(
+    custom
+      .filter((plan) => plan.region === 'IN' && (INDIA_PLAN_KEYS as readonly string[]).includes(plan.key))
+      .map((plan) => [plan.key, plan]),
+  )
+
+  // The environment may only provide provider Plan IDs. It must not be able
+  // to resurrect the retired Starter/Growth/Enterprise India catalogue.
+  const india = DEFAULT_CATALOG
+    .filter((plan) => plan.region === 'IN')
+    .map((plan) => {
+      const override = customIndia.get(plan.key)
+      if (!override) return plan
+      return {
+        ...plan,
+        ...override,
+        monthly: { ...plan.monthly, ...override.monthly },
+        annual: { ...plan.annual, ...override.annual },
+        entitlements: { ...plan.entitlements, ...override.entitlements },
+      }
+    })
+
+  const us = DEFAULT_CATALOG
+    .filter((plan) => plan.region === 'US')
+    .map((plan) => {
+      const override = customUs.get(plan.key)
+      if (!override) return plan
+      return {
+        ...plan,
+        ...override,
+        monthly: { ...plan.monthly, ...override.monthly },
+        annual: { ...plan.annual, ...override.annual },
+        entitlements: { ...plan.entitlements, ...override.entitlements },
+      }
+    })
+
+  return [...india, ...us]
 }
 
 function roundMinor(value: number): number {
@@ -220,6 +394,7 @@ export function toPlanOption(plan: BillingPlanDefinition) {
   return {
     key: plan.key,
     includedStores: plan.includedStores,
+    entitlements: plan.entitlements,
     region: plan.region,
     currency: plan.currency,
     name: plan.name,
@@ -251,5 +426,6 @@ export function providerPlanId(plan: BillingPlanDefinition, billingCycle: Billin
  */
 export function includedStoresForPlan(planKey: string): number {
   const plan = loadCatalog().find((entry) => entry.key === planKey)
-  return plan?.includedStores ?? 1
+  const limit = plan?.entitlements.maxLocations ?? plan?.includedStores
+  return typeof limit === 'number' && Number.isSafeInteger(limit) && limit >= 1 ? limit : 1
 }

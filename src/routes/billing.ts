@@ -8,6 +8,7 @@ import {
 import { requireRole } from '../middleware/requireRole'
 import { cancelSubscription, createSubscription, getBillingStatus, billingMode, regionForCountry, verifySubscription } from '../services/billing'
 import { getPlans, toPlanOption } from '../services/billingCatalog'
+import { entitlementStatusFields, getEntitlementSummary } from '../services/entitlements'
 import { forTenant } from '../db/tenantClient'
 
 const router = Router()
@@ -25,7 +26,9 @@ router.get('/plans', async (req, res) => {
 })
 
 router.get('/status', async (req, res) => {
-  return res.json(await getBillingStatus(req.user!.tenantId))
+  const billing = await getBillingStatus(req.user!.tenantId)
+  const entitlements = await getEntitlementSummary(req.user!.tenantId)
+  return res.json({ ...billing, ...entitlementStatusFields(entitlements) })
 })
 
 router.post('/subscription', requireRole('owner'), async (req, res) => {

@@ -1,0 +1,190 @@
+import { describe, expect, it } from 'vitest'
+import {
+  decideEntitlement,
+  reservePosTransaction,
+  snapshotForPlan,
+  snapshotFromStoredRow,
+} from '../../src/services/entitlements'
+import { trialAccessForRow } from '../../src/services/billingAccess'
+
+function fakeTransaction(initialUsed = 0, posLimit = 50) {
+  let used = initialUsed
+  const eventKeys = new Set<string>()
+  const deletedEvents: string[] = []
+
+  const tx = {
+    tenants: {
+      findFirst: async () => ({ country: 'IN', timezone: 'Asia/Kolkata' }),
+    },
+    stores: { count: async () => 1 },
+    staff_members: { count: async () => 1 },
+    terminals: { count: async () => 1 },
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = Array.from(strings).join(' ')
+      if (query.includes('FROM public.billing_subscriptions')) return []
+      if (query.includes('FROM public.billing_trials')) {
+        return [{
+          plan_key: 'free',
+          region: 'IN',
+          status: 'active',
+          started_at: new Date('2026-08-01T00:00:00.000Z'),
+          ends_at: null,
+          entitlement_snapshot: {
+            version: 'india-mvp-04-v1',
+            planKey: 'free',
+            region: 'IN',
+            limits: {
+              maxLocations: 1,
+              maxActiveUsers: 1,
+              maxActiveRegisters: 1,
+              monthlyPosTransactions: posLimit,
+              monthlySalesOrders: 50,
+              monthlyEcommerceOrders: 50,
+              monthlyPurchaseOrders: 20,
+              monthlyBills: 20,
+              dailyApiCalls: 1_500,
+              integrations: 0,
+            },
+          },
+        }]
+      }
+      if (query.includes('FROM public.entitlement_usage_counters')) {
+        return [{ business_month: '2026-08-01', used_count: used }]
+      }
+      if (query.includes('INSERT INTO public.entitlement_usage_events')) {
+        const sourceKey = String(values[5])
+        if (eventKeys.has(sourceKey)) return []
+        eventKeys.add(sourceKey)
+        return [{ id: `event-${sourceKey}` }]
+      }
+      if (query.includes('INSERT INTO public.entitlement_usage_counters')) {
+        if (used >= posLimit) return []
+        used += 1
+        return [{ used_count: used }]
+      }
+      return []
+    },
+    $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const query = Array.from(strings).join(' ')
+      if (query.includes('DELETE FROM public.entitlement_usage_events')) deletedEvents.push(String(values[3]))
+      return 1
+    },
+  }
+
+  return { tx, getUsed: () => used, eventKeys, deletedEvents }
+}
+
+describe('entitlement projection and enforcement', () => {
+  it('resolves an unknown plan downward to Free and never trusts malformed stored limits', () => {
+    const unknown = snapshotForPlan('IN', 'does-not-exist')
+    expect(unknown.planKey).toBe('free')
+    expect(unknown.limits.maxActiveUsers).toBe(1)
+    expect(unknown.limits.monthlyPosTransactions).toBe(50)
+
+    const malformed = snapshotFromStoredRow({
+      plan_key: 'premium',
+      entitlement_snapshot: {
+        version: 'future-unverified-version',
+        planKey: 'premium',
+        region: 'IN',
+        limits: {
+          maxLocations: 'unlimited',
+          maxActiveUsers: 'unlimited',
+          maxActiveRegisters: 'unlimited',
+          monthlyPosTransactions: 'unlimited',
+          monthlySalesOrders: 'unlimited',
+          monthlyEcommerceOrders: 'unlimited',
+          monthlyPurchaseOrders: 'unlimited',
+          monthlyBills: 'unlimited',
+          dailyApiCalls: 'unlimited',
+          integrations: 0,
+        },
+      },
+    }, 'IN')
+    expect(malformed.planKey).toBe('free')
+    expect(malformed.limits.maxLocations).toBe(1)
+  })
+
+  it('blocks exactly at a finite boundary and leaves unlimited values open', () => {
+    expect(decideEntitlement('maxActiveUsers', 3, 2, 'Active users').allowed).toBe(true)
+    expect(decideEntitlement('maxActiveUsers', 3, 3, 'Active users')).toMatchObject({
+      allowed: false,
+      code: 'entitlement_limit_reached',
+      usage: 3,
+      limit: 3,
+    })
+    expect(decideEntitlement('monthlyPosTransactions', 'unlimited', 100).allowed).toBe(true)
+  })
+
+  it('blocks a zero-valued finite entitlement before creating a counter', async () => {
+    const fixture = fakeTransaction(0, 0)
+    const reservation = await reservePosTransaction(fixture.tx, {
+      tenantId: '11111111-1111-4111-8111-111111111111',
+      storeId: '22222222-2222-4222-8222-222222222222',
+      sourceKey: 'zero-limit-sale',
+      now: new Date('2026-08-11T10:00:00.000Z'),
+    })
+
+    expect(reservation).toMatchObject({ allowed: false, limit: 0, usage: 0 })
+    expect(fixture.getUsed()).toBe(0)
+    expect(fixture.deletedEvents).toContain('zero-limit-sale')
+  })
+
+  it('treats an expired trial as blocked', () => {
+    const access = trialAccessForRow(
+      { status: 'active', ends_at: new Date('2026-08-01T00:00:00.000Z') },
+      new Date('2026-08-02T00:00:00.000Z'),
+    )
+    expect(access).toEqual({ entitlement: 'blocked', accessAllowed: false, graceUntil: null })
+  })
+
+  it('counts one committed POS sale, makes retries idempotent, and blocks the 51st without a write', async () => {
+    const fixture = fakeTransaction(49)
+    const first = await reservePosTransaction(fixture.tx, {
+      tenantId: '11111111-1111-4111-8111-111111111111',
+      storeId: '22222222-2222-4222-8222-222222222222',
+      sourceKey: 'sale-1',
+      now: new Date('2026-08-11T10:00:00.000Z'),
+    })
+    const retry = await reservePosTransaction(fixture.tx, {
+      tenantId: '11111111-1111-4111-8111-111111111111',
+      storeId: '22222222-2222-4222-8222-222222222222',
+      sourceKey: 'sale-1',
+      now: new Date('2026-08-11T10:00:00.000Z'),
+    })
+    const fiftyFirst = await reservePosTransaction(fixture.tx, {
+      tenantId: '11111111-1111-4111-8111-111111111111',
+      storeId: '22222222-2222-4222-8222-222222222222',
+      sourceKey: 'sale-2',
+      now: new Date('2026-08-11T10:00:00.000Z'),
+    })
+
+    expect(first).toMatchObject({ allowed: true, counted: true, replayed: false })
+    expect(retry).toMatchObject({ allowed: true, counted: false, replayed: true })
+    expect(fiftyFirst).toMatchObject({ allowed: false, code: 'entitlement_limit_reached', limit: 50, usage: 50 })
+    expect(fixture.getUsed()).toBe(50)
+    expect(fixture.deletedEvents).toContain('sale-2')
+  })
+
+  it('serializes two distinct concurrent reservations at the finite counter', async () => {
+    const fixture = fakeTransaction(49)
+    const results = await Promise.all([
+      reservePosTransaction(fixture.tx, {
+        tenantId: '11111111-1111-4111-8111-111111111111',
+        storeId: '22222222-2222-4222-8222-222222222222',
+        sourceKey: 'sale-a',
+        now: new Date('2026-08-11T10:00:00.000Z'),
+      }),
+      reservePosTransaction(fixture.tx, {
+        tenantId: '11111111-1111-4111-8111-111111111111',
+        storeId: '22222222-2222-4222-8222-222222222222',
+        sourceKey: 'sale-b',
+        now: new Date('2026-08-11T10:00:00.000Z'),
+      }),
+    ])
+
+    expect(results.filter((result) => result.allowed)).toHaveLength(1)
+    expect(results.filter((result) => !result.allowed)).toHaveLength(1)
+    expect(fixture.getUsed()).toBe(50)
+  })
+})

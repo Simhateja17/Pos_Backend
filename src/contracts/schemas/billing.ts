@@ -9,6 +9,37 @@ export const BillingRegionSchema = z.enum(['IN', 'US']).openapi('BillingRegion')
 export const BillingCycleSchema = z.enum(['monthly', 'annual']).openapi('BillingCycle')
 export const BillingCurrencySchema = z.enum(['INR', 'USD']).openapi('BillingCurrency')
 
+export const EntitlementValueSchema = z
+  .union([z.literal('unlimited'), z.number().int().nonnegative()])
+  .openapi('EntitlementValue')
+
+export const EntitlementLimitsSchema = z
+  .object({
+    maxLocations: EntitlementValueSchema,
+    maxActiveUsers: EntitlementValueSchema,
+    maxActiveRegisters: EntitlementValueSchema,
+    monthlyPosTransactions: EntitlementValueSchema,
+    monthlySalesOrders: EntitlementValueSchema,
+    monthlyEcommerceOrders: EntitlementValueSchema,
+    monthlyPurchaseOrders: EntitlementValueSchema,
+    monthlyBills: EntitlementValueSchema,
+    dailyApiCalls: EntitlementValueSchema,
+    integrations: EntitlementValueSchema,
+  })
+  .strict()
+  .openapi('EntitlementLimits')
+
+export const EntitlementUsageSchema = z
+  .object({
+    businessMonth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    locations: z.number().int().nonnegative(),
+    activeUsers: z.number().int().nonnegative(),
+    activeRegisters: z.number().int().nonnegative(),
+    monthlyPosTransactions: z.number().int().nonnegative(),
+  })
+  .strict()
+  .openapi('EntitlementUsage')
+
 export const BillingQuoteSchema = z
   .object({
     baseAmountMinor: z.number().int().nonnegative(),
@@ -23,12 +54,14 @@ export const BillingQuoteSchema = z
 export const BillingPlanOptionSchema = z
   .object({
     key: z.string(),
+    includedStores: z.number().int().positive(),
     region: BillingRegionSchema,
     currency: BillingCurrencySchema,
     name: z.string(),
     description: z.string(),
     popular: z.boolean(),
     features: z.array(z.string()),
+    entitlements: EntitlementLimitsSchema,
     monthly: BillingQuoteSchema,
     annual: BillingQuoteSchema,
     monthlyAvailable: z.boolean(),
@@ -84,6 +117,12 @@ export const BillingStatusSchema = z
     entitlement: z.enum(['active', 'grace', 'blocked']),
     accessAllowed: z.boolean(),
     graceUntil: z.string().datetime().nullable(),
+    planKey: z.string(),
+    region: BillingRegionSchema,
+    entitlementSource: z.enum(['subscription', 'trial', 'free', 'blocked']),
+    entitlementVersion: z.string(),
+    entitlements: EntitlementLimitsSchema,
+    usage: EntitlementUsageSchema,
     subscription: z
       .object({
         id: z.string().uuid(),
@@ -109,4 +148,7 @@ export const CancelSubscriptionSchema = z
 export type BillingRegion = z.infer<typeof BillingRegionSchema>
 export type BillingCycle = z.infer<typeof BillingCycleSchema>
 export type BillingCurrency = z.infer<typeof BillingCurrencySchema>
+export type EntitlementValue = z.infer<typeof EntitlementValueSchema>
+export type EntitlementLimits = z.infer<typeof EntitlementLimitsSchema>
+export type EntitlementUsage = z.infer<typeof EntitlementUsageSchema>
 export type CreateSubscriptionInput = z.infer<typeof CreateSubscriptionSchema>

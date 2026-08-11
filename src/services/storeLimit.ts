@@ -1,4 +1,5 @@
 import { OPEN_SUBSCRIPTION_STATUSES } from './billingAccess'
+import { snapshotFromStoredRow } from './entitlements'
 
 export type StoreAllowance = {
   /** Active shops the business currently has. */
@@ -32,16 +33,25 @@ export type StoreAllowance = {
  * when it matters.
  */
 export async function storeAllowance(tx: any, tenantId: string): Promise<StoreAllowance> {
-  const [activeStores, subscription] = await Promise.all([
+  const [activeStores, subscription, tenant, snapshotRow] = await Promise.all([
     tx.stores.count({ where: { is_active: true } }),
     tx.billing_subscriptions.findFirst({
       where: { tenant_id: tenantId, status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
       orderBy: { updated_at: 'desc' },
-      select: { included_store_count: true, additional_store_count: true },
+      select: { included_store_count: true, additional_store_count: true, plan_key: true },
     }),
+    tx.tenants?.findFirst?.({ where: { id: tenantId }, select: { country: true } }) ?? null,
+    readStoredEntitlement(tx, tenantId),
   ])
 
-  const includedInPlan = subscription?.included_store_count ?? 1
+  const region = (tenant?.country ?? 'IN').trim().toUpperCase() === 'IN' ? 'IN' : 'US'
+  const snapshot = snapshotRow
+    ? snapshotFromStoredRow(snapshotRow, region)
+    : null
+  const snapshotLocations = snapshot?.limits.maxLocations
+  const includedInPlan = snapshot && typeof snapshotLocations === 'number'
+    ? snapshotLocations
+    : subscription?.included_store_count ?? 1
   const additionalPurchased = subscription?.additional_store_count ?? 0
   const limit = includedInPlan + additionalPurchased
 
@@ -51,6 +61,22 @@ export async function storeAllowance(tx: any, tenantId: string): Promise<StoreAl
     canAddStore: activeStores < limit,
     includedInPlan,
     additionalPurchased,
+  }
+}
+
+async function readStoredEntitlement(tx: any, tenantId: string): Promise<any | null> {
+  try {
+    const rows = await tx.$queryRaw<any[]>`
+      SELECT plan_key, region, entitlement_snapshot
+      FROM public.billing_subscriptions
+      WHERE tenant_id = ${tenantId}::uuid
+        AND status IN (${OPEN_SUBSCRIPTION_STATUSES[0]}, ${OPEN_SUBSCRIPTION_STATUSES[1]}, ${OPEN_SUBSCRIPTION_STATUSES[2]}, ${OPEN_SUBSCRIPTION_STATUSES[3]}, ${OPEN_SUBSCRIPTION_STATUSES[4]})
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `
+    return rows[0] ?? null
+  } catch {
+    return null
   }
 }
 

@@ -71,10 +71,11 @@ describe('storeAllowance (Phase 8 task 12)', () => {
 
 describe('includedStoresForPlan', () => {
   it('Test 7: known plans carry their tier allowance', () => {
-    expect(includedStoresForPlan('starter')).toBe(1)
-    expect(includedStoresForPlan('growth')).toBe(3)
+    expect(includedStoresForPlan('free')).toBe(1)
+    expect(includedStoresForPlan('standard')).toBe(1)
+    expect(includedStoresForPlan('professional')).toBe(3)
+    expect(includedStoresForPlan('premium')).toBe(5)
     expect(includedStoresForPlan('essentials')).toBe(1)
-    expect(includedStoresForPlan('professional')).toBe(5)
   })
 
   it('Test 8: an unknown plan defaults DOWN to one shop', () => {
