@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client'
 import { CreateReturnSchema } from '../contracts/schemas/return'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { findPairedTerminal } from '../lib/counterDevice'
+import { createCreditNoteForReturn, ensureTaxInvoice } from '../services/taxDocuments'
 
 const router = Router()
 
@@ -68,6 +69,43 @@ router.post('/', async (req, res) => {
         return { status: 404, body: { error: 'Sale not found' } }
       }
 
+      // Serialize retries for the same sale before checking the idempotency
+      // record. Without this lock, two concurrent requests could both pass the
+      // check and append duplicate stock/refund rows before one of them hit the
+      // credit-note unique index.
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM public.sales
+        WHERE id = ${sale.id}::uuid AND tenant_id = ${tenantId}::uuid
+        FOR UPDATE
+      `
+
+      // A retried return must be a read of the already committed result. This
+      // check happens before stock/payment writes and is backed by the partial
+      // unique index on tax_documents.return_reference_id.
+      const existingCreditNote = await tx.tax_documents.findFirst({
+        where: {
+          tenant_id: tenantId,
+          document_type: 'credit_note',
+          return_reference_id: parsed.data.returnReferenceId,
+        },
+      })
+      if (existingCreditNote) {
+        if (existingCreditNote.sale_id !== sale.id) {
+          return { status: 409, body: { error: 'Return reference has already been used for another sale.' } }
+        }
+        return {
+          status: 200,
+          body: {
+            saleId: existingCreditNote.sale_id,
+            returnReferenceId: parsed.data.returnReferenceId,
+            refundTotal: existingCreditNote.grand_total.toString(),
+            creditNoteId: existingCreditNote.id,
+            creditNoteNumber: existingCreditNote.document_number,
+            idempotent: true,
+          },
+        }
+      }
+
       // T-03-10: each line must actually belong to the claimed sale, and
       // T-03-11: over-return (returning more than remains returnable) is
       // rejected before any write.
@@ -103,10 +141,31 @@ router.post('/', async (req, res) => {
         refundLines.push({ saleLineItem, quantity: line.quantity, refundAmount })
       }
 
-      const expectedRefundTotal = refundLines.reduce(
-        (sum, l) => sum.plus(l.refundAmount),
-        ZERO,
+      // Existing sale_line_items store the pre-tax line amount. A GST credit
+      // note must reverse the tax snapshot as well, so use the immutable
+      // invoice line total for the refund amount. Tax-zero legacy sales keep
+      // exactly the old amount.
+      const invoice = await ensureTaxInvoice(tx, {
+        tenantId,
+        saleId: sale.id,
+        createdBy: await resolveActingStaffId(tx, req),
+      })
+      if (!invoice) return { status: 404, body: { error: 'Tax invoice not found' } }
+      const invoiceLineBySaleLine = new Map(
+        invoice.lines
+          .filter((line) => !!line.saleLineItemId)
+          .map((line) => [line.saleLineItemId!, line]),
       )
+      for (const refundLine of refundLines) {
+        const invoiceLine = invoiceLineBySaleLine.get(refundLine.saleLineItem.id)
+        if (!invoiceLine) return { status: 409, body: { error: 'Tax invoice line snapshot is incomplete' } }
+        refundLine.refundAmount = new Prisma.Decimal(invoiceLine.lineTotal)
+          .dividedBy(new Prisma.Decimal(invoiceLine.quantity))
+          .times(refundLine.quantity)
+          .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+      }
+
+      const expectedRefundTotal = refundLines.reduce((sum, l) => sum.plus(l.refundAmount), ZERO)
       const refundPaymentSum = parsed.data.refundPayments.reduce(
         (sum, p) => sum.plus(new Prisma.Decimal(p.amount)),
         ZERO,
@@ -180,16 +239,38 @@ router.post('/', async (req, res) => {
         createdPayments.push(payment)
       }
 
+      const creditNoteResult = await createCreditNoteForReturn(tx, {
+        tenantId,
+        saleId: sale.id,
+        returnReferenceId: parsed.data.returnReferenceId,
+        returnedLines: refundLines.map((line) => ({
+          saleLineItemId: line.saleLineItem.id,
+          quantity: new Prisma.Decimal(line.quantity),
+        })),
+        refundPayments: createdPayments.map((payment) => ({
+          method: String(payment.method),
+          direction: String(payment.direction),
+          amount: new Prisma.Decimal(payment.amount).toString(),
+          referenceCode: payment.reference_code ?? null,
+        })),
+        createdBy,
+      })
+      if (!creditNoteResult.document) return { status: 500, body: { error: 'Could not create credit note' } }
+
       return {
         status: 201,
         body: {
           saleId: sale.id,
+          returnReferenceId: parsed.data.returnReferenceId,
           refundedLines: refundLines.map((l) => ({
             saleLineItemId: l.saleLineItem.id,
             quantity: l.quantity,
             refundAmount: l.refundAmount.toString(),
           })),
           refundTotal: expectedRefundTotal.toString(),
+          creditNoteId: creditNoteResult.document.id,
+          creditNoteNumber: creditNoteResult.document.documentNumber,
+          idempotent: false,
         },
       }
     })
@@ -201,6 +282,10 @@ router.post('/', async (req, res) => {
         return res.status(409).json(result.body)
       case 400:
         return res.status(400).json(result.body)
+      case 200:
+        return res.status(200).json(result.body)
+      case 500:
+        return res.status(500).json(result.body)
       default:
         return res.status(201).json(result.body)
     }

@@ -29,9 +29,16 @@ import { ChangeOperatorPinSchema, PinSwitchSchema, PinSwitchResponseSchema, Staf
 import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
 import { CreateSaleSchema, SaleSchema, SaleListQuerySchema, SaleListSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema } from './schemas/sale'
-import { CreateReturnSchema } from './schemas/return'
+import { CreateReturnSchema, ReturnResponseSchema } from './schemas/return'
 import { CustomerListQuerySchema, CustomerListSchema, CustomerSchema } from './schemas/customer'
 import { PaymentReadQuerySchema, PaymentReadSchema } from './schemas/payment'
+import {
+  CreateTaxInvoiceSchema,
+  TaxDocumentListQuerySchema,
+  TaxDocumentListSchema,
+  TaxDocumentSchema,
+  TaxDocumentSummarySchema,
+} from './schemas/taxDocument'
 import { AppContextSchema } from './schemas/context'
 import { DashboardQuerySchema, DashboardSchema } from './schemas/dashboard'
 import {
@@ -665,10 +672,70 @@ registry.registerPath({
   description: "Process a partial or full return/refund against a prior sale (CHECK-07, D-09 through D-12). Writes a positive-delta return stock movement and refund payment row(s) against the original payment method — server-validated against the original sale's actual payment methods (D-10).",
   request: { body: { content: { 'application/json': { schema: CreateReturnSchema } } } },
   responses: {
-    201: { description: 'Return processed' },
+    200: { description: 'Existing return replayed idempotently', content: { 'application/json': { schema: ReturnResponseSchema } } },
+    201: { description: 'Return processed and credit note created', content: { 'application/json': { schema: ReturnResponseSchema } } },
     400: { description: 'Invalid request, over-return, refund-sum mismatch, or refund method not used on the original sale' },
     404: { description: 'Sale or line item not found' },
     409: { description: 'Target shift is already closed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/tax-documents',
+  description: 'List immutable, tenant-scoped GST tax invoices and credit notes. The response is a document snapshot and never recalculates historical values from current catalogue or tax settings.',
+  request: { query: TaxDocumentListQuerySchema },
+  responses: {
+    200: { description: 'Tax document summaries', content: { 'application/json': { schema: TaxDocumentListSchema } } },
+    400: { description: 'Invalid tax document filters' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/tax-documents/invoices',
+  description: 'Create or return the immutable GST tax invoice for a completed sale. Number allocation and the document snapshot are committed atomically and the operation is idempotent per sale.',
+  request: { body: { content: { 'application/json': { schema: CreateTaxInvoiceSchema } } } },
+  responses: {
+    201: { description: 'Tax invoice', content: { 'application/json': { schema: TaxDocumentSchema } } },
+    400: { description: 'Invalid invoice request' },
+    404: { description: 'Sale not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/tax-documents/invoices/sale/{saleId}',
+  description: 'Read the immutable tax invoice for a sale, creating the snapshot lazily if an older completed sale has not received one yet.',
+  request: { params: z.object({ saleId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Tax invoice', content: { 'application/json': { schema: TaxDocumentSchema } } },
+    400: { description: 'Invalid sale id' },
+    404: { description: 'Sale or tax invoice not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/tax-documents/invoices/{invoiceId}/credit-notes',
+  description: 'List credit-note snapshots linked to a tax invoice.',
+  request: { params: z.object({ invoiceId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Credit-note summaries', content: { 'application/json': { schema: z.array(TaxDocumentSummarySchema) } } },
+    400: { description: 'Invalid invoice id' },
+    404: { description: 'Tax invoice not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/tax-documents/{documentId}',
+  description: 'Read one immutable GST tax-document snapshot, including its line and payment snapshots.',
+  request: { params: z.object({ documentId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Tax document', content: { 'application/json': { schema: TaxDocumentSchema } } },
+    400: { description: 'Invalid document id' },
+    404: { description: 'Tax document not found' },
   },
 })
 

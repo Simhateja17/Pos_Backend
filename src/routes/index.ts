@@ -12,6 +12,7 @@ import notificationsRouter from './notifications'
 import stockMovementsRouter from './stockMovements'
 import salesRouter from './sales'
 import returnsRouter from './returns'
+import taxDocumentsRouter from './taxDocuments'
 import customersRouter from './customers'
 import shiftsRouter from './shifts'
 import onboardingRouter from './onboarding'
@@ -89,6 +90,10 @@ router.use('/products', ...appAccess, productsRouter)
 router.use('/categories', ...appAccess, categoriesRouter)
 router.use('/sales', ...appAccess, salesRouter)
 router.use('/returns', ...appAccess, returnsRouter)
+// GST documents are readable by cashiers for their current store and by
+// managers/owners within the store/business scope resolved above. Creation is
+// idempotent and lazy, so an older sale can receive its invoice on first read.
+router.use('/tax-documents', ...appAccess, taxDocumentsRouter)
 router.use('/customers', ...appAccess, customersRouter)
 router.use('/shifts', ...appAccess, shiftsRouter)
 

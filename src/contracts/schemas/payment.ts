@@ -5,12 +5,12 @@ extendZodWithOpenApi(z)
 
 export const PaymentInputSchema = z
   .object({
-    method: z.enum(['cash', 'card', 'check']),
+    method: z.enum(['cash', 'card', 'check', 'upi']),
     amount: z.string().regex(/^\d+\.\d{2}$/),
-    referenceCode: z.string().max(50).optional(),
+    referenceCode: z.string().trim().min(1).max(50).optional(),
   })
-  .refine((p) => p.method !== 'card' || !!p.referenceCode, {
-    message: 'referenceCode is required for card payments',
+  .refine((p) => !['card', 'upi'].includes(p.method) || !!p.referenceCode, {
+    message: 'referenceCode is required for card and UPI payments',
     path: ['referenceCode'],
   })
   .openapi('PaymentInput')
@@ -19,7 +19,7 @@ export const PaymentSchema = z
   .object({
     id: z.string().uuid(),
     saleId: z.string().uuid(),
-    method: z.enum(['cash', 'card', 'check']),
+    method: z.enum(['cash', 'card', 'check', 'upi']),
     direction: z.enum(['payment', 'refund']),
     amount: z.string(),
     referenceCode: z.string().nullable(),
@@ -30,7 +30,7 @@ export const PaymentSchema = z
 
 export const PaymentReadQuerySchema = z
   .object({
-    method: z.enum(['cash', 'card', 'check']).optional(),
+    method: z.enum(['cash', 'card', 'check', 'upi']).optional(),
     status: z.enum(['completed', 'refunded']).optional(),
     from: z.string().datetime({ offset: true }).optional(),
     to: z.string().datetime({ offset: true }).optional(),
