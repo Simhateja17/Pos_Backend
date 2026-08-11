@@ -45,6 +45,10 @@
           "key": {
             "type": "string"
           },
+          "includedStores": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
           "region": {
             "$ref": "#/components/schemas/BillingRegion"
           },
@@ -65,6 +69,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "entitlements": {
+            "$ref": "#/components/schemas/EntitlementLimits"
           },
           "monthly": {
             "$ref": "#/components/schemas/BillingQuote"
@@ -96,12 +103,14 @@
         },
         "required": [
           "key",
+          "includedStores",
           "region",
           "currency",
           "name",
           "description",
           "popular",
           "features",
+          "entitlements",
           "monthly",
           "annual",
           "monthlyAvailable",
@@ -114,6 +123,68 @@
         "enum": [
           "INR",
           "USD"
+        ]
+      },
+      "EntitlementLimits": {
+        "type": "object",
+        "properties": {
+          "maxLocations": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "maxActiveUsers": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "maxActiveRegisters": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "monthlyPosTransactions": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "monthlySalesOrders": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "monthlyEcommerceOrders": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "monthlyPurchaseOrders": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "monthlyBills": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "dailyApiCalls": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          },
+          "integrations": {
+            "$ref": "#/components/schemas/EntitlementValue"
+          }
+        },
+        "required": [
+          "maxLocations",
+          "maxActiveUsers",
+          "maxActiveRegisters",
+          "monthlyPosTransactions",
+          "monthlySalesOrders",
+          "monthlyEcommerceOrders",
+          "monthlyPurchaseOrders",
+          "monthlyBills",
+          "dailyApiCalls",
+          "integrations"
+        ],
+        "additionalProperties": false
+      },
+      "EntitlementValue": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "unlimited"
+            ]
+          },
+          {
+            "type": "integer",
+            "minimum": 0
+          }
         ]
       },
       "BillingQuote": {
@@ -178,6 +249,30 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "planKey": {
+            "type": "string"
+          },
+          "region": {
+            "$ref": "#/components/schemas/BillingRegion"
+          },
+          "entitlementSource": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "trial",
+              "free",
+              "blocked"
+            ]
+          },
+          "entitlementVersion": {
+            "type": "string"
+          },
+          "entitlements": {
+            "$ref": "#/components/schemas/EntitlementLimits"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/EntitlementUsage"
           },
           "subscription": {
             "type": [
@@ -246,8 +341,47 @@
           "entitlement",
           "accessAllowed",
           "graceUntil",
+          "planKey",
+          "region",
+          "entitlementSource",
+          "entitlementVersion",
+          "entitlements",
+          "usage",
           "subscription"
         ]
+      },
+      "EntitlementUsage": {
+        "type": "object",
+        "properties": {
+          "businessMonth": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "locations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "activeUsers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "activeRegisters": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "monthlyPosTransactions": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "businessMonth",
+          "locations",
+          "activeUsers",
+          "activeRegisters",
+          "monthlyPosTransactions"
+        ],
+        "additionalProperties": false
       },
       "BillingCycle": {
         "type": "string",
@@ -2980,7 +3114,8 @@
             "enum": [
               "cash",
               "card",
-              "check"
+              "check",
+              "upi"
             ]
           },
           "direction": {
@@ -3227,6 +3362,63 @@
           }
         ]
       },
+      "ReturnResponse": {
+        "type": "object",
+        "properties": {
+          "saleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "returnReferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "refundedLines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "saleLineItemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantity": {
+                  "type": "number"
+                },
+                "refundAmount": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "saleLineItemId",
+                "quantity",
+                "refundAmount"
+              ]
+            }
+          },
+          "refundTotal": {
+            "type": "string"
+          },
+          "creditNoteId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "creditNoteNumber": {
+            "type": "string"
+          },
+          "idempotent": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "saleId",
+          "returnReferenceId",
+          "refundTotal",
+          "creditNoteId",
+          "creditNoteNumber",
+          "idempotent"
+        ]
+      },
       "CreateReturnRequest": {
         "type": "object",
         "properties": {
@@ -3285,6 +3477,600 @@
           "refundPayments"
         ]
       },
+      "TaxDocumentList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxDocumentSummary"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "nextCursor"
+        ]
+      },
+      "TaxDocumentSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentType": {
+            "$ref": "#/components/schemas/TaxDocumentType"
+          },
+          "financialYear": {
+            "type": "string"
+          },
+          "sequenceNumber": {
+            "type": "string"
+          },
+          "documentNumber": {
+            "type": "string"
+          },
+          "documentDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "saleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "returnReferenceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "originalDocumentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "originalDocumentNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seller": {
+            "$ref": "#/components/schemas/TaxPartySnapshot"
+          },
+          "buyer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaxPartySnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "placeOfSupply": {
+            "$ref": "#/components/schemas/PlaceOfSupplySnapshot"
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxPaymentSnapshot"
+            }
+          },
+          "subtotal": {
+            "type": "string"
+          },
+          "discountTotal": {
+            "type": "string"
+          },
+          "taxableTotal": {
+            "type": "string"
+          },
+          "cgstTotal": {
+            "type": "string"
+          },
+          "sgstTotal": {
+            "type": "string"
+          },
+          "igstTotal": {
+            "type": "string"
+          },
+          "cessTotal": {
+            "type": "string"
+          },
+          "roundingAmount": {
+            "type": "string"
+          },
+          "grandTotal": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "documentType",
+          "financialYear",
+          "sequenceNumber",
+          "documentNumber",
+          "documentDate",
+          "tenantId",
+          "storeId",
+          "saleId",
+          "customerId",
+          "returnReferenceId",
+          "originalDocumentId",
+          "originalDocumentNumber",
+          "seller",
+          "buyer",
+          "placeOfSupply",
+          "payments",
+          "subtotal",
+          "discountTotal",
+          "taxableTotal",
+          "cgstTotal",
+          "sgstTotal",
+          "igstTotal",
+          "cessTotal",
+          "roundingAmount",
+          "grandTotal",
+          "createdAt"
+        ]
+      },
+      "TaxDocumentType": {
+        "type": "string",
+        "enum": [
+          "tax_invoice",
+          "credit_note"
+        ]
+      },
+      "TaxPartySnapshot": {
+        "type": "object",
+        "properties": {
+          "legalName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tradeName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "gstin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pan": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addressLine1": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addressLine2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stateCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postalCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "legalName",
+          "tradeName",
+          "gstin",
+          "pan",
+          "addressLine1",
+          "addressLine2",
+          "city",
+          "state",
+          "stateCode",
+          "postalCode",
+          "country",
+          "phone",
+          "email"
+        ]
+      },
+      "PlaceOfSupplySnapshot": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stateCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isInterState": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state",
+          "stateCode",
+          "isInterState"
+        ]
+      },
+      "TaxPaymentSnapshot": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ]
+          },
+          "amount": {
+            "type": "string"
+          },
+          "referenceCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "method",
+          "direction",
+          "amount",
+          "referenceCode"
+        ]
+      },
+      "TaxDocument": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentType": {
+            "$ref": "#/components/schemas/TaxDocumentType"
+          },
+          "financialYear": {
+            "type": "string"
+          },
+          "sequenceNumber": {
+            "type": "string"
+          },
+          "documentNumber": {
+            "type": "string"
+          },
+          "documentDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "saleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "returnReferenceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "originalDocumentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "originalDocumentNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seller": {
+            "$ref": "#/components/schemas/TaxPartySnapshot"
+          },
+          "buyer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaxPartySnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "placeOfSupply": {
+            "$ref": "#/components/schemas/PlaceOfSupplySnapshot"
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxPaymentSnapshot"
+            }
+          },
+          "subtotal": {
+            "type": "string"
+          },
+          "discountTotal": {
+            "type": "string"
+          },
+          "taxableTotal": {
+            "type": "string"
+          },
+          "cgstTotal": {
+            "type": "string"
+          },
+          "sgstTotal": {
+            "type": "string"
+          },
+          "igstTotal": {
+            "type": "string"
+          },
+          "cessTotal": {
+            "type": "string"
+          },
+          "roundingAmount": {
+            "type": "string"
+          },
+          "grandTotal": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaxDocumentLine"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "documentType",
+          "financialYear",
+          "sequenceNumber",
+          "documentNumber",
+          "documentDate",
+          "tenantId",
+          "storeId",
+          "saleId",
+          "customerId",
+          "returnReferenceId",
+          "originalDocumentId",
+          "originalDocumentNumber",
+          "seller",
+          "buyer",
+          "placeOfSupply",
+          "payments",
+          "subtotal",
+          "discountTotal",
+          "taxableTotal",
+          "cgstTotal",
+          "sgstTotal",
+          "igstTotal",
+          "cessTotal",
+          "roundingAmount",
+          "grandTotal",
+          "lines",
+          "createdAt"
+        ]
+      },
+      "TaxDocumentLine": {
+        "type": "object",
+        "properties": {
+          "saleLineItemId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "originalLineId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hsnSac": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "unitPrice": {
+            "type": "string"
+          },
+          "grossValue": {
+            "type": "string"
+          },
+          "discountValue": {
+            "type": "string"
+          },
+          "taxableValue": {
+            "type": "string"
+          },
+          "gstRate": {
+            "type": "string"
+          },
+          "cgstAmount": {
+            "type": "string"
+          },
+          "sgstAmount": {
+            "type": "string"
+          },
+          "igstAmount": {
+            "type": "string"
+          },
+          "cessAmount": {
+            "type": "string"
+          },
+          "lineTotal": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "saleLineItemId",
+          "originalLineId",
+          "variantId",
+          "description",
+          "sku",
+          "hsnSac",
+          "unit",
+          "quantity",
+          "unitPrice",
+          "grossValue",
+          "discountValue",
+          "taxableValue",
+          "gstRate",
+          "cgstAmount",
+          "sgstAmount",
+          "igstAmount",
+          "cessAmount",
+          "lineTotal"
+        ]
+      },
+      "CreateTaxInvoiceRequest": {
+        "type": "object",
+        "properties": {
+          "saleId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "saleId"
+        ]
+      },
       "CustomerList": {
         "type": "object",
         "properties": {
@@ -3324,6 +4110,12 @@
               "null"
             ]
           },
+          "billingName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "phone": {
             "type": [
               "string",
@@ -3336,16 +4128,74 @@
               "null"
             ]
           },
+          "gstin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addressLine1": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addressLine2": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stateCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "postalCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
             "type": "string"
           }
         },
         "required": [
           "id",
           "name",
+          "billingName",
           "phone",
           "email",
-          "createdAt"
+          "gstin",
+          "addressLine1",
+          "addressLine2",
+          "city",
+          "stateCode",
+          "postalCode",
+          "country",
+          "notes",
+          "createdAt",
+          "updatedAt"
         ]
       },
       "ResendReceiptResponse": {
@@ -6348,657 +7198,6 @@
           "recipient"
         ],
         "additionalProperties": false
-      },
-      "ReturnResponse": {
-        "type": "object",
-        "properties": {
-          "saleId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "returnReferenceId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "refundedLines": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "saleLineItemId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "quantity": {
-                  "type": "number"
-                },
-                "refundAmount": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "saleLineItemId",
-                "quantity",
-                "refundAmount"
-              ]
-            }
-          },
-          "refundTotal": {
-            "type": "string"
-          },
-          "creditNoteId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "creditNoteNumber": {
-            "type": "string"
-          },
-          "idempotent": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "saleId",
-          "returnReferenceId",
-          "refundTotal",
-          "creditNoteId",
-          "creditNoteNumber",
-          "idempotent"
-        ]
-      },
-      "TaxDocumentList": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TaxDocumentSummary"
-            }
-          },
-          "total": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "nextCursor": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "nextCursor"
-        ]
-      },
-      "TaxDocumentSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "documentType": {
-            "$ref": "#/components/schemas/TaxDocumentType"
-          },
-          "financialYear": {
-            "type": "string"
-          },
-          "sequenceNumber": {
-            "type": "string"
-          },
-          "documentNumber": {
-            "type": "string"
-          },
-          "documentDate": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "tenantId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "storeId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "saleId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "customerId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "returnReferenceId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "originalDocumentId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "originalDocumentNumber": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "seller": {
-            "$ref": "#/components/schemas/TaxPartySnapshot"
-          },
-          "buyer": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaxPartySnapshot"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "placeOfSupply": {
-            "$ref": "#/components/schemas/PlaceOfSupplySnapshot"
-          },
-          "payments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TaxPaymentSnapshot"
-            }
-          },
-          "subtotal": {
-            "type": "string"
-          },
-          "discountTotal": {
-            "type": "string"
-          },
-          "taxableTotal": {
-            "type": "string"
-          },
-          "cgstTotal": {
-            "type": "string"
-          },
-          "sgstTotal": {
-            "type": "string"
-          },
-          "igstTotal": {
-            "type": "string"
-          },
-          "cessTotal": {
-            "type": "string"
-          },
-          "roundingAmount": {
-            "type": "string"
-          },
-          "grandTotal": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "documentType",
-          "financialYear",
-          "sequenceNumber",
-          "documentNumber",
-          "documentDate",
-          "tenantId",
-          "storeId",
-          "saleId",
-          "customerId",
-          "returnReferenceId",
-          "originalDocumentId",
-          "originalDocumentNumber",
-          "seller",
-          "buyer",
-          "placeOfSupply",
-          "payments",
-          "subtotal",
-          "discountTotal",
-          "taxableTotal",
-          "cgstTotal",
-          "sgstTotal",
-          "igstTotal",
-          "cessTotal",
-          "roundingAmount",
-          "grandTotal",
-          "createdAt"
-        ]
-      },
-      "TaxDocumentType": {
-        "type": "string",
-        "enum": [
-          "tax_invoice",
-          "credit_note"
-        ]
-      },
-      "TaxPartySnapshot": {
-        "type": "object",
-        "properties": {
-          "legalName": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "tradeName": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "gstin": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "pan": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "addressLine1": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "addressLine2": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "city": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "state": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "stateCode": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "postalCode": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "country": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "phone": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "email": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "legalName",
-          "tradeName",
-          "gstin",
-          "pan",
-          "addressLine1",
-          "addressLine2",
-          "city",
-          "state",
-          "stateCode",
-          "postalCode",
-          "country",
-          "phone",
-          "email"
-        ]
-      },
-      "PlaceOfSupplySnapshot": {
-        "type": "object",
-        "properties": {
-          "state": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "stateCode": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "isInterState": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "state",
-          "stateCode",
-          "isInterState"
-        ]
-      },
-      "TaxPaymentSnapshot": {
-        "type": "object",
-        "properties": {
-          "method": {
-            "type": "string"
-          },
-          "direction": {
-            "type": "string",
-            "enum": [
-              "payment",
-              "refund"
-            ]
-          },
-          "amount": {
-            "type": "string"
-          },
-          "referenceCode": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "method",
-          "direction",
-          "amount",
-          "referenceCode"
-        ]
-      },
-      "TaxDocument": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "documentType": {
-            "$ref": "#/components/schemas/TaxDocumentType"
-          },
-          "financialYear": {
-            "type": "string"
-          },
-          "sequenceNumber": {
-            "type": "string"
-          },
-          "documentNumber": {
-            "type": "string"
-          },
-          "documentDate": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "tenantId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "storeId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "saleId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "customerId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "returnReferenceId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "originalDocumentId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "originalDocumentNumber": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "seller": {
-            "$ref": "#/components/schemas/TaxPartySnapshot"
-          },
-          "buyer": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TaxPartySnapshot"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "placeOfSupply": {
-            "$ref": "#/components/schemas/PlaceOfSupplySnapshot"
-          },
-          "payments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TaxPaymentSnapshot"
-            }
-          },
-          "subtotal": {
-            "type": "string"
-          },
-          "discountTotal": {
-            "type": "string"
-          },
-          "taxableTotal": {
-            "type": "string"
-          },
-          "cgstTotal": {
-            "type": "string"
-          },
-          "sgstTotal": {
-            "type": "string"
-          },
-          "igstTotal": {
-            "type": "string"
-          },
-          "cessTotal": {
-            "type": "string"
-          },
-          "roundingAmount": {
-            "type": "string"
-          },
-          "grandTotal": {
-            "type": "string"
-          },
-          "lines": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TaxDocumentLine"
-            }
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "documentType",
-          "financialYear",
-          "sequenceNumber",
-          "documentNumber",
-          "documentDate",
-          "tenantId",
-          "storeId",
-          "saleId",
-          "customerId",
-          "returnReferenceId",
-          "originalDocumentId",
-          "originalDocumentNumber",
-          "seller",
-          "buyer",
-          "placeOfSupply",
-          "payments",
-          "subtotal",
-          "discountTotal",
-          "taxableTotal",
-          "cgstTotal",
-          "sgstTotal",
-          "igstTotal",
-          "cessTotal",
-          "roundingAmount",
-          "grandTotal",
-          "lines",
-          "createdAt"
-        ]
-      },
-      "TaxDocumentLine": {
-        "type": "object",
-        "properties": {
-          "saleLineItemId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "originalLineId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "variantId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "description": {
-            "type": "string"
-          },
-          "sku": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "hsnSac": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "unit": {
-            "type": "string"
-          },
-          "quantity": {
-            "type": "string"
-          },
-          "unitPrice": {
-            "type": "string"
-          },
-          "grossValue": {
-            "type": "string"
-          },
-          "discountValue": {
-            "type": "string"
-          },
-          "taxableValue": {
-            "type": "string"
-          },
-          "gstRate": {
-            "type": "string"
-          },
-          "cgstAmount": {
-            "type": "string"
-          },
-          "sgstAmount": {
-            "type": "string"
-          },
-          "igstAmount": {
-            "type": "string"
-          },
-          "cessAmount": {
-            "type": "string"
-          },
-          "lineTotal": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "saleLineItemId",
-          "originalLineId",
-          "variantId",
-          "description",
-          "sku",
-          "hsnSac",
-          "unit",
-          "quantity",
-          "unitPrice",
-          "grossValue",
-          "discountValue",
-          "taxableValue",
-          "gstRate",
-          "cgstAmount",
-          "sgstAmount",
-          "igstAmount",
-          "cessAmount",
-          "lineTotal"
-        ]
-      },
-      "CreateTaxInvoiceRequest": {
-        "type": "object",
-        "properties": {
-          "saleId": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "saleId"
-        ]
       }
     },
     "parameters": {}
@@ -8581,6 +8780,229 @@
           },
           "409": {
             "description": "Target shift is already closed"
+          }
+        }
+      }
+    },
+    "/tax-documents": {
+      "get": {
+        "description": "List immutable, tenant-scoped GST tax invoices and credit notes. The response is a document snapshot and never recalculates historical values from current catalogue or tax settings.",
+        "parameters": [
+          {
+            "schema": {
+              "$ref": "#/components/schemas/TaxDocumentType"
+            },
+            "required": false,
+            "name": "documentType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "customerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 16
+            },
+            "required": false,
+            "name": "documentNumber",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tax document summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxDocumentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid tax document filters"
+          }
+        }
+      }
+    },
+    "/tax-documents/invoices": {
+      "post": {
+        "description": "Create or return the immutable GST tax invoice for a completed sale. Number allocation and the document snapshot are committed atomically and the operation is idempotent per sale.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaxInvoiceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Tax invoice",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid invoice request"
+          },
+          "404": {
+            "description": "Sale not found"
+          }
+        }
+      }
+    },
+    "/tax-documents/invoices/sale/{saleId}": {
+      "get": {
+        "description": "Read the immutable tax invoice for a sale, creating the snapshot lazily if an older completed sale has not received one yet.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "saleId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tax invoice",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid sale id"
+          },
+          "404": {
+            "description": "Sale or tax invoice not found"
+          }
+        }
+      }
+    },
+    "/tax-documents/invoices/{invoiceId}/credit-notes": {
+      "get": {
+        "description": "List credit-note snapshots linked to a tax invoice.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "invoiceId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credit-note summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaxDocumentSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid invoice id"
+          },
+          "404": {
+            "description": "Tax invoice not found"
+          }
+        }
+      }
+    },
+    "/tax-documents/{documentId}": {
+      "get": {
+        "description": "Read one immutable GST tax-document snapshot, including its line and payment snapshots.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "documentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tax document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaxDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid document id"
+          },
+          "404": {
+            "description": "Tax document not found"
           }
         }
       }
@@ -10512,229 +10934,6 @@
           },
           "403": {
             "description": "Owner role required"
-          }
-        }
-      }
-    },
-    "/tax-documents": {
-      "get": {
-        "description": "List immutable, tenant-scoped GST tax invoices and credit notes. The response is a document snapshot and never recalculates historical values from current catalogue or tax settings.",
-        "parameters": [
-          {
-            "schema": {
-              "$ref": "#/components/schemas/TaxDocumentType"
-            },
-            "required": false,
-            "name": "documentType",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "required": false,
-            "name": "from",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "required": false,
-            "name": "to",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": false,
-            "name": "customerId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "maxLength": 16
-            },
-            "required": false,
-            "name": "documentNumber",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "required": false,
-            "name": "cursor",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 25
-            },
-            "required": false,
-            "name": "limit",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Tax document summaries",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaxDocumentList"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid tax document filters"
-          }
-        }
-      }
-    },
-    "/tax-documents/invoices": {
-      "post": {
-        "description": "Create or return the immutable GST tax invoice for a completed sale. Number allocation and the document snapshot are committed atomically and the operation is idempotent per sale.",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateTaxInvoiceRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Tax invoice",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaxDocument"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid invoice request"
-          },
-          "404": {
-            "description": "Sale not found"
-          }
-        }
-      }
-    },
-    "/tax-documents/invoices/sale/{saleId}": {
-      "get": {
-        "description": "Read the immutable tax invoice for a sale, creating the snapshot lazily if an older completed sale has not received one yet.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": true,
-            "name": "saleId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Tax invoice",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaxDocument"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid sale id"
-          },
-          "404": {
-            "description": "Sale or tax invoice not found"
-          }
-        }
-      }
-    },
-    "/tax-documents/invoices/{invoiceId}/credit-notes": {
-      "get": {
-        "description": "List credit-note snapshots linked to a tax invoice.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": true,
-            "name": "invoiceId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Credit-note summaries",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TaxDocumentSummary"
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid invoice id"
-          },
-          "404": {
-            "description": "Tax invoice not found"
-          }
-        }
-      }
-    },
-    "/tax-documents/{documentId}": {
-      "get": {
-        "description": "Read one immutable GST tax-document snapshot, including its line and payment snapshots.",
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": true,
-            "name": "documentId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Tax document",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaxDocument"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid document id"
-          },
-          "404": {
-            "description": "Tax document not found"
           }
         }
       }

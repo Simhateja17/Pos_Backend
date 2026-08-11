@@ -347,7 +347,27 @@ SELECT
   business_month,
   SUM(units)::integer
 FROM public.entitlement_usage_events
+WHERE store_id IS NULL
 GROUP BY tenant_id, store_id, entitlement_key, business_month
-ON CONFLICT DO UPDATE SET
+ON CONFLICT (tenant_id, entitlement_key, business_month)
+  WHERE store_id IS NULL
+DO UPDATE SET
+  used_count = EXCLUDED.used_count,
+  updated_at = now();
+
+INSERT INTO public.entitlement_usage_counters
+  (tenant_id, store_id, entitlement_key, business_month, used_count)
+SELECT
+  tenant_id,
+  store_id,
+  entitlement_key,
+  business_month,
+  SUM(units)::integer
+FROM public.entitlement_usage_events
+WHERE store_id IS NOT NULL
+GROUP BY tenant_id, store_id, entitlement_key, business_month
+ON CONFLICT (tenant_id, store_id, entitlement_key, business_month)
+  WHERE store_id IS NOT NULL
+DO UPDATE SET
   used_count = EXCLUDED.used_count,
   updated_at = now();
