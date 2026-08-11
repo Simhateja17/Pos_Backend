@@ -78,6 +78,7 @@ describe('dashboard route', () => {
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
       tenant_id: '11111111-1111-4111-8111-111111111111',
+      store_id: 'store-1',
     }))
   })
 

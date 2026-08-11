@@ -60,7 +60,7 @@ router.get('/', async (req, res) => {
     result.levels.map((level: any) => [level.store_id, level.quantity]),
   )
 
-  const ownStoreId = req.user!.storeId
+  const ownStoreId = req.actingStaff?.storeId ?? req.user!.storeId
 
   const stores = result.stores
     .map((store: any) => ({

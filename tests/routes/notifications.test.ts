@@ -77,12 +77,18 @@ describe('GET /notifications — per-shop alert routing (Phase 8 task 11)', () =
     }))
   })
 
-  async function buildApp() {
+  async function buildApp(actingStaff?: { id: string; role: 'owner' | 'manager'; storeId: string }) {
     const { authMiddleware } = await import('../../src/middleware/auth')
     const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
     const { default: router } = await import('../../src/routes/notifications')
     const app = express()
     app.use(express.json())
+    if (actingStaff) {
+      app.use((req, _res, next) => {
+        req.actingStaff = actingStaff
+        next()
+      })
+    }
     app.use('/notifications', authMiddleware, storeContextMiddleware, router)
     return app
   }
@@ -112,6 +118,17 @@ describe('GET /notifications — per-shop alert routing (Phase 8 task 11)', () =
     expect(notificationsFindManyMock).toHaveBeenCalledWith(
       expect.objectContaining({ where: {} }),
     )
+  })
+
+  it('a PIN-switched manager keeps the manager notification scope on an owner JWT', async () => {
+    notificationsFindManyMock.mockResolvedValue([])
+    const app = await buildApp({ id: 'staff-manager', role: 'manager', storeId: OTHER_STORE })
+
+    await request(app).get('/notifications').set('Authorization', `Bearer ${tokenFor('owner')}`)
+
+    expect(notificationsFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { OR: [{ store_id: OTHER_STORE }, { store_id: null }] },
+    }))
   })
 
   it('Test 3: the owner gets unread counts grouped by shop, busiest first', async () => {

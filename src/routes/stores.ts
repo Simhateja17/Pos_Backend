@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { forTenantTransaction } from '../db/tenantClient'
 import { storeAllowance, storeLimitMessage } from '../services/storeLimit'
-import { requireRole } from '../middleware/requireRole'
+import { effectiveRole, requireRole } from '../middleware/requireRole'
 import { CreateStoreSchema, UpdateStoreSchema } from '../contracts/schemas/store'
 
 const router = Router()
@@ -39,8 +39,8 @@ function toStoreJson(row: any, ownStoreId: string) {
  * needs to name the shop they are standing in.
  */
 router.get('/', async (req, res) => {
-  const ownStoreId = req.user!.storeId
-  const isOwner = req.user!.role === 'owner'
+  const ownStoreId = req.actingStaff?.storeId ?? req.user!.storeId
+  const isOwner = effectiveRole(req) === 'owner'
 
   const { stores, allowance } = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
     const stores = await tx.stores.findMany({

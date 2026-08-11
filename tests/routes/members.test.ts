@@ -129,6 +129,9 @@ describe('members routes', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       },
     ])
+    expect(staffMembersFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { store_id: 'store-abc' },
+    }))
 
     const cashierRes = await request(app).get('/members').set('Authorization', `Bearer ${tokenFor('cashier')}`)
     expect(cashierRes.status).toBe(403)

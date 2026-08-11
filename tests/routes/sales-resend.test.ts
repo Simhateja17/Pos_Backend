@@ -28,8 +28,10 @@ function buildApp(role: 'owner' | 'manager' | 'cashier' = 'cashier') {
     next()
   })
   return import('../../src/routes/sales').then(({ default: salesRouter }) => {
-    app.use('/sales', salesRouter)
-    return app
+    return import('../../src/middleware/storeContext').then(({ storeContextMiddleware }) => {
+      app.use('/sales', storeContextMiddleware, salesRouter)
+      return app
+    })
   })
 }
 

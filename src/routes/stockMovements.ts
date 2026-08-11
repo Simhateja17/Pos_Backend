@@ -1,4 +1,4 @@
-import { activeStoreId } from '../middleware/storeContext'
+import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import { CreateStockMovementSchema } from '../contracts/schemas/stockMovement'
@@ -126,7 +126,7 @@ router.get('/', async (req, res) => {
   }
   const client = forTenant(req.user!.tenantId) as any
   const rows = await client.stock_movements.findMany({
-    where: { variant_id: variantId },
+    where: { variant_id: variantId, ...storeScopeWhere(req) },
     orderBy: { created_at: 'desc' },
   })
   res.json(rows.map(toMovementJson))

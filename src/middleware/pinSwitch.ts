@@ -7,6 +7,8 @@ type StaffRole = 'owner' | 'manager' | 'cashier'
 export interface OperatorClaims {
   id: string
   role: StaffRole
+  /** Optional for backward compatibility with tokens minted before Phase 8. */
+  storeId?: string
   sessionId?: string
   mustChangePin?: boolean
 }
@@ -46,12 +48,13 @@ export async function validatePin(
     const rows = await tx.$queryRaw<Array<{
       id: string
       role: string
+      store_id: string
       pin_hash: string | null
       pin_attempts: number | null
       pin_locked_until: Date | null
       pin_must_change: boolean | null
     }>>`
-      SELECT id, role, pin_hash, pin_attempts, pin_locked_until, pin_must_change
+      SELECT id, role, store_id, pin_hash, pin_attempts, pin_locked_until, pin_must_change
       FROM public.staff_members
       WHERE id = ${staffId}::uuid
         AND tenant_id = ${tenantId}::uuid
@@ -88,7 +91,11 @@ export async function validatePin(
       data: { pin_attempts: 0, pin_locked_until: null },
     })
 
-    const claims: OperatorClaims = { id: staff.id, role: staff.role as StaffRole }
+    const claims: OperatorClaims = {
+      id: staff.id,
+      role: staff.role as StaffRole,
+      storeId: staff.store_id,
+    }
     if (staff.pin_must_change !== null) claims.mustChangePin = Boolean(staff.pin_must_change)
     return { ok: true, staff: claims }
   })
@@ -108,6 +115,7 @@ export async function validatePin(
  */
 export function signOperatorToken(staff: OperatorClaims, tenantId: string): string {
   const payload: Record<string, unknown> = { id: staff.id, role: staff.role, tenant_id: tenantId }
+  if (staff.storeId) payload.store_id = staff.storeId
   if (staff.sessionId) payload.session_id = staff.sessionId
   if (staff.mustChangePin !== undefined) payload.must_change_pin = staff.mustChangePin
   return jwt.sign(
@@ -142,6 +150,7 @@ export function verifyOperatorToken(
       role: decoded.role as StaffRole,
       tenantId: decoded.tenant_id,
     }
+    if (typeof decoded.store_id === 'string') claims.storeId = decoded.store_id
     if (typeof decoded.session_id === 'string') claims.sessionId = decoded.session_id
     if (typeof decoded.must_change_pin === 'boolean') claims.mustChangePin = decoded.must_change_pin
     return claims

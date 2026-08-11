@@ -1,4 +1,4 @@
-import { activeStoreId } from '../middleware/storeContext'
+import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
@@ -48,6 +48,10 @@ function sumBy<T>(rows: T[], fn: (row: T) => Prisma.Decimal): Prisma.Decimal {
 async function resolveRequestTerminal(client: any, req: import('express').Request, requestedId?: string) {
   const paired = await findPairedTerminal(client, req)
   if (paired) {
+    const scope = storeScopeWhere(req)
+    if (scope.store_id && paired.store_id !== scope.store_id) {
+      return { terminal: null, error: `This device is paired to ${paired.name} in another store.` }
+    }
     if (requestedId && requestedId !== paired.id) {
       return { terminal: null, error: `This device is paired to ${paired.name}.` }
     }
@@ -61,7 +65,10 @@ async function resolveRequestTerminal(client: any, req: import('express').Reques
     return { terminal: null, error: 'Pair this device to a counter before opening a shift.' }
   }
   if (!requestedId) return { terminal: null, error: 'Pair this device to a counter before opening a shift.' }
-  return { terminal: await client.terminals.findFirst({ where: { id: requestedId } }), error: null }
+  return {
+    terminal: await client.terminals.findFirst({ where: { id: requestedId, ...storeScopeWhere(req) } }),
+    error: null,
+  }
 }
 
 function toTerminalContextJson(row: any, hasOpenShift: boolean) {
@@ -129,17 +136,20 @@ async function computeXReport(client: any, shift: any) {
  */
 router.get('/', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
+  const storeScope = storeScopeWhere(req)
 
   let where: any = undefined
   if (effectiveRole(req) === 'cashier') {
     const terminal = await findPairedTerminal(client, req)
     if (!terminal) return res.status(409).json({ error: 'This device is not paired to a counter.' })
-    where = { terminal_id: terminal.id, closed_at: null }
+    where = { ...storeScope, terminal_id: terminal.id, closed_at: null }
+  } else {
+    where = storeScope
   }
 
   const shifts = await client.shifts.findMany({ where, orderBy: [{ opened_at: 'desc' }], take: 100 })
-  const staff = await client.staff_members.findMany({ select: { id: true, name: true } })
-  const terminals = await client.terminals.findMany({ select: { id: true, name: true } })
+  const staff = await client.staff_members.findMany({ where: storeScope, select: { id: true, name: true } })
+  const terminals = await client.terminals.findMany({ where: storeScope, select: { id: true, name: true } })
 
   const staffNames = new Map(staff.map((row: any) => [row.id, row.name]))
   const terminalNames = new Map(terminals.map((row: any) => [row.id, row.name]))
@@ -161,10 +171,10 @@ router.get('/current', async (req, res) => {
   if (!terminal) return res.json({ terminal: null, shift: null })
 
   const shift = await client.shifts.findFirst({
-    where: { terminal_id: terminal.id, closed_at: null },
+    where: { ...storeScopeWhere(req), terminal_id: terminal.id, closed_at: null },
   })
   const staff = shift
-    ? await client.staff_members.findFirst({ where: { id: shift.staff_id }, select: { name: true } })
+    ? await client.staff_members.findFirst({ where: { id: shift.staff_id, ...storeScopeWhere(req) }, select: { name: true } })
     : null
   return res.json({
     terminal: toTerminalContextJson(terminal, Boolean(shift)),
@@ -188,6 +198,12 @@ router.post('/', async (req, res) => {
   }
 
   const client = forTenant(req.user!.tenantId) as any
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before opening a shift.' })
+  }
   const staffId = await resolveActingStaffId(client, req)
   if (!staffId) {
     return res.status(400).json({ error: 'Could not resolve the acting staff member' })
@@ -204,11 +220,11 @@ router.post('/', async (req, res) => {
   }
 
   const openOnTerminal = await client.shifts.findFirst({
-    where: { terminal_id: terminal.id, closed_at: null },
+    where: { store_id: storeId, terminal_id: terminal.id, closed_at: null },
   })
   if (openOnTerminal) {
     const holder = await client.staff_members.findFirst({
-      where: { id: openOnTerminal.staff_id },
+      where: { id: openOnTerminal.staff_id, store_id: storeId },
       select: { name: true },
     })
     return res.status(409).json({
@@ -229,7 +245,7 @@ router.post('/', async (req, res) => {
     const shift = await client.shifts.create({
       data: {
         tenant_id: req.user!.tenantId,
-        store_id: activeStoreId(req),
+        store_id: storeId,
         staff_id: staffId,
         terminal_id: terminal.id,
         starting_cash: startingCash,
@@ -261,7 +277,9 @@ router.get('/:shiftId/x-report', async (req, res) => {
   }
 
   const client = forTenant(req.user!.tenantId) as any
-  const shift = await client.shifts.findFirst({ where: { id: req.params.shiftId } })
+  const shift = await client.shifts.findFirst({
+    where: { id: req.params.shiftId, ...storeScopeWhere(req) },
+  })
   if (!shift) {
     return res.status(404).json({ error: 'Shift not found' })
   }
@@ -291,7 +309,15 @@ router.post('/:shiftId/close', async (req, res) => {
   }
 
   const client = forTenant(req.user!.tenantId) as any
-  const shift = await client.shifts.findFirst({ where: { id: req.params.shiftId } })
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before closing a shift.' })
+  }
+  const shift = await client.shifts.findFirst({
+    where: { id: req.params.shiftId, store_id: storeId },
+  })
   if (!shift) {
     return res.status(404).json({ error: 'Shift not found' })
   }
@@ -307,7 +333,7 @@ router.post('/:shiftId/close', async (req, res) => {
   const variance = countedCash.minus(report._expectedCashDecimal)
 
   const updated = await client.shifts.update({
-    where: { id: req.params.shiftId },
+    where: { id: req.params.shiftId, store_id: storeId },
     data: {
       counted_cash: countedCash.toString(),
       variance: variance.toString(),

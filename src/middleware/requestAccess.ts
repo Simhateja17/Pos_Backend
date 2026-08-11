@@ -30,12 +30,15 @@ function operatorToken(req: Request): string | undefined {
 
 function validOperatorStaff(
   claims: NonNullable<ReturnType<typeof verifyOperatorToken>>,
+  resolvedStoreId?: string,
 ): Extract<RequestAccessContext['operator'], { state: 'valid' }>['staff'] {
   const staff: Extract<RequestAccessContext['operator'], { state: 'valid' }>['staff'] = {
     id: claims.id,
     role: claims.role,
   }
   if (claims.sessionId) staff.sessionId = claims.sessionId
+  const storeId = resolvedStoreId ?? claims.storeId
+  if (storeId) staff.storeId = storeId
   if (claims.mustChangePin !== undefined) staff.mustChangePin = claims.mustChangePin
   return staff
 }
@@ -125,12 +128,18 @@ export async function resolveRequestAccess(
     } else if (!claims.sessionId) {
       // Backward compatibility for tokens minted before durable staff_sessions
       // were introduced. They remain tenant-bound and signature-verified.
-      operator = { state: 'valid', staff: validOperatorStaff(claims) }
+      const operatorStaff = await tx.staff_members.findFirst({
+        where: { id: claims.id, role: claims.role, is_active: true },
+        select: { id: true, role: true, store_id: true },
+      })
+      operator = operatorStaff
+        ? { state: 'valid', staff: validOperatorStaff(claims, operatorStaff.store_id) }
+        : { state: 'invalid' }
     } else {
       const session = await tx.staff_sessions.findFirst({
         where: { id: claims.sessionId, logged_out_at: null },
         include: {
-          staff_members: { select: { id: true, role: true, is_active: true } },
+          staff_members: { select: { id: true, role: true, store_id: true, is_active: true } },
         },
       })
 
@@ -151,7 +160,7 @@ export async function resolveRequestAccess(
             data: { last_seen_at: now },
           })
         }
-        operator = { state: 'valid', staff: validOperatorStaff(claims) }
+        operator = { state: 'valid', staff: validOperatorStaff(claims, session.staff_members.store_id) }
       }
     }
 

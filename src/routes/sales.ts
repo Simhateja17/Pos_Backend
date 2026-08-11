@@ -1,4 +1,4 @@
-import { activeStoreId } from '../middleware/storeContext'
+import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
@@ -111,9 +111,11 @@ function toSaleJson(sale: any, lines: any[], payments: any[], businessName?: str
  * status. Tenant-scoped through forTenant(), so a client_sale_id minted by
  * another tenant can never resolve here.
  */
-async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string) {
+async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string, storeId?: string) {
   const client = forTenant(tenantId) as any
-  const sale = await client.sales.findFirst({ where: { client_sale_id: clientSaleId } })
+  const sale = await client.sales.findFirst({
+    where: { client_sale_id: clientSaleId, ...(storeId ? { store_id: storeId } : {}) },
+  })
   if (!sale) return null
 
   const [lines, payments, tenant] = await Promise.all([
@@ -144,7 +146,12 @@ router.post('/', async (req, res) => {
   // Phase 8: a sale belongs to the shop that rang it up. activeStoreId() throws
   // under business scope rather than guessing, so a checkout can never be
   // recorded against an arbitrary shop.
-  const storeId = activeStoreId(req)
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before completing a sale.' })
+  }
 
   try {
     const deviceClient = forTenant(tenantId) as any
@@ -157,7 +164,7 @@ router.post('/', async (req, res) => {
     // the guarantee — the guarantee is the unique index from migration 0017,
     // which is what actually holds under concurrency. The catch block below
     // handles the race this lookup cannot.
-    const replayed = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId)
+    const replayed = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId, storeId)
     if (replayed) {
       // 200 rather than 201: nothing was created by THIS request. The body is
       // byte-identical to the original 201 so a retrying client needs no
@@ -169,7 +176,7 @@ router.post('/', async (req, res) => {
       // T-03-14 / CASH-02 / D-13/D-15: shift lookup + closed-shift guard MUST
       // happen before any variant lookup or write, so a stale client-held
       // shiftId from an already-Z-reported shift can never attach a new sale.
-      const shift = await tx.shifts.findFirst({ where: { id: parsed.data.shiftId } })
+      const shift = await tx.shifts.findFirst({ where: { id: parsed.data.shiftId, store_id: storeId } })
       if (!shift) {
         return { status: 404, body: { error: 'Shift not found' } }
       }
@@ -433,7 +440,7 @@ router.post('/', async (req, res) => {
     // The whole write is one transaction, so the loser rolled back completely:
     // no orphan lines, payments, or stock movements.
     if (err?.code === 'P2002') {
-      const winner = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId)
+      const winner = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId, storeId)
       if (winner) {
         return res.status(200).json(winner)
       }
@@ -463,6 +470,10 @@ router.get('/payments', requireRole('manager'), async (req, res) => {
 
   const client = forTenant(req.user!.tenantId) as any
   const where: any = {}
+  const storeScope = storeScopeWhere(req)
+  // payments has no store_id of its own; its sale is the authoritative shop
+  // boundary for both row pagination and aggregate totals.
+  if (storeScope.store_id) where.sales = { store_id: storeScope.store_id }
   if (parsed.data.method) where.method = parsed.data.method
   if (parsed.data.status) where.direction = parsed.data.status === 'completed' ? 'payment' : 'refund'
   if (parsed.data.from || parsed.data.to || parsed.data.cursor) {
@@ -509,6 +520,7 @@ router.get('/records', async (req, res) => {
   const parsed = SaleListQuerySchema.safeParse(req.query)
   if (!parsed.success) return res.status(400).json({ error: 'Invalid sale query' })
   const where: any = {}
+  Object.assign(where, storeScopeWhere(req))
 
   // Cashiers may browse the sales currently being rung up on this physical
   // counter, but never the organisation-wide ledger. Historical lookup stays
@@ -518,7 +530,7 @@ router.get('/records', async (req, res) => {
     const terminal = await findPairedTerminal(client, req)
     if (!terminal) return res.status(409).json({ error: 'This device is not paired to a counter.' })
     const currentShift = await client.shifts.findFirst({
-      where: { terminal_id: terminal.id, closed_at: null },
+      where: { ...storeScopeWhere(req), terminal_id: terminal.id, closed_at: null },
       select: { id: true },
     })
     if (!currentShift) return res.json({ items: [], total: 0, nextCursor: null })
@@ -607,7 +619,7 @@ router.get('/:saleId', async (req, res) => {
     return res.status(400).json({ error: 'Invalid saleId' })
   }
   const client = forTenant(req.user!.tenantId) as any
-  const sale = await client.sales.findFirst({ where: { id: req.params.saleId } })
+  const sale = await client.sales.findFirst({ where: { id: req.params.saleId, ...storeScopeWhere(req) } })
   if (!sale) {
     return res.status(404).json({ error: 'Sale not found' })
   }
@@ -637,7 +649,7 @@ router.post('/:saleId/resend-receipt', async (req, res) => {
   // CR-01/T-03-19: tenant-scoped lookup — a saleId belonging to another
   // tenant simply returns 404, identical to every other tenant-scoped miss
   // elsewhere in this codebase.
-  const sale = await client.sales.findFirst({ where: { id: req.params.saleId } })
+  const sale = await client.sales.findFirst({ where: { id: req.params.saleId, ...storeScopeWhere(req) } })
   if (!sale) {
     return res.status(404).json({ error: 'Sale not found' })
   }

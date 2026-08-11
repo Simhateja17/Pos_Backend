@@ -34,7 +34,10 @@ async function listWithOpenShifts(client: any, storeId: string, currentDeviceHas
   const [terminals, openShifts, activeSessions, staff] = await Promise.all([
     client.terminals.findMany({ where: { store_id: storeId }, orderBy: [{ name: 'asc' }] }),
     client.shifts.findMany({ where: { store_id: storeId, closed_at: null }, select: { terminal_id: true } }),
-    client.staff_sessions.findMany({ where: { logged_out_at: null }, select: { terminal_id: true, staff_id: true } }),
+    client.staff_sessions.findMany({
+      where: { logged_out_at: null, staff_members: { store_id: storeId } },
+      select: { terminal_id: true, staff_id: true },
+    }),
     client.staff_members.findMany({ where: { store_id: storeId }, select: { id: true, name: true } }),
   ])
   const busy = new Set(openShifts.map((row: any) => row.terminal_id).filter(Boolean))
@@ -81,7 +84,7 @@ router.get('/device', async (req, res) => {
   if (!terminal) return res.json({ terminal: null, isRegisterLocked: isRegisterLocked(req, req.user!.tenantId) })
 
   const openShift = await client.shifts.findFirst({
-    where: { terminal_id: terminal.id, closed_at: null },
+    where: { terminal_id: terminal.id, store_id: terminal.store_id, closed_at: null },
     select: { id: true },
   })
   return res.json({
@@ -181,7 +184,7 @@ router.post('/:terminalId/pair', requireOperatorOnPairedDevice, requireRole('man
 
   setCounterDeviceCookie(res, newToken)
   const openShift = await client.shifts.findFirst({
-    where: { terminal_id: paired.id, closed_at: null },
+    where: { terminal_id: paired.id, store_id: paired.store_id, closed_at: null },
     select: { id: true },
   })
   return res.json(toTerminalJson(paired, Boolean(openShift), newHash, null))
@@ -225,7 +228,7 @@ router.patch('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager
       },
     })
     const openShift = await client.shifts.findFirst({
-      where: { terminal_id: updated.id, closed_at: null },
+      where: { terminal_id: updated.id, store_id: updated.store_id, closed_at: null },
       select: { id: true },
     })
     const token = getCounterDeviceToken(req)

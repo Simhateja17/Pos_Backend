@@ -111,6 +111,21 @@ describe('purchase order routes', () => {
     expect(poCreateMock).not.toHaveBeenCalled()
   })
 
+  it('GET / lists only purchase orders from the active store', async () => {
+    poFindManyMock.mockResolvedValue([])
+    const app = await buildApp()
+
+    const res = await request(app)
+      .get('/purchase-orders')
+      .query({ status: 'sent' })
+      .set('Authorization', `Bearer ${tokenFor()}`)
+
+    expect(res.status).toBe(200)
+    expect(poFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: 'sent', store_id: 'store-1' },
+    }))
+  })
+
   it('Test 2: POST /:poId/receive on a DRAFT order is refused — you cannot receive what was never sent', async () => {
     poFindFirstMock.mockResolvedValue({ ...poRow, status: 'draft' })
     const app = await buildApp()

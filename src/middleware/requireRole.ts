@@ -6,6 +6,10 @@ import type { NextFunction, Request, Response } from 'express'
  */
 export const ROLE_RANK = { cashier: 0, manager: 1, owner: 2 } as const
 
+export function effectiveRole(req: Request): keyof typeof ROLE_RANK | undefined {
+  return req.actingStaff?.role ?? req.user?.role
+}
+
 /**
  * requireRole(min) — Express middleware factory enforcing AUTH-02's
  * server-side role gating.
@@ -19,7 +23,7 @@ export const ROLE_RANK = { cashier: 0, manager: 1, owner: 2 } as const
  */
 export function requireRole(min: keyof typeof ROLE_RANK) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const actingRole = req.actingStaff?.role ?? req.user?.role
+    const actingRole = effectiveRole(req)
 
     if (!actingRole) {
       return res.status(401).json({ error: 'Unauthorized' })

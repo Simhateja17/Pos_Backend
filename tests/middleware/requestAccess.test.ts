@@ -21,7 +21,7 @@ function requestWith(headers: Record<string, string> = {}): Request {
 function transaction(overrides: Record<string, any> = {}) {
   return {
     staff_members: {
-      findFirst: vi.fn().mockResolvedValue({ role: 'manager', tenant_id: 'tenant-1' }),
+      findFirst: vi.fn().mockResolvedValue({ role: 'manager', tenant_id: 'tenant-1', store_id: 'store-1' }),
     },
     billing_subscriptions: {
       findFirst: vi.fn().mockResolvedValue({
@@ -58,7 +58,7 @@ describe('resolveRequestAccess', () => {
 
     expect(tenantMocks.forTenantTransaction).toHaveBeenCalledOnce()
     expect(tenantMocks.forTenantTransaction).toHaveBeenCalledWith('tenant-1', expect.any(Function))
-    expect(resolved.membership).toEqual({ role: 'manager', tenant_id: 'tenant-1' })
+    expect(resolved.membership).toEqual({ role: 'manager', tenant_id: 'tenant-1', store_id: 'store-1' })
     expect(resolved.accessContext).toEqual({
       subscription: { entitlement: 'active', accessAllowed: true, graceUntil: null },
       pairedTerminalId: null,
@@ -80,7 +80,7 @@ describe('resolveRequestAccess', () => {
           id: 'session-1',
           terminal_id: 'terminal-1',
           last_seen_at: stale,
-          staff_members: { id: 'staff-1', role: 'cashier', is_active: true },
+          staff_members: { id: 'staff-1', role: 'cashier', store_id: 'store-1', is_active: true },
         }),
         updateMany: sessionUpdateMany,
       },
@@ -102,7 +102,7 @@ describe('resolveRequestAccess', () => {
     expect(resolved.accessContext?.pairedTerminalId).toBe('terminal-1')
     expect(resolved.accessContext?.operator).toEqual({
       state: 'valid',
-      staff: { id: 'staff-1', role: 'cashier', sessionId: 'session-1' },
+      staff: { id: 'staff-1', role: 'cashier', storeId: 'store-1', sessionId: 'session-1' },
     })
     expect(terminalUpdateMany).toHaveBeenCalledOnce()
     expect(sessionUpdateMany).toHaveBeenCalledOnce()
@@ -122,7 +122,7 @@ describe('resolveRequestAccess', () => {
           id: 'session-1',
           terminal_id: 'terminal-1',
           last_seen_at: recent,
-          staff_members: { id: 'staff-1', role: 'cashier', is_active: true },
+          staff_members: { id: 'staff-1', role: 'cashier', store_id: 'store-1', is_active: true },
         }),
         updateMany: sessionUpdateMany,
       },
@@ -156,7 +156,7 @@ describe('resolveRequestAccess', () => {
           id: 'session-1',
           terminal_id: 'terminal-1',
           last_seen_at: new Date(),
-          staff_members: { id: 'staff-1', role: 'cashier', is_active: true },
+          staff_members: { id: 'staff-1', role: 'cashier', store_id: 'store-1', is_active: true },
         }),
         updateMany: vi.fn(),
       },

@@ -40,6 +40,7 @@ describe('pinSwitch', () => {
     queryRawMock.mockResolvedValue([{
       id: 'staff-1',
       role: 'cashier',
+      store_id: 'store-1',
       pin_hash: hash,
       pin_attempts: 2,
       pin_locked_until: null,
@@ -49,8 +50,10 @@ describe('pinSwitch', () => {
 
     const result = await validatePin('tenant-1', 'staff-1', '1234')
 
-    expect(result).toEqual({ ok: true, staff: { id: 'staff-1', role: 'cashier' } })
-    expect(queryRawMock.mock.calls[0][0].join(' ')).toContain('FOR UPDATE')
+    expect(result).toEqual({ ok: true, staff: { id: 'staff-1', role: 'cashier', storeId: 'store-1' } })
+    const queryText = queryRawMock.mock.calls[0][0].join(' ')
+    expect(queryText).toContain('store_id')
+    expect(queryText).toContain('FOR UPDATE')
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'staff-1' },
@@ -64,6 +67,7 @@ describe('pinSwitch', () => {
     queryRawMock.mockResolvedValue([{
       id: 'staff-1',
       role: 'cashier',
+      store_id: 'store-1',
       pin_hash: hash,
       pin_attempts: 4,
       pin_locked_until: null,
@@ -85,6 +89,7 @@ describe('pinSwitch', () => {
     queryRawMock.mockResolvedValue([{
       id: 'staff-1',
       role: 'cashier',
+      store_id: 'store-1',
       pin_hash: hash,
       pin_attempts: 5,
       pin_locked_until: new Date(Date.now() + 10 * 60 * 1000),
@@ -105,9 +110,9 @@ describe('pinSwitch', () => {
   })
 
   it('Test 4: signOperatorToken/verifyOperatorToken round-trip (with tenant_id binding); tampered token returns null, never throws', () => {
-    const token = signOperatorToken({ id: 'staff-1', role: 'manager' }, 'tenant-1')
+    const token = signOperatorToken({ id: 'staff-1', role: 'manager', storeId: 'store-1' }, 'tenant-1')
     const decoded = verifyOperatorToken(token)
-    expect(decoded).toEqual({ id: 'staff-1', role: 'manager', tenantId: 'tenant-1' })
+    expect(decoded).toEqual({ id: 'staff-1', role: 'manager', storeId: 'store-1', tenantId: 'tenant-1' })
 
     expect(() => verifyOperatorToken('garbage.tampered.token')).not.toThrow()
     expect(verifyOperatorToken('garbage.tampered.token')).toBeNull()
@@ -117,6 +122,7 @@ describe('pinSwitch', () => {
     queryRawMock.mockResolvedValue([{
       id: 'staff-1',
       role: 'cashier',
+      store_id: 'store-1',
       pin_hash: null,
       pin_attempts: 0,
       pin_locked_until: null,

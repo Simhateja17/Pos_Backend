@@ -59,10 +59,10 @@ export async function operatorContext(req: Request, res: Response, next: NextFun
   // New operator tokens are bound to a durable staff_sessions row. This makes
   // an explicit logout, deactivation, or replacement of the active cashier
   // take effect immediately instead of waiting for the JWT's expiry.
-  const valid = await forTenantTransaction(req.user.tenantId, async (tx) => {
+  const resolvedStoreId = await forTenantTransaction(req.user.tenantId, async (tx) => {
     const session = await tx.staff_sessions.findFirst({
       where: { id: claims.sessionId, logged_out_at: null },
-      include: { staff_members: { select: { id: true, role: true, is_active: true } } },
+      include: { staff_members: { select: { id: true, role: true, store_id: true, is_active: true } } },
     })
     const pairedTerminal = session?.terminal_id ? await findPairedTerminal(tx, req) : null
 
@@ -73,23 +73,24 @@ export async function operatorContext(req: Request, res: Response, next: NextFun
       session.staff_members.role !== claims.role ||
       (session.terminal_id !== null && pairedTerminal?.id !== session.terminal_id)
     ) {
-      return false
+      return null
     }
 
     await tx.staff_sessions.update({
       where: { id: claims.sessionId },
       data: { last_seen_at: new Date() },
     })
-    return true
+    return session.staff_members.store_id
   })
 
-  if (!valid) {
+  if (!resolvedStoreId) {
     return res.status(401).json({ error: 'Invalid operator session' })
   }
 
   req.actingStaff = {
     id: claims.id,
     role: claims.role,
+    storeId: resolvedStoreId,
     sessionId: claims.sessionId,
     mustChangePin: claims.mustChangePin,
   }

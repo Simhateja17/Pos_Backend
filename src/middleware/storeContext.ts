@@ -12,6 +12,28 @@ function requestedStoreId(req: Request): string | undefined {
   return value?.trim() || undefined
 }
 
+function effectiveRole(req: Request): 'owner' | 'manager' | 'cashier' | undefined {
+  return req.actingStaff?.role ?? req.user?.role
+}
+
+async function effectiveMembershipStoreId(req: Request): Promise<string | null> {
+  if (!req.user) return null
+  if (!req.actingStaff) return req.user.storeId
+  if (req.actingStaff.storeId) return req.actingStaff.storeId
+
+  // Tokens minted before Phase 8 did not carry store_id. Resolve those legacy
+  // operator claims from the tenant-scoped staff row before accepting a store
+  // header, so the fallback can never become an authorization decision.
+  const client = forTenant(req.user.tenantId) as any
+  const staff = await client.staff_members?.findFirst?.({
+    where: { id: req.actingStaff.id, is_active: true },
+    select: { id: true, role: true, store_id: true },
+  })
+  if (!staff || staff.role !== req.actingStaff.role) return null
+  req.actingStaff.storeId = staff.store_id
+  return staff.store_id
+}
+
 /**
  * storeContextMiddleware — resolves WHICH STORE this request acts on.
  *
@@ -48,13 +70,30 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
   }
 
   const requested = requestedStoreId(req)
+  const role = effectiveRole(req)
+  const membershipStoreId = await effectiveMembershipStoreId(req)
+  if (!role || !membershipStoreId) {
+    return res.status(401).json({ error: 'Invalid operator session' })
+  }
+
+  // A PIN-switched manager/cashier may only operate on the counter's store.
+  // Owners are tenant-wide and remain free to move between stores.
+  if (req.actingStaff && role !== 'owner' && req.accessContext?.pairedTerminalId) {
+    const terminal = await (forTenant(req.user.tenantId) as any).terminals?.findFirst?.({
+      where: { id: req.accessContext.pairedTerminalId, is_active: true },
+      select: { store_id: true },
+    })
+    if (!terminal || terminal.store_id !== membershipStoreId) {
+      return res.status(403).json({ error: 'This operator belongs to a different store' })
+    }
+  }
 
   // Default: everyone acts in their own shop. This is the overwhelmingly common
   // path — cashiers and managers never send the header at all.
-  if (!requested || requested === req.user.storeId) {
+  if (!requested || requested === membershipStoreId) {
     req.storeContext = {
       scope: 'store',
-      activeStoreId: req.user.storeId,
+      activeStoreId: membershipStoreId,
       actingRemotely: false,
     }
     return next()
@@ -62,7 +101,7 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
 
   // Business-wide read scope, for the owner's combined dashboard and reports.
   if (requested.toLowerCase() === 'all') {
-    if (req.user.role !== 'owner') {
+    if (role !== 'owner') {
       return res.status(403).json({ error: 'You can only act in your own store' })
     }
     req.storeContext = { scope: 'business', activeStoreId: null, actingRemotely: false }
@@ -77,7 +116,7 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
   // Only an owner may operate outside their own shop. A manager or cashier
   // naming another shop is not a bad request — it is an authorization failure,
   // and it is the exact attempt this phase exists to refuse.
-  if (req.user.role !== 'owner') {
+  if (role !== 'owner') {
     return res.status(403).json({ error: 'You can only act in your own store' })
   }
 

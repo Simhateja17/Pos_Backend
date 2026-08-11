@@ -63,6 +63,39 @@ describe('storeContextMiddleware', () => {
     expect(storesFindFirstMock).not.toHaveBeenCalled()
   })
 
+  it('PIN-switched staff membership wins over the durable owner session', async () => {
+    const req = mockReq({
+      user: user('owner'),
+      actingStaff: { id: 'staff-manager', role: 'manager', storeId: OTHER_STORE },
+    })
+    const res = mockRes()
+    const next = vi.fn()
+
+    await storeContextMiddleware(req, res, next)
+
+    expect(next).toHaveBeenCalled()
+    expect(req.storeContext).toEqual({
+      scope: 'store',
+      activeStoreId: OTHER_STORE,
+      actingRemotely: false,
+    })
+  })
+
+  it('PIN-switched manager cannot request business-wide scope from an owner session', async () => {
+    const req = mockReq({
+      user: user('owner'),
+      headers: { 'x-store-id': 'all' },
+      actingStaff: { id: 'staff-manager', role: 'manager', storeId: OTHER_STORE },
+    })
+    const res = mockRes()
+    const next = vi.fn()
+
+    await storeContextMiddleware(req, res, next)
+
+    expect(res.status).toHaveBeenCalledWith(403)
+    expect(next).not.toHaveBeenCalled()
+  })
+
   it.each(['cashier', 'manager'] as const)(
     'Test 3: a %s naming another store is refused with 403',
     async (role) => {
@@ -179,6 +212,21 @@ describe('business-wide scope (X-Store-Id: all)', () => {
 
   it.each(['manager', 'cashier'] as const)('a %s may not', async (role) => {
     const req = mockReq({ user: user(role), headers: { 'x-store-id': 'all' } })
+    const res = mockRes()
+    const next = vi.fn()
+
+    await storeContextMiddleware(req, res, next)
+
+    expect(res.status).toHaveBeenCalledWith(403)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('a PIN-switched manager may not request business-wide scope even when the JWT is owner', async () => {
+    const req = mockReq({
+      user: user('owner'),
+      headers: { 'x-store-id': 'all' },
+      actingStaff: { id: 'staff-manager', role: 'manager', storeId: OTHER_STORE },
+    })
     const res = mockRes()
     const next = vi.fn()
 

@@ -188,7 +188,10 @@ describe('stock-movements routes (INV-01)', () => {
     ])
     expect(stockMovementsFindManyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { variant_id: '11111111-1111-4111-8111-111111111111' },
+        where: {
+          variant_id: '11111111-1111-4111-8111-111111111111',
+          store_id: 'store-1',
+        },
         orderBy: { created_at: 'desc' },
       }),
     )

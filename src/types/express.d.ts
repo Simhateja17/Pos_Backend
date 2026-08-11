@@ -36,6 +36,8 @@ declare namespace Express {
     actingStaff?: {
       id: string
       role: 'owner' | 'manager' | 'cashier'
+      /** One-person/one-store membership; optional only for legacy tokens. */
+      storeId?: string
       sessionId?: string
       mustChangePin?: boolean
     }
@@ -59,6 +61,8 @@ declare namespace Express {
             staff: {
               id: string
               role: 'owner' | 'manager' | 'cashier'
+              /** Store membership resolved from the staff row when available. */
+              storeId?: string
               sessionId?: string
               mustChangePin?: boolean
             }

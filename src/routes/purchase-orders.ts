@@ -1,4 +1,4 @@
-import { activeStoreId } from '../middleware/storeContext'
+import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import {
@@ -61,7 +61,7 @@ router.get('/', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const statusFilter = req.query.status as string | undefined
   const orders = await client.purchase_orders.findMany({
-    where: statusFilter ? { status: statusFilter } : undefined,
+    where: { ...storeScopeWhere(req), ...(statusFilter ? { status: statusFilter } : {}) },
     include: PO_INCLUDE,
     orderBy: { created_at: 'desc' },
   })
@@ -73,7 +73,10 @@ router.get('/:poId', async (req, res) => {
     return res.status(400).json({ error: 'Invalid purchase order id' })
   }
   const client = forTenant(req.user!.tenantId) as any
-  const po = await client.purchase_orders.findFirst({ where: { id: req.params.poId }, include: PO_INCLUDE })
+  const po = await client.purchase_orders.findFirst({
+    where: { id: req.params.poId, ...storeScopeWhere(req) },
+    include: PO_INCLUDE,
+  })
   if (!po) return res.status(404).json({ error: 'Purchase order not found' })
   res.json(toPurchaseOrderJson(po))
 })
@@ -89,6 +92,12 @@ router.post('/', async (req, res) => {
   }
 
   const tenantId = req.user!.tenantId
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before creating a purchase order.' })
+  }
 
   try {
     const po = await forTenantTransaction(tenantId, async (tx) => {
@@ -107,7 +116,7 @@ router.post('/', async (req, res) => {
           created = await tx.purchase_orders.create({
             data: {
               tenant_id: tenantId,
-              store_id: activeStoreId(req),
+              store_id: storeId,
               supplier_id: parsed.data.supplierId,
               po_number: poNumber,
               status: 'draft',
@@ -158,7 +167,15 @@ router.patch('/:poId', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: 'Invalid request' })
 
   const client = forTenant(req.user!.tenantId) as any
-  const existing = await client.purchase_orders.findFirst({ where: { id: req.params.poId } })
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before changing a purchase order.' })
+  }
+  const existing = await client.purchase_orders.findFirst({
+    where: { id: req.params.poId, store_id: storeId },
+  })
   if (!existing) return res.status(404).json({ error: 'Purchase order not found' })
 
   if (parsed.data.status && !['draft', 'sent'].includes(existing.status)) {
@@ -175,7 +192,10 @@ router.patch('/:poId', async (req, res) => {
       ...(parsed.data.notes !== undefined ? { notes: parsed.data.notes } : {}),
     },
   })
-  const updated = await client.purchase_orders.findFirst({ where: { id: existing.id }, include: PO_INCLUDE })
+  const updated = await client.purchase_orders.findFirst({
+    where: { id: existing.id, store_id: storeId },
+    include: PO_INCLUDE,
+  })
   res.json(toPurchaseOrderJson(updated))
 })
 
@@ -201,10 +221,18 @@ router.post('/:poId/receive', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: 'Invalid request' })
 
   const tenantId = req.user!.tenantId
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before receiving a purchase order.' })
+  }
 
   try {
     const result = await forTenantTransaction(tenantId, async (tx) => {
-      const po = await tx.purchase_orders.findFirst({ where: { id: req.params.poId } })
+      const po = await tx.purchase_orders.findFirst({
+        where: { id: req.params.poId, store_id: storeId },
+      })
       if (!po) throw Object.assign(new Error('Purchase order not found'), { status: 404 })
       if (po.status === 'cancelled') {
         throw Object.assign(new Error('A cancelled purchase order cannot be received'), { status: 409 })
@@ -214,7 +242,7 @@ router.post('/:poId/receive', async (req, res) => {
       }
 
       const existingReceipt = await tx.purchase_order_receipts.findFirst({
-        where: { client_receipt_id: parsed.data.clientReceiptId },
+        where: { client_receipt_id: parsed.data.clientReceiptId, store_id: po.store_id },
       })
       if (existingReceipt) return { receiptId: existingReceipt.id, replayed: true, overReceived: [] as any[] }
 
@@ -234,7 +262,7 @@ router.post('/:poId/receive', async (req, res) => {
       const receipt = await tx.purchase_order_receipts.create({
         data: {
           tenant_id: tenantId,
-          store_id: activeStoreId(req),
+          store_id: storeId,
           purchase_order_id: po.id,
           client_receipt_id: parsed.data.clientReceiptId,
           note: parsed.data.note ?? null,
@@ -274,7 +302,10 @@ router.post('/:poId/receive', async (req, res) => {
     })
 
     const client = forTenant(tenantId) as any
-    const po = await client.purchase_orders.findFirst({ where: { id: req.params.poId }, include: PO_INCLUDE })
+    const po = await client.purchase_orders.findFirst({
+      where: { id: req.params.poId, store_id: storeId },
+      include: PO_INCLUDE,
+    })
 
     return res.status(result.replayed ? 200 : 201).json({
       receiptId: result.receiptId,

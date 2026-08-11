@@ -69,7 +69,7 @@ async function buildApp() {
   app.use(express.json())
   app.use('/context', authMiddleware, storeContextMiddleware, contextRouter)
   app.use('/customers', authMiddleware, customersRouter)
-  app.use('/sales', authMiddleware, salesRouter)
+  app.use('/sales', authMiddleware, storeContextMiddleware, salesRouter)
   return app
 }
 
@@ -138,7 +138,10 @@ describe('context and tenant record read routes', () => {
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ items: [], total: 0, nextCursor: null })
-    expect(salesFindManyMock).toHaveBeenCalledWith(expect.objectContaining({ take: 2, where: { status: 'completed' } }))
+    expect(salesFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      take: 2,
+      where: { status: 'completed', store_id: 'store-1' },
+    }))
     const { forTenant } = await import('../../src/db/tenantClient')
     expect(forTenant).toHaveBeenLastCalledWith('tenant-real')
   })
@@ -158,7 +161,9 @@ describe('context and tenant record read routes', () => {
       items: [], total: 0, nextCursor: null,
       summary: { collectedAmount: '150.00', refundedAmount: '20.00', netAmount: '130.00' },
     })
-    expect(paymentsGroupByMock).toHaveBeenCalledWith(expect.objectContaining({ where: { method: 'cash' } }))
+    expect(paymentsGroupByMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { method: 'cash', sales: { store_id: 'store-1' } },
+    }))
     const { forTenant } = await import('../../src/db/tenantClient')
     expect(forTenant).toHaveBeenLastCalledWith('tenant-real')
   })

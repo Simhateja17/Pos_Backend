@@ -30,6 +30,12 @@ router.post('/', async (req, res) => {
   }
 
   const tenantId = req.user!.tenantId
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before processing a return.' })
+  }
 
   try {
     const pairedTerminal = await findPairedTerminal(forTenant(tenantId) as any, req)
@@ -42,7 +48,7 @@ router.post('/', async (req, res) => {
       // T-03-14 / CASH-02 / D-13/D-15: shift lookup + closed-shift guard MUST
       // happen before any sale/line lookup or write, mirroring the identical
       // guard in POST /sales (03-03).
-      const shift = await tx.shifts.findFirst({ where: { id: parsed.data.shiftId } })
+      const shift = await tx.shifts.findFirst({ where: { id: parsed.data.shiftId, store_id: storeId } })
       if (!shift) {
         return { status: 404, body: { error: 'Shift not found' } }
       }
@@ -143,7 +149,7 @@ router.post('/', async (req, res) => {
             // may not be the shop that made the sale — a customer can return at
             // any outlet. The goods land on this shop's shelf and the refund
             // leaves this shop's till, so this is where the movement belongs.
-            store_id: activeStoreId(req),
+            store_id: storeId,
             variant_id: refundLine.saleLineItem.variant_id,
             movement_type: 'return',
             quantity_delta: refundLine.quantity,

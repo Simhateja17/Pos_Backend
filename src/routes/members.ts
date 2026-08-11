@@ -9,7 +9,7 @@ import {
 } from '../contracts/schemas/member'
 import { requireRole } from '../middleware/requireRole'
 import { forTenant } from '../db/tenantClient'
-import { activeStoreId } from '../middleware/storeContext'
+import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import {
   requireOperatorOnPairedDevice,
   requireOperatorOrFirstPinSetup,
@@ -67,6 +67,7 @@ function toMemberJson(row: StaffRow) {
  */
 router.get('/', requireRole('manager'), async (req, res) => {
   const rows = await (forTenant(req.user!.tenantId) as any).staff_members.findMany({
+    where: storeScopeWhere(req),
     orderBy: { created_at: 'asc' },
   })
   res.json(rows.map(toMemberJson))
@@ -201,7 +202,15 @@ router.post('/:memberId/reset-pin', requireOperatorOrFirstPinSetup, requireRole(
   }
 
   const client = forTenant(req.user!.tenantId) as any
-  const target = await client.staff_members.findFirst({ where: { id: req.params.memberId } })
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before resetting a PIN.' })
+  }
+  const target = await client.staff_members.findFirst({
+    where: { id: req.params.memberId, store_id: storeId },
+  })
   if (!target) return res.status(404).json({ error: 'Member not found' })
 
   const actingRole = req.actingStaff?.role ?? req.user!.role

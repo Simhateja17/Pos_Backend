@@ -7,6 +7,7 @@ import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { findPairedTerminal, setRegisterLockedCookie } from '../lib/counterDevice'
 import { consumeRateLimit } from '../lib/rateLimit'
 import { pinSessionRequiresTerminal } from '../lib/pinSessionPolicy'
+import { storeScopeWhere } from '../middleware/storeContext'
 
 const router = Router()
 const PIN_SWITCH_WINDOW_MS = 15 * 60 * 1000
@@ -94,9 +95,21 @@ router.post('/switch', async (req, res) => {
     return res.status(403).json({ error: 'Owner or manager PIN required.' })
   }
 
+  // A PIN is a staff identity, not a tenant-wide capability. Owners are
+  // tenant-wide; managers and cashiers must belong to the paired counter's
+  // store, or to the explicitly selected store during unpaired management
+  // setup.
+  if (result.staff.role !== 'owner') {
+    const targetStoreId = result.staff.storeId
+    const requestStoreId = terminal?.store_id ?? req.storeContext?.activeStoreId
+    if (!targetStoreId || !requestStoreId || targetStoreId !== requestStoreId) {
+      return res.status(403).json({ error: 'That staff member belongs to a different store.' })
+    }
+  }
+
   const openShift = terminal
     ? await client.shifts.findFirst({
-        where: { terminal_id: terminal.id, closed_at: null },
+        where: { terminal_id: terminal.id, store_id: terminal.store_id, closed_at: null },
         select: { id: true },
       })
     : null
@@ -161,12 +174,13 @@ router.post('/logout', async (req, res) => {
 router.get('/sessions', requireRole('manager'), async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const sessions = await client.staff_sessions.findMany({
+    where: { staff_members: storeScopeWhere(req) },
     orderBy: { logged_in_at: 'desc' },
     take: 200,
   })
   const [staff, terminals] = await Promise.all([
-    client.staff_members.findMany({ select: { id: true, name: true } }),
-    client.terminals.findMany({ select: { id: true, name: true } }),
+    client.staff_members.findMany({ where: storeScopeWhere(req), select: { id: true, name: true } }),
+    client.terminals.findMany({ where: storeScopeWhere(req), select: { id: true, name: true } }),
   ])
   const staffNames = new Map(staff.map((row: any) => [row.id, row.name]))
   const terminalNames = new Map(terminals.map((row: any) => [row.id, row.name]))

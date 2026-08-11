@@ -1,5 +1,7 @@
 import { Router } from 'express'
 import { forTenantTransaction } from '../db/tenantClient'
+import { effectiveRole } from '../middleware/requireRole'
+import { storeScopeWhere } from '../middleware/storeContext'
 
 const router = Router()
 
@@ -39,17 +41,23 @@ function toNotificationJson(row: any, storeNames: Map<string, string>) {
  * volume manageable; hiding categories would make it incomplete.
  */
 router.get('/', async (req, res) => {
-  const isOwner = req.user!.role === 'owner'
-  const ownStoreId = req.user!.storeId
+  const isOwner = effectiveRole(req) === 'owner'
+  // Owners historically receive the full digest when no store is selected.
+  // Once they explicitly select a shop, the same endpoint must respect that
+  // request scope; a manager PIN-switched onto an owner JWT is always scoped.
+  const header = req.headers['x-store-id']
+  const hasExplicitStoreScope = Boolean((Array.isArray(header) ? header[0] : header)?.trim())
+  const storeScope = isOwner && !hasExplicitStoreScope ? {} : storeScopeWhere(req)
+  const visibleWhere = storeScope.store_id
+    ? { OR: [{ store_id: storeScope.store_id }, { store_id: null }] }
+    : {}
 
   const { rows, stores, tenant } = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
     const rows = await tx.notifications.findMany({
-      where: isOwner
-        ? {}
-        : // Own shop OR business-wide. A manager should still learn that the
-          // subscription failed; they just should not field another shop's
-          // stock alerts.
-          { OR: [{ store_id: ownStoreId }, { store_id: null }] },
+      // Own shop OR business-wide. A manager should still learn that the
+      // subscription failed; they just should not field another shop's stock
+      // alerts. An explicitly selected owner shop follows the same rule.
+      where: visibleWhere,
       orderBy: { created_at: 'desc' },
     })
     const stores = await tx.stores.findMany({ select: { id: true, name: true } })
@@ -125,14 +133,19 @@ router.get('/', async (req, res) => {
  * from the person responsible for it.
  */
 router.post('/read', async (req, res) => {
-  const isOwner = req.user!.role === 'owner'
-  const ownStoreId = req.user!.storeId
+  const isOwner = effectiveRole(req) === 'owner'
+  const header = req.headers['x-store-id']
+  const hasExplicitStoreScope = Boolean((Array.isArray(header) ? header[0] : header)?.trim())
+  const storeScope = isOwner && !hasExplicitStoreScope ? {} : storeScopeWhere(req)
+  const visibleWhere = storeScope.store_id
+    ? { OR: [{ store_id: storeScope.store_id }, { store_id: null }] }
+    : {}
 
   await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
     await tx.notifications.updateMany({
       where: {
         read_at: null,
-        ...(isOwner ? {} : { OR: [{ store_id: ownStoreId }, { store_id: null }] }),
+        ...visibleWhere,
       },
       data: { read_at: new Date() },
     })

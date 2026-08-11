@@ -47,7 +47,7 @@ router.use('/auth', authRouter)
 // authMiddleware (CR-01 fix): it verifies the operator token's tenant_id
 // claim against req.user.tenantId, so it depends on req.user already being
 // populated from a trusted source.
-router.use('/terminal/pin', authMiddleware, requireSubscription, operatorContext, pinRouter)
+router.use('/terminal/pin', authMiddleware, requireSubscription, operatorContext, storeContextMiddleware, pinRouter)
 // /members additionally needs storeContextMiddleware: creating a staff member
 // writes staff_members.store_id (NOT NULL since 0042), so the route must know
 // which shop it is acting in. It is added here rather than by adopting

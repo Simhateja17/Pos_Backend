@@ -108,6 +108,8 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
   // Business-day window expressed as an instant range, so the index on
   // sales(created_at) is usable rather than being defeated by a per-row cast.
   const sourceFilter = args.includeImported ? '' : `and s.source = 'pos'`
+  const salesStoreFilter = args.storeId ? `and s.store_id = $5::uuid` : ''
+  const movementStoreFilter = args.storeId ? `and m.store_id = $5::uuid` : ''
   const window = `
     s.created_at >= (($1::date)::timestamp at time zone $3)
     and s.created_at < ((($2::date) + 1)::timestamp at time zone $3)
@@ -124,12 +126,13 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
                 count(distinct s.id) filter (where s.source = 'import')::int as imported_bills
          from sales s
          join sale_line_items l on l.sale_id = s.id
-         where s.tenant_id = $4::uuid and ${window} ${sourceFilter}
+         where s.tenant_id = $4::uuid and ${window} ${sourceFilter} ${salesStoreFilter}
          group by 1 order by 1`,
         args.from,
         args.to,
         args.zone,
         args.tenantId,
+        ...(args.storeId ? [args.storeId] : []),
       )
 
       return {
@@ -173,12 +176,13 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
          join variants v on v.id = l.variant_id
          join products p on p.id = v.product_id
          left join categories c on c.id = p.category_id and c.tenant_id = p.tenant_id
-         where s.tenant_id = $4::uuid and ${window} ${sourceFilter}
+         where s.tenant_id = $4::uuid and ${window} ${sourceFilter} ${salesStoreFilter}
          group by 1${byCategory ? '' : ', v.sku'} order by 3 desc limit 500`,
         args.from,
         args.to,
         args.zone,
         args.tenantId,
+        ...(args.storeId ? [args.storeId] : []),
       )
 
       return {
@@ -217,12 +221,13 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
          from sales s
          join sale_line_items l on l.sale_id = s.id
          left join staff_members st on st.id = s.created_by
-         where s.tenant_id = $4::uuid and ${window} ${sourceFilter}
+         where s.tenant_id = $4::uuid and ${window} ${sourceFilter} ${salesStoreFilter}
          group by 1 order by 3 desc`,
         args.from,
         args.to,
         args.zone,
         args.tenantId,
+        ...(args.storeId ? [args.storeId] : []),
       )
 
       const unattributed = rows.some((row: any) => row.staff === 'Unattributed')
@@ -332,11 +337,13 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
          where m.tenant_id = $4::uuid
            and m.created_at >= (($1::date)::timestamp at time zone $3)
            and m.created_at < ((($2::date) + 1)::timestamp at time zone $3)
+           ${movementStoreFilter}
          order by m.created_at desc limit 1000`,
         args.from,
         args.to,
         args.zone,
         args.tenantId,
+        ...(args.storeId ? [args.storeId] : []),
       )
 
       return {
@@ -367,15 +374,18 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
                 count(*)::int as refund_count,
                 coalesce(sum(pay.amount), 0) as refund_value
          from payments pay
+         join sales s on s.id = pay.sale_id
          left join staff_members st on st.id = pay.created_by
          where pay.tenant_id = $4::uuid and pay.direction = 'refund'
            and pay.created_at >= (($1::date)::timestamp at time zone $3)
            and pay.created_at < ((($2::date) + 1)::timestamp at time zone $3)
+           ${salesStoreFilter}
          group by 1`,
         args.from,
         args.to,
         args.zone,
         args.tenantId,
+        ...(args.storeId ? [args.storeId] : []),
       )
 
       const discounts = await tx.$queryRawUnsafe(
@@ -387,12 +397,13 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
          from sales s
          join sale_line_items l on l.sale_id = s.id
          left join staff_members st on st.id = s.created_by
-         where s.tenant_id = $4::uuid and ${window} ${sourceFilter}
+         where s.tenant_id = $4::uuid and ${window} ${sourceFilter} ${salesStoreFilter}
          group by 1`,
         args.from,
         args.to,
         args.zone,
         args.tenantId,
+        ...(args.storeId ? [args.storeId] : []),
       )
 
       const byStaff = new Map<string, any>()
