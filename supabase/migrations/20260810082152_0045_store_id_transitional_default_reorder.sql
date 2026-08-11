@@ -1,0 +1,8 @@
+-- Historical ledger compatibility marker.
+--
+-- The live project recorded the reorder_suggestions part of the transitional
+-- store_id trigger as a separate migration after the other writer tables. The
+-- checked-in 0045 SQL already contains both halves so a fresh database reaches
+-- the same final schema from the first file. Keep this timestamped no-op so
+-- Supabase CLI can reconcile the checked-in migration set with the live ledger
+-- without replaying either migration.
