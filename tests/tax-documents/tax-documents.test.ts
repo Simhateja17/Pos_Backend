@@ -75,7 +75,9 @@ describe('GST document numbering and financial-year rules', () => {
     const number = formatDocumentNumber('AMB', 'tax_invoice', '2026-27', BigInt(1))
     expect(number).toBe('AMB/26-27/000001')
     expect(number.length).toBeLessThanOrEqual(16)
+    expect(formatDocumentNumber('LONG', 'tax_invoice', '2026-27', BigInt(1))).toBe('LON/26-27/000001')
   })
+
 })
 
 describe('pure GST invoice builder', () => {
@@ -174,5 +176,29 @@ describe('partial credit-note builder', () => {
       returnReferenceId: '99999999-9999-4999-8999-999999999999',
       refundPayments: [],
     })).toThrow(/exceeds the original invoice quantity/)
+  })
+
+  it('carries invoice-line rounding into a partial credit note', () => {
+    const invoice = buildTaxInvoiceSnapshot({
+      source: source(),
+      financialYear: '2026-27',
+      sequenceNumber: BigInt(6),
+      documentNumber: 'AMB/26-27/000006',
+    })
+    invoice.lines[0].lineTotal = '236.01'
+
+    const creditNote = buildCreditNoteSnapshot({
+      invoice: { ...invoice, id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab' },
+      returnedLines: [{ saleLineItemId: invoice.lines[0].saleLineItemId!, quantity: '1' }],
+      financialYear: '2026-27',
+      sequenceNumber: BigInt(3),
+      documentNumber: 'CN/26-27/000003',
+      documentDate: new Date('2026-08-12T10:00:00.000Z'),
+      returnReferenceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc',
+      refundPayments: [{ method: 'upi', direction: 'refund', amount: '118.01', referenceCode: 'UPI-ROUNDING' }],
+    })
+
+    expect(creditNote.grandTotal.toString()).toBe('118.01')
+    expect(creditNote.roundingAmount.toString()).toBe('0.01')
   })
 })

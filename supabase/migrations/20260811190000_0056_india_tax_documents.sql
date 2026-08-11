@@ -25,7 +25,7 @@ BEGIN
   ) THEN
     ALTER TABLE public.stores
       ADD CONSTRAINT stores_invoice_prefix_check
-      CHECK (invoice_prefix ~ '^[A-Za-z0-9]{1,4}$');
+      CHECK (invoice_prefix ~ '^[A-Za-z0-9]{1,3}$');
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'stores_invoice_start_number_check'

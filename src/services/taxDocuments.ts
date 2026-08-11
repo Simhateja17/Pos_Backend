@@ -451,7 +451,11 @@ export function buildCreditNoteSnapshot(input: {
     const sgst = scale(original.sgstAmount)
     const igst = scale(original.igstAmount)
     const cess = scale(original.cessAmount)
-    const lineTotal = roundMoney(grossValue.minus(discountValue).plus(cgst).plus(sgst).plus(igst).plus(cess))
+    // Preserve any invoice-level rounding carried by this line. The return
+    // route refunds from the immutable invoice line total, so recalculating
+    // only from the prorated components could make the credit note differ by
+    // a paisa and fail exact refund reconciliation.
+    const lineTotal = roundMoney(decimal(original.lineTotal).times(ratio))
 
     lines.push({
       ...original,
@@ -478,6 +482,20 @@ export function buildCreditNoteSnapshot(input: {
   const sum = (field: keyof TaxDocumentLineSnapshot) =>
     lines.reduce((total, line) => total.plus(decimal(line[field] as string)), ZERO)
   const grandTotal = roundMoney(sum('lineTotal'))
+  const paymentTotal = input.refundPayments.reduce((total, payment) => total.plus(decimal(payment.amount)), ZERO)
+  if (!paymentTotal.equals(grandTotal)) {
+    throw new Error(`Credit-note payments must equal the returned document total (${grandTotal.toString()})`)
+  }
+  const roundingAmount = roundMoney(
+    grandTotal.minus(
+      sum('grossValue')
+        .minus(sum('discountValue'))
+        .plus(sum('cgstAmount'))
+        .plus(sum('sgstAmount'))
+        .plus(sum('igstAmount'))
+        .plus(sum('cessAmount')),
+    ),
+  )
 
   return {
     documentType: 'credit_note',
@@ -503,7 +521,7 @@ export function buildCreditNoteSnapshot(input: {
     sgstTotal: roundMoney(sum('sgstAmount')),
     igstTotal: roundMoney(sum('igstAmount')),
     cessTotal: roundMoney(sum('cessAmount')),
-    roundingAmount: ZERO,
+    roundingAmount,
     grandTotal,
     lines,
   }
@@ -523,13 +541,17 @@ export function financialYearFor(date: Date, timezone = 'Asia/Kolkata'): string 
 
 function documentPrefix(prefix: string, type: TaxDocumentType): string {
   if (type === 'credit_note') return 'CN'
-  const clean = prefix.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 4)
+  // Rule 46 caps the complete invoice serial at 16 characters. With the
+  // compact FY and six-digit serial below, only three prefix characters fit.
+  const clean = prefix.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 3)
   return clean || 'INV'
 }
 
 export function formatDocumentNumber(prefix: string, type: TaxDocumentType, financialYear: string, sequenceNumber: bigint): string {
   const shortYear = financialYear.slice(2)
-  return `${documentPrefix(prefix, type)}/${shortYear}/${sequenceNumber.toString().padStart(6, '0')}`
+  const number = `${documentPrefix(prefix, type)}/${shortYear}/${sequenceNumber.toString().padStart(6, '0')}`
+  if (number.length > 16) throw new Error('GST document number exceeds the 16-character limit')
+  return number
 }
 
 async function loadSaleSource(tx: any, tenantId: string, saleId: string): Promise<TaxSaleSource> {
