@@ -55,6 +55,29 @@ export const StoreSettingsSchema = z
     combinedTaxRatePercent: z.string(),
     discountThresholdPercent: z.string(),
     barcodeLabelFormat: BarcodeLabelFormatSchema,
+    /**
+     * Server-owned editability hints.  These are deliberately returned with
+     * the record rather than inferred from the browser's role so a rolling
+     * deploy cannot accidentally render a field as writable when the API will
+     * reject it.
+     */
+    editableFields: z.object({
+      businessName: z.boolean(),
+      tradeName: z.boolean(),
+      addressLine1: z.boolean(),
+      addressLine2: z.boolean(),
+      city: z.boolean(),
+      state: z.boolean(),
+      postalCode: z.boolean(),
+      gstStatus: z.boolean(),
+      gstin: z.boolean(),
+      pan: z.boolean(),
+      placeOfSupply: z.boolean(),
+      businessType: z.boolean(),
+      combinedTaxRatePercent: z.boolean(),
+      discountThresholdPercent: z.boolean(),
+      barcodeLabelFormat: z.boolean(),
+    }),
   })
   .openapi('StoreSettings')
 
@@ -70,6 +93,10 @@ export const UpdateStoreSettingsSchema = z
     gstStatus: z.enum(['regular', 'composition', 'unregistered']).nullable().optional(),
     gstin: z.string().trim().max(15).nullable().optional(),
     pan: z.string().trim().max(10).nullable().optional(),
+    businessType: z
+      .enum(['supermarket', 'grocery', 'bakery', 'general', 'apparel', 'electronics', 'other'])
+      .nullable()
+      .optional(),
     placeOfSupply: z.string().trim().max(100).nullable().optional(),
     // A combined-rate write is spread evenly across the four jurisdiction
     // columns rather than dumping it all into `state` — nothing downstream

@@ -61,6 +61,14 @@ import {
   OnboardingStepNumberSchema,
 } from './schemas/onboarding'
 import {
+  ScannerTestRequestSchema,
+  ScannerTestResponseSchema,
+  SetupResolutionSchema,
+  SetupStateSchema,
+  TourProgressRequestSchema,
+  TourProgressSchema,
+} from './schemas/setup'
+import {
   CommitImportSchema,
   ImportBatchListSchema,
   ImportBatchSchema,
@@ -236,6 +244,67 @@ registry.registerPath({
     401: { description: 'Unauthenticated' },
     403: { description: 'Owner role required' },
     409: { description: 'One or more required onboarding steps are incomplete' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/setup',
+  description:
+    'Read server-derived, per-store setup readiness. Owners and managers may use this before terminal pairing; derived steps cannot be marked complete by the client.',
+  responses: {
+    200: { description: 'Guided setup state', content: { 'application/json': { schema: SetupStateSchema } } },
+    400: { description: 'A specific store must be selected' },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner or manager role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/setup/resolve',
+  description: 'Persist one explicit optional setup decision for the active store.',
+  request: { body: { content: { 'application/json': { schema: SetupResolutionSchema } } } },
+  responses: {
+    200: { description: 'Updated setup state', content: { 'application/json': { schema: SetupStateSchema } } },
+    400: { description: 'Invalid decision or store scope' },
+    403: { description: 'Owner or manager role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/setup/scanner-test',
+  description:
+    'Verify a keyboard-wedge scanner against one exact indexed SKU/barcode lookup. The input is never persisted and no sale/cart is created.',
+  request: { body: { content: { 'application/json': { schema: ScannerTestRequestSchema } } } },
+  responses: {
+    200: { description: 'Scanner test result', content: { 'application/json': { schema: ScannerTestResponseSchema } } },
+    400: { description: 'Invalid scanner input or store scope' },
+    403: { description: 'Owner or manager role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/setup/tour',
+  description: 'Read guided-tour progress for the acting owner or manager in the active store.',
+  responses: {
+    200: { description: 'Tour progress', content: { 'application/json': { schema: TourProgressSchema } } },
+    400: { description: 'A specific store must be selected' },
+    403: { description: 'Owner or manager role required' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/setup/tour',
+  description: 'Save resumable guided-tour progress for the acting owner or manager.',
+  request: { body: { content: { 'application/json': { schema: TourProgressRequestSchema } } } },
+  responses: {
+    200: { description: 'Tour progress saved', content: { 'application/json': { schema: TourProgressSchema } } },
+    400: { description: 'Invalid tour progress or store scope' },
+    403: { description: 'Owner or manager role required' },
   },
 })
 
@@ -991,21 +1060,23 @@ registry.registerPath({
 registry.registerPath({
   method: 'get',
   path: '/settings',
-  description: 'Store settings — business identity, GST fields, tax rate and discount threshold. Readable by any staff role.',
+  description: 'Read settings for one selected store. Owners may choose any active store; managers are fixed to their assigned store.',
   responses: {
     200: { description: 'Store settings', content: { 'application/json': { schema: StoreSettingsSchema } } },
+    400: { description: 'A specific store must be selected' },
+    403: { description: 'Owner or manager role required' },
   },
 })
 
 registry.registerPath({
   method: 'patch',
   path: '/settings',
-  description: 'Update store settings. Owner-only. Legal name/GSTIN/PAN are not amended with the government by this call — see UI copy.',
+  description: 'Update settings for one selected store. Managers may edit store address, locality, place of supply and tax rate; company identity and policy fields are owner-only.',
   request: { body: { content: { 'application/json': { schema: UpdateStoreSettingsSchema } } } },
   responses: {
     200: { description: 'Store settings updated', content: { 'application/json': { schema: StoreSettingsSchema } } },
     400: { description: 'Invalid request' },
-    403: { description: 'Only the owner can change store settings' },
+    403: { description: 'The submitted fields are owner-only or the caller is not management' },
   },
 })
 

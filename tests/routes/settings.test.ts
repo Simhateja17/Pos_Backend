@@ -107,18 +107,28 @@ describe('settings routes', () => {
     return app
   }
 
-  it('reads settings with the four tax jurisdictions collapsed into one combined rate', async () => {
+  it('reads settings with the four tax jurisdictions collapsed into one combined rate for an owner', async () => {
     tenantsFindFirstMock.mockResolvedValue(tenantRow())
     storesFindFirstMock.mockResolvedValue(
       storeRow({ tax_rate_state: 0.025, tax_rate_county: 0.01, tax_rate_city: 0.005, tax_rate_district: 0 }),
     )
     const app = await buildApp()
 
-    const response = await request(app).get('/settings').set('Authorization', `Bearer ${tokenFor('cashier')}`)
+    const response = await request(app).get('/settings').set('Authorization', `Bearer ${tokenFor('owner')}`)
 
     expect(response.status).toBe(200)
     expect(response.body.combinedTaxRatePercent).toBe('4.0000')
     expect(response.body.businessName).toBe('Example Retail')
+  })
+
+  it('denies a cashier from reading settings', async () => {
+    tenantsFindFirstMock.mockResolvedValue(tenantRow())
+    const app = await buildApp()
+
+    const response = await request(app).get('/settings').set('Authorization', `Bearer ${tokenFor('cashier')}`)
+
+    expect(response.status).toBe(403)
+    expect(tenantsFindFirstMock).not.toHaveBeenCalled()
   })
 
   it('returns a clear scope error instead of a 500 for an all-stores request', async () => {
@@ -144,6 +154,28 @@ describe('settings routes', () => {
 
     expect(response.status).toBe(403)
     expect(tenantsUpdateMock).not.toHaveBeenCalled()
+  })
+
+  it('lets a manager update only the selected store address, locality and tax rate', async () => {
+    tenantsFindFirstMock.mockResolvedValue(tenantRow())
+    storesUpdateMock.mockImplementation(async ({ data }: { data: any }) => storeRow(data))
+    const app = await buildApp()
+
+    const response = await request(app)
+      .patch('/settings')
+      .set('Authorization', `Bearer ${tokenFor('manager')}`)
+      .send({ addressLine1: '99 New Road', city: 'Pune', placeOfSupply: 'Maharashtra', combinedTaxRatePercent: 8 })
+
+    expect(response.status).toBe(200)
+    expect(tenantsUpdateMock).not.toHaveBeenCalled()
+    expect(storesUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'store-1' },
+        data: expect.objectContaining({ address_line1: '99 New Road', city: 'Pune', place_of_supply: 'Maharashtra', tax_rate_state: 0.02 }),
+      }),
+    )
+    expect(response.body.editableFields.businessName).toBe(false)
+    expect(response.body.editableFields.addressLine1).toBe(true)
   })
 
   it('lets the owner update settings, spreading a combined tax rate across all four columns', async () => {

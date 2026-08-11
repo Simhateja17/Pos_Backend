@@ -6,6 +6,7 @@ import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
 import { activeStoreId } from '../middleware/storeContext'
 import { effectivePricesForVariants } from '../lib/storePricing'
+import { findExactVariant } from '../services/catalogLookup'
 
 const uuidSchema = z.string().uuid()
 
@@ -94,7 +95,7 @@ const SEARCH_RESULT_LIMIT = 50
  * first. Returns [] for "searched, matched nothing" — the caller must not
  * confuse that with `null`, which means "no search, return everything".
  */
-async function matchingProductIds(client: any, search: string): Promise<string[]> {
+async function matchingProductIds(client: any, search: string, tenantId: string): Promise<string[]> {
   // Step 1 — exact code, the path a barcode scan takes. Both
   // (tenant_id, barcode) [0031] and (tenant_id, sku) [0006] are unique
   // indexes, so this is a single index lookup at any catalog size.
@@ -104,12 +105,9 @@ async function matchingProductIds(client: any, search: string): Promise<string[]
   // same digits. It is also compared case-sensitively, being digits-only by
   // schema (BarcodeSchema); SKU is not, so it needs an insensitive compare to
   // preserve the old lowercase-both behaviour.
-  const exact = await client.variants.findFirst({
-    where: { OR: [{ barcode: search }, { sku: { equals: search, mode: 'insensitive' } }] },
-    select: { product_id: true },
-  })
+  const exact = await findExactVariant(client, search, tenantId)
   if (exact) {
-    return [exact.product_id]
+    return exact.product_id ? [exact.product_id] : []
   }
 
   // Step 2 — substring fallback (CHECK-02: search by name when there is no
@@ -159,7 +157,7 @@ router.get('/', async (req, res) => {
   const search = (req.query.search as string | undefined)?.trim()
   const client = forTenant(req.user!.tenantId) as any
 
-  const productIds = search ? await matchingProductIds(client, search) : null
+  const productIds = search ? await matchingProductIds(client, search, req.user!.tenantId) : null
   if (productIds !== null && productIds.length === 0) {
     return res.json([])
   }

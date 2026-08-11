@@ -524,6 +524,7 @@ model staff_members {
   tenants                 tenants                   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users                   users?                    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
   stock_movements         stock_movements[]
+  staff_tour_progress     staff_tour_progress[]
 
   @@index([tenant_id], map: "idx_staff_members_tenant_id")
   @@index([user_id], map: "idx_staff_members_user_id")
@@ -575,9 +576,52 @@ model stores {
   tax_rate_district  Decimal  @default(0) @db.Decimal(6, 4)
   tax_rounding_basis String   @default("per_invoice")
   place_of_supply    String?
+  store_setup_progress store_setup_progress[]
+  staff_tour_progress  staff_tour_progress[]
   tenants            tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([tenant_id], map: "idx_stores_tenant_id")
+  @@schema("public")
+}
+
+/// 0055 — explicit per-store choices for guided setup. All other readiness
+/// facts are derived from operational records at request time.
+model store_setup_progress {
+  tenant_id           String    @db.Uuid
+  store_id            String    @db.Uuid
+  team_mode           String?
+  scanner_choice      String?
+  scanner_verified_at DateTime? @db.Timestamptz(6)
+  scanner_variant_id  String?   @db.Uuid
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
+  stores              stores    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  tenants             tenants   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  variants            variants? @relation(fields: [scanner_variant_id], references: [id], onDelete: SetNull)
+
+  @@id([tenant_id, store_id])
+  @@index([store_id], map: "idx_store_setup_progress_store")
+  @@schema("public")
+}
+
+/// 0055 — per-staff, per-store tour resume state.
+model staff_tour_progress {
+  tenant_id     String        @db.Uuid
+  store_id      String        @db.Uuid
+  staff_id      String        @db.Uuid
+  status        String        @default("not_started")
+  last_step     String?
+  seen_steps    Json          @default("[]")
+  started_at    DateTime?     @db.Timestamptz(6)
+  skipped_at    DateTime?     @db.Timestamptz(6)
+  completed_at  DateTime?     @db.Timestamptz(6)
+  updated_at    DateTime      @default(now()) @db.Timestamptz(6)
+  staff_members staff_members @relation(fields: [staff_id], references: [id], onDelete: Cascade)
+  stores        stores        @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  tenants       tenants       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@id([tenant_id, store_id, staff_id])
+  @@index([staff_id, updated_at(sort: Desc)], map: "idx_staff_tour_progress_staff")
   @@schema("public")
 }
 
@@ -701,6 +745,8 @@ model tenants {
   billing_subscription_attempts billing_subscription_attempts[]
   billing_subscriptions         billing_subscriptions[]
   billing_transactions          billing_transactions[]
+  store_setup_progress          store_setup_progress[]
+  staff_tour_progress           staff_tour_progress[]
 
   @@schema("public")
 }
@@ -1024,6 +1070,7 @@ model variants {
   stock_movements              stock_movements[]
   supplier_products            supplier_products[]
   variant_stock_levels         variant_stock_levels[]
+  store_setup_progress         store_setup_progress[]
   products                     products                       @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants                      tenants                        @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 

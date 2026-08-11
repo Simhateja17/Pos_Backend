@@ -32,6 +32,7 @@ import { requireSubscription } from '../middleware/requireSubscription'
 import { requireRole } from '../middleware/requireRole'
 import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
 import { storeContextMiddleware } from '../middleware/storeContext'
+import setupRouter from './setup'
 
 const router = Router()
 
@@ -67,6 +68,17 @@ router.use('/terminals', authMiddleware, requireSubscription, operatorContext, s
 // or write against the wrong shop, which is the worst failure this phase can
 // produce. activeStoreId() throws rather than defaulting, for the same reason.
 const appAccess = [authMiddleware, requireSubscription, operatorContext, requireOperatorOnPairedDevice, storeContextMiddleware]
+
+// Management surfaces are reachable during first-time setup on an unpaired
+// browser, but a browser that is already assigned to a counter still needs a
+// verified owner/manager PIN. Business-wide scope is allowed through this
+// guard so the route itself can return its deterministic `choose_store` 400
+// before a pairing check turns it into a register-lock response.
+function requireOperatorOnSpecificStore(req: Parameters<typeof requireOperatorOnPairedDevice>[0], res: Parameters<typeof requireOperatorOnPairedDevice>[1], next: Parameters<typeof requireOperatorOnPairedDevice>[2]) {
+  if (req.storeContext?.scope === 'business') return next()
+  return requireOperatorOnPairedDevice(req, res, next)
+}
+
 router.use('/stores', ...appAccess, storesRouter)
 // Cross-shop availability is open to EVERY role, cashiers included — it is
 // the point of being a chain. It returns quantity only; see the route.
@@ -83,7 +95,11 @@ router.use('/shifts', ...appAccess, shiftsRouter)
 // Back-office modules are also server-gated. Filtering the sidebar is only a
 // convenience; a cashier who types these URLs or calls the APIs still gets a
 // 403 from requireRole.
-router.use('/settings', ...appAccess, requireRole('manager'), settingsRouter)
+// Settings is a management surface, but unlike operational reads it must
+// return a clean 403 to cashiers before the shared-register lock (423) is
+// considered.  It also needs to be usable during first-time setup on an
+// unpaired browser, so the route has its own ordered access chain.
+router.use('/settings', authMiddleware, operatorContext, storeContextMiddleware, requireRole('manager'), requireOperatorOnSpecificStore, requireSubscription, settingsRouter)
 router.use('/notifications', ...appAccess, requireRole('manager'), notificationsRouter)
 router.use('/stock-movements', ...appAccess, requireRole('manager'), stockMovementsRouter)
 router.use('/transfers', ...appAccess, requireRole('manager'), transfersRouter)
@@ -95,6 +111,12 @@ router.use('/reorder', ...appAccess, requireRole('manager'), reorderRouter)
 router.use('/import', ...appAccess, requireRole('manager'), importRouter)
 router.use('/reports', ...appAccess, requireRole('manager'), reportsRouter)
 router.use('/email', ...appAccess, requireRole('manager'), emailRouter)
+
+// Guided setup is intentionally available before terminal pairing.  It never
+// authorizes a sale; the existing billing/operator/shift gates remain the
+// authority for checkout.  A store context is still mandatory so setup state
+// cannot bleed between outlets.
+router.use('/setup', authMiddleware, operatorContext, storeContextMiddleware, requireRole('manager'), requireOperatorOnSpecificStore, setupRouter)
 
 router.use('/onboarding', authMiddleware, operatorContext, requireOperatorOnPairedDevice, requireRole('manager'), onboardingRouter)
 router.use('/billing', authMiddleware, operatorContext, requireOperatorOnPairedDevice, billingRouter)

@@ -1536,6 +1536,442 @@
         "properties": {},
         "additionalProperties": false
       },
+      "SetupState": {
+        "type": "object",
+        "properties": {
+          "store": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "addressLine1": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "addressLine2": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "city": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "state": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "postalCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "addressLine1",
+              "addressLine2",
+              "city",
+              "state",
+              "postalCode"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SetupStep"
+            }
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "completionPercentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "nextAction": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "store_profile",
+              "owner_pin",
+              "team",
+              "products",
+              "counter",
+              "device_pairing",
+              "scanner",
+              null
+            ]
+          },
+          "storeReady": {
+            "type": "boolean"
+          },
+          "billingBlockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decisions": {
+            "type": "object",
+            "properties": {
+              "teamMode": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "staffed",
+                  "solo_owner",
+                  null
+                ]
+              },
+              "scannerChoice": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "verified",
+                  "no_scanner",
+                  "configure_later",
+                  null
+                ]
+              },
+              "scannerVerifiedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "scannerVariantId": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "teamMode",
+              "scannerChoice",
+              "scannerVerifiedAt",
+              "scannerVariantId"
+            ]
+          },
+          "tour": {
+            "$ref": "#/components/schemas/TourProgress"
+          }
+        },
+        "required": [
+          "store",
+          "steps",
+          "complete",
+          "completionPercentage",
+          "nextAction",
+          "storeReady",
+          "billingBlockers",
+          "decisions",
+          "tour"
+        ]
+      },
+      "SetupStep": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/SetupStepId"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SetupStepStatus"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "skippable": {
+            "type": "boolean"
+          },
+          "billingBlocking": {
+            "type": "boolean"
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SetupStepId"
+            }
+          },
+          "actionHref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "status",
+          "complete",
+          "required",
+          "skippable",
+          "billingBlocking",
+          "dependsOn",
+          "actionHref",
+          "reason"
+        ]
+      },
+      "SetupStepId": {
+        "type": "string",
+        "enum": [
+          "store_profile",
+          "owner_pin",
+          "team",
+          "products",
+          "counter",
+          "device_pairing",
+          "scanner"
+        ]
+      },
+      "SetupStepStatus": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "incomplete",
+          "blocked",
+          "unavailable"
+        ]
+      },
+      "TourProgress": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TourStatus"
+          },
+          "lastStep": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seenSteps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "skippedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "lastStep",
+          "seenSteps",
+          "startedAt",
+          "skippedAt",
+          "completedAt"
+        ]
+      },
+      "TourStatus": {
+        "type": "string",
+        "enum": [
+          "not_started",
+          "in_progress",
+          "completed",
+          "skipped"
+        ]
+      },
+      "SetupResolutionRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "team_mode"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/SetupTeamMode"
+              }
+            },
+            "required": [
+              "decision",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "scanner_choice"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "enum": [
+                  "no_scanner",
+                  "configure_later"
+                ]
+              }
+            },
+            "required": [
+              "decision",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "SetupTeamMode": {
+        "type": "string",
+        "enum": [
+          "staffed",
+          "solo_owner"
+        ]
+      },
+      "ScannerTestResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "no_match"
+            ]
+          },
+          "matched": {
+            "type": "boolean"
+          },
+          "variantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "productName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "matched",
+          "variantId",
+          "sku",
+          "productName",
+          "message"
+        ]
+      },
+      "ScannerTestRequest": {
+        "type": "object",
+        "properties": {
+          "scannedValue": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "scannedValue"
+        ],
+        "additionalProperties": false
+      },
+      "TourProgressRequest": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TourStatus"
+          },
+          "lastStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 80
+          },
+          "seenSteps": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
       "OtpRequestRequest": {
         "type": "object",
         "properties": {
@@ -4118,6 +4554,73 @@
           },
           "barcodeLabelFormat": {
             "$ref": "#/components/schemas/BarcodeLabelFormat"
+          },
+          "editableFields": {
+            "type": "object",
+            "properties": {
+              "businessName": {
+                "type": "boolean"
+              },
+              "tradeName": {
+                "type": "boolean"
+              },
+              "addressLine1": {
+                "type": "boolean"
+              },
+              "addressLine2": {
+                "type": "boolean"
+              },
+              "city": {
+                "type": "boolean"
+              },
+              "state": {
+                "type": "boolean"
+              },
+              "postalCode": {
+                "type": "boolean"
+              },
+              "gstStatus": {
+                "type": "boolean"
+              },
+              "gstin": {
+                "type": "boolean"
+              },
+              "pan": {
+                "type": "boolean"
+              },
+              "placeOfSupply": {
+                "type": "boolean"
+              },
+              "businessType": {
+                "type": "boolean"
+              },
+              "combinedTaxRatePercent": {
+                "type": "boolean"
+              },
+              "discountThresholdPercent": {
+                "type": "boolean"
+              },
+              "barcodeLabelFormat": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "businessName",
+              "tradeName",
+              "addressLine1",
+              "addressLine2",
+              "city",
+              "state",
+              "postalCode",
+              "gstStatus",
+              "gstin",
+              "pan",
+              "placeOfSupply",
+              "businessType",
+              "combinedTaxRatePercent",
+              "discountThresholdPercent",
+              "barcodeLabelFormat"
+            ]
           }
         },
         "required": [
@@ -4135,7 +4638,8 @@
           "businessType",
           "combinedTaxRatePercent",
           "discountThresholdPercent",
-          "barcodeLabelFormat"
+          "barcodeLabelFormat",
+          "editableFields"
         ]
       },
       "BarcodeLabelFormat": {
@@ -4214,6 +4718,22 @@
               "null"
             ],
             "maxLength": 10
+          },
+          "businessType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "supermarket",
+              "grocery",
+              "bakery",
+              "general",
+              "apparel",
+              "electronics",
+              "other",
+              null
+            ]
           },
           "placeOfSupply": {
             "type": [
@@ -6169,6 +6689,149 @@
           },
           "409": {
             "description": "One or more required onboarding steps are incomplete"
+          }
+        }
+      }
+    },
+    "/setup": {
+      "get": {
+        "description": "Read server-derived, per-store setup readiness. Owners and managers may use this before terminal pairing; derived steps cannot be marked complete by the client.",
+        "responses": {
+          "200": {
+            "description": "Guided setup state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A specific store must be selected"
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner or manager role required"
+          }
+        }
+      }
+    },
+    "/setup/resolve": {
+      "post": {
+        "description": "Persist one explicit optional setup decision for the active store.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupResolutionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated setup state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid decision or store scope"
+          },
+          "403": {
+            "description": "Owner or manager role required"
+          }
+        }
+      }
+    },
+    "/setup/scanner-test": {
+      "post": {
+        "description": "Verify a keyboard-wedge scanner against one exact indexed SKU/barcode lookup. The input is never persisted and no sale/cart is created.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScannerTestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scanner test result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScannerTestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid scanner input or store scope"
+          },
+          "403": {
+            "description": "Owner or manager role required"
+          }
+        }
+      }
+    },
+    "/setup/tour": {
+      "get": {
+        "description": "Read guided-tour progress for the acting owner or manager in the active store.",
+        "responses": {
+          "200": {
+            "description": "Tour progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TourProgress"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A specific store must be selected"
+          },
+          "403": {
+            "description": "Owner or manager role required"
+          }
+        }
+      },
+      "patch": {
+        "description": "Save resumable guided-tour progress for the acting owner or manager.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TourProgressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tour progress saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TourProgress"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid tour progress or store scope"
+          },
+          "403": {
+            "description": "Owner or manager role required"
           }
         }
       }
@@ -8209,7 +8872,7 @@
     },
     "/settings": {
       "get": {
-        "description": "Store settings — business identity, GST fields, tax rate and discount threshold. Readable by any staff role.",
+        "description": "Read settings for one selected store. Owners may choose any active store; managers are fixed to their assigned store.",
         "responses": {
           "200": {
             "description": "Store settings",
@@ -8220,11 +8883,17 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "A specific store must be selected"
+          },
+          "403": {
+            "description": "Owner or manager role required"
           }
         }
       },
       "patch": {
-        "description": "Update store settings. Owner-only. Legal name/GSTIN/PAN are not amended with the government by this call — see UI copy.",
+        "description": "Update settings for one selected store. Managers may edit store address, locality, place of supply and tax rate; company identity and policy fields are owner-only.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8249,7 +8918,7 @@
             "description": "Invalid request"
           },
           "403": {
-            "description": "Only the owner can change store settings"
+            "description": "The submitted fields are owner-only or the caller is not management"
           }
         }
       }
