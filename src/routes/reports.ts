@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { Prisma } from '@prisma/client'
 import { forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
 import {
@@ -10,7 +11,8 @@ import {
 const router = Router()
 
 /**
- * REPORT-01 — sales, stock and staff-exception reports over a chosen range.
+ * REPORT-01 — fixed sales, payment, purchasing, stock and staff-exception
+ * reports over a chosen range.
  *
  * Two things worth knowing before reading the SQL:
  *
@@ -27,6 +29,12 @@ const CATALOG = [
   { kind: 'sales-by-product', title: 'Sales by product', description: 'Units and revenue per product, best sellers first.', group: 'sales' },
   { kind: 'sales-by-category', title: 'Sales by category', description: 'Where revenue is concentrated across the catalog.', group: 'sales' },
   { kind: 'sales-by-staff', title: 'Sales by staff', description: 'Bills rung up and revenue taken per staff member.', group: 'sales' },
+  { kind: 'payments-by-method', title: 'Payments by method', description: 'Collected and refunded tenders by persisted payment method.', group: 'payments' },
+  { kind: 'refunds-by-method', title: 'Refunds by method', description: 'Refund count and value by the tender returned to the customer.', group: 'payments' },
+  { kind: 'shift-tender-reconciliation', title: 'Shift tender reconciliation', description: 'Opening cash, tender movement and counted drawer cash for every shift.', group: 'payments' },
+  { kind: 'purchases-by-supplier', title: 'Purchases by supplier', description: 'Purchase orders, receipt value and outstanding ordered quantities by supplier.', group: 'purchases' },
+  { kind: 'goods-received-by-day', title: 'Goods received by day', description: 'Actual receipt events and receipt cost, separate from ordered value.', group: 'purchases' },
+  { kind: 'purchase-cost-by-product', title: 'Purchase cost by product', description: 'Receipt quantities, weighted receipt cost and current moving-average cost.', group: 'purchases' },
   { kind: 'stock-valuation', title: 'Stock valuation', description: 'What is on the shelves and what it cost you.', group: 'stock' },
   { kind: 'stock-movements', title: 'Stock movement history', description: 'Every receipt, sale, return and adjustment in the range.', group: 'stock' },
   { kind: 'staff-exceptions', title: 'Staff exception report', description: 'Refunds and discounts by staff member — the loss-prevention view.', group: 'staff' },
@@ -41,6 +49,30 @@ function defaultRange(): { from: string; to: string } {
 
 function money(value: unknown): number {
   return Number(value ?? 0)
+}
+
+const ZERO = new Prisma.Decimal(0)
+
+/**
+ * Keep report arithmetic in Decimal until the final JSON boundary. PostgreSQL
+ * performs the grouped aggregates; these helpers prevent the totals row from
+ * reintroducing binary floating-point arithmetic in Node.
+ */
+function decimal(value: unknown): Prisma.Decimal {
+  return new Prisma.Decimal(String(value ?? 0))
+}
+
+function sumMoney(rows: readonly any[], key: string): number {
+  return rows.reduce((total, row) => total.plus(decimal(row[key])), ZERO).toNumber()
+}
+
+function sumCount(rows: readonly any[], key: string): number {
+  return rows.reduce((total, row) => total + Number(row[key] ?? 0), 0)
+}
+
+function dateWindow(column: string, zonePlaceholder = '$3'): string {
+  return `${column} >= (($1::date)::timestamp at time zone ${zonePlaceholder})
+          and ${column} < ((($2::date) + 1)::timestamp at time zone ${zonePlaceholder})`
 }
 
 router.get('/catalog', async (_req, res) => {
@@ -254,6 +286,438 @@ export async function buildReport(tx: any, args: BuildArgs): Promise<ReportTable
               },
             ]
           : [],
+      }
+    }
+
+    case 'payments-by-method':
+    case 'refunds-by-method': {
+      const refundsOnly = args.kind === 'refunds-by-method'
+      const sourceFilter = args.includeImported ? '' : `and s.source = 'pos'`
+      const rows = await tx.$queryRawUnsafe(
+        `select pay.method::text as method,
+                count(*) filter (where pay.direction = 'payment')::int as collected_count,
+                coalesce(sum(pay.amount) filter (where pay.direction = 'payment'), 0) as collected_amount,
+                count(*) filter (where pay.direction = 'refund')::int as refund_count,
+                coalesce(sum(abs(pay.amount)) filter (where pay.direction = 'refund'), 0) as refund_amount,
+                coalesce(sum(case
+                  when pay.direction = 'payment' then pay.amount
+                  when pay.direction = 'refund' then -abs(pay.amount)
+                  else 0
+                end), 0) as net_amount
+         from payments pay
+         join sales s on s.id = pay.sale_id and s.tenant_id = $4::uuid
+         where pay.tenant_id = $4::uuid
+           and ${dateWindow('pay.created_at')}
+           and ($5::uuid is null or s.store_id = $5::uuid)
+           ${sourceFilter}
+           ${refundsOnly ? `and pay.direction = 'refund'` : ''}
+         group by pay.method::text
+         order by pay.method::text`,
+        args.from,
+        args.to,
+        args.zone,
+        args.tenantId,
+        args.storeId,
+      )
+
+      if (refundsOnly) {
+        return {
+          ...base,
+          columns: [
+            { key: 'method', label: 'Payment method', align: 'left', money: false },
+            { key: 'refund_count', label: 'Refunds', align: 'right', money: false },
+            { key: 'refund_amount', label: 'Refunded amount', align: 'right', money: true },
+          ],
+          rows: rows.map((row: any) => ({
+            method: row.method,
+            refund_count: row.refund_count,
+            refund_amount: money(row.refund_amount),
+          })),
+          totals: {
+            method: 'Total',
+            refund_count: sumCount(rows, 'refund_count'),
+            refund_amount: sumMoney(rows, 'refund_amount'),
+          },
+          unavailable: [],
+        }
+      }
+
+      return {
+        ...base,
+        columns: [
+          { key: 'method', label: 'Payment method', align: 'left', money: false },
+          { key: 'collected_count', label: 'Collected payments', align: 'right', money: false },
+          { key: 'collected_amount', label: 'Collected amount', align: 'right', money: true },
+          { key: 'refund_count', label: 'Refunds', align: 'right', money: false },
+          { key: 'refund_amount', label: 'Refunded amount', align: 'right', money: true },
+          { key: 'net_amount', label: 'Net amount', align: 'right', money: true },
+        ],
+        rows: rows.map((row: any) => ({
+          ...row,
+          collected_amount: money(row.collected_amount),
+          refund_amount: money(row.refund_amount),
+          net_amount: money(row.net_amount),
+        })),
+        totals: {
+          method: 'Total',
+          collected_count: sumCount(rows, 'collected_count'),
+          collected_amount: sumMoney(rows, 'collected_amount'),
+          refund_count: sumCount(rows, 'refund_count'),
+          refund_amount: sumMoney(rows, 'refund_amount'),
+          net_amount: sumMoney(rows, 'net_amount'),
+        },
+        unavailable: [],
+      }
+    }
+
+    case 'shift-tender-reconciliation': {
+      const sourceFilter = args.includeImported ? '' : `and s.source = 'pos'`
+      const rows = await tx.$queryRawUnsafe(
+        `with selected_shifts as (
+           select sh.*
+           from shifts sh
+           where sh.tenant_id = $4::uuid
+             and ${dateWindow('sh.opened_at')}
+             and ($5::uuid is null or sh.store_id = $5::uuid)
+         )
+         select sh.id as shift_id,
+                coalesce(st.name, 'Unattributed') as cashier,
+                coalesce(term.name, 'Unassigned') as terminal,
+                sh.starting_cash as opening_cash,
+                count(distinct s.id)::int as sale_count,
+                coalesce(sum(pay.amount) filter (where pay.direction = 'payment' and pay.method::text = 'cash'), 0) as cash_sales,
+                coalesce(sum(abs(pay.amount)) filter (where pay.direction = 'refund' and pay.method::text = 'cash'), 0) as cash_refunds,
+                (sh.starting_cash
+                  + coalesce(sum(pay.amount) filter (where pay.direction = 'payment' and pay.method::text = 'cash'), 0)
+                  - coalesce(sum(abs(pay.amount)) filter (where pay.direction = 'refund' and pay.method::text = 'cash'), 0)) as expected_cash,
+                sh.counted_cash,
+                sh.variance,
+                coalesce(sum(pay.amount) filter (where pay.direction = 'payment' and pay.method::text = 'card'), 0) as card_sales,
+                coalesce(sum(abs(pay.amount)) filter (where pay.direction = 'refund' and pay.method::text = 'card'), 0) as card_refunds,
+                coalesce(sum(pay.amount) filter (where pay.direction = 'payment' and pay.method::text = 'check'), 0) as check_sales,
+                coalesce(sum(abs(pay.amount)) filter (where pay.direction = 'refund' and pay.method::text = 'check'), 0) as check_refunds,
+                coalesce(sum(pay.amount) filter (where pay.direction = 'payment' and pay.method::text not in ('cash', 'card', 'check')), 0) as other_sales,
+                coalesce(sum(abs(pay.amount)) filter (where pay.direction = 'refund' and pay.method::text not in ('cash', 'card', 'check')), 0) as other_refunds,
+                case when sh.closed_at is null then 'open' else 'closed' end as status
+         from selected_shifts sh
+         left join sales s
+           on s.shift_id = sh.id
+          and s.tenant_id = $4::uuid
+          and s.store_id = sh.store_id
+          ${sourceFilter}
+         left join payments pay on pay.sale_id = s.id and pay.tenant_id = $4::uuid
+         left join staff_members st on st.id = sh.staff_id and st.tenant_id = $4::uuid
+         left join terminals term on term.id = sh.terminal_id and term.tenant_id = $4::uuid
+         group by sh.id, st.name, term.name
+         order by sh.opened_at desc`,
+        args.from,
+        args.to,
+        args.zone,
+        args.tenantId,
+        args.storeId,
+      )
+
+      const moneyKeys = [
+        'opening_cash',
+        'cash_sales',
+        'cash_refunds',
+        'expected_cash',
+        'counted_cash',
+        'variance',
+        'card_sales',
+        'card_refunds',
+        'check_sales',
+        'check_refunds',
+        'other_sales',
+        'other_refunds',
+      ]
+      const normalizedRows = rows.map((row: any) => {
+        const normalized = { ...row }
+        for (const key of moneyKeys) normalized[key] = row[key] === null ? null : money(row[key])
+        return normalized
+      })
+      const hasOpenShift = normalizedRows.some((row: any) => row.status === 'open')
+
+      return {
+        ...base,
+        columns: [
+          { key: 'shift_id', label: 'Shift', align: 'left', money: false },
+          { key: 'cashier', label: 'Cashier', align: 'left', money: false },
+          { key: 'terminal', label: 'Terminal', align: 'left', money: false },
+          { key: 'opening_cash', label: 'Opening cash', align: 'right', money: true },
+          { key: 'cash_sales', label: 'Cash sales', align: 'right', money: true },
+          { key: 'cash_refunds', label: 'Cash refunds', align: 'right', money: true },
+          { key: 'expected_cash', label: 'Expected cash', align: 'right', money: true },
+          { key: 'counted_cash', label: 'Counted cash', align: 'right', money: true },
+          { key: 'variance', label: 'Variance', align: 'right', money: true },
+          { key: 'card_sales', label: 'Card sales', align: 'right', money: true },
+          { key: 'card_refunds', label: 'Card refunds', align: 'right', money: true },
+          { key: 'check_sales', label: 'Check sales', align: 'right', money: true },
+          { key: 'check_refunds', label: 'Check refunds', align: 'right', money: true },
+          { key: 'other_sales', label: 'Other tender sales', align: 'right', money: true },
+          { key: 'other_refunds', label: 'Other tender refunds', align: 'right', money: true },
+          { key: 'status', label: 'Status', align: 'left', money: false },
+        ],
+        rows: normalizedRows,
+        totals: {
+          shift_id: 'Total',
+          sale_count: sumCount(normalizedRows, 'sale_count'),
+          opening_cash: sumMoney(normalizedRows, 'opening_cash'),
+          cash_sales: sumMoney(normalizedRows, 'cash_sales'),
+          cash_refunds: sumMoney(normalizedRows, 'cash_refunds'),
+          expected_cash: sumMoney(normalizedRows, 'expected_cash'),
+          counted_cash: hasOpenShift ? null : sumMoney(normalizedRows, 'counted_cash'),
+          variance: hasOpenShift ? null : sumMoney(normalizedRows, 'variance'),
+          card_sales: sumMoney(normalizedRows, 'card_sales'),
+          card_refunds: sumMoney(normalizedRows, 'card_refunds'),
+          check_sales: sumMoney(normalizedRows, 'check_sales'),
+          check_refunds: sumMoney(normalizedRows, 'check_refunds'),
+          other_sales: sumMoney(normalizedRows, 'other_sales'),
+          other_refunds: sumMoney(normalizedRows, 'other_refunds'),
+          status: hasOpenShift ? 'Open shifts included' : 'Closed',
+        },
+        unavailable: hasOpenShift
+          ? [{ what: 'Counted cash and variance for open shifts', reason: 'An open shift has no counted cash until the drawer is closed.' }]
+          : [],
+      }
+    }
+
+    case 'purchases-by-supplier': {
+      // PO totals are built per line and then per PO before supplier grouping.
+      // This prevents one partial receipt from multiplying the ordered value.
+      // Received value uses receipt-line costs; outstanding value uses the PO's
+      // ordered unit cost and the quantity still outstanding at the end of the
+      // selected business-date window.
+      const rows = await tx.$queryRawUnsafe(
+        `with receipt_by_line as (
+           select rl.purchase_order_line_id,
+                  coalesce(sum(rl.quantity_received), 0) as received_quantity,
+                  coalesce(sum(rl.quantity_received * rl.unit_cost), 0) as received_value
+           from purchase_order_receipt_lines rl
+           join purchase_order_receipts r
+             on r.id = rl.receipt_id
+            and r.tenant_id = $4::uuid
+           join purchase_orders receipt_po
+             on receipt_po.id = r.purchase_order_id
+            and receipt_po.tenant_id = $4::uuid
+            and receipt_po.store_id = r.store_id
+           join purchase_order_lines receipt_pol
+             on receipt_pol.id = rl.purchase_order_line_id
+            and receipt_pol.tenant_id = $4::uuid
+            and receipt_pol.purchase_order_id = r.purchase_order_id
+           where rl.tenant_id = $4::uuid
+             and ${dateWindow('r.received_at')}
+             and ($5::uuid is null or r.store_id = $5::uuid)
+           group by rl.purchase_order_line_id
+         ), po_rollup as (
+           select po.id,
+                  coalesce(sum(pol.quantity_ordered * pol.unit_cost), 0) as ordered_value,
+                  coalesce(sum(coalesce(rbl.received_quantity, 0)), 0) as received_quantity,
+                  coalesce(sum(coalesce(rbl.received_value, 0)), 0) as received_value,
+                  coalesce(sum(greatest(pol.quantity_ordered - coalesce(rbl.received_quantity, 0), 0)), 0) as outstanding_quantity,
+                  coalesce(sum(greatest(pol.quantity_ordered - coalesce(rbl.received_quantity, 0), 0) * pol.unit_cost), 0) as outstanding_value
+           from purchase_orders po
+           left join purchase_order_lines pol
+             on pol.purchase_order_id = po.id
+            and pol.tenant_id = $4::uuid
+           left join receipt_by_line rbl on rbl.purchase_order_line_id = pol.id
+           where po.tenant_id = $4::uuid
+           group by po.id
+         )
+         select sup.id as supplier_id,
+                sup.name as supplier,
+                count(po.id)::int as po_count,
+                coalesce(sum(pr.ordered_value), 0) as ordered_value,
+                coalesce(sum(pr.received_quantity), 0) as received_quantity,
+                coalesce(sum(pr.received_value), 0) as received_value,
+                coalesce(sum(pr.outstanding_quantity), 0) as outstanding_quantity,
+                coalesce(sum(pr.outstanding_value), 0) as outstanding_value,
+                count(po.id) filter (where po.status = 'draft')::int as draft_count,
+                count(po.id) filter (where po.status = 'sent')::int as sent_count,
+                count(po.id) filter (where po.status = 'partial')::int as partial_count,
+                count(po.id) filter (where po.status = 'received')::int as received_count,
+                count(po.id) filter (where po.status = 'cancelled')::int as cancelled_count
+         from purchase_orders po
+         join suppliers sup on sup.id = po.supplier_id and sup.tenant_id = $4::uuid
+         join po_rollup pr on pr.id = po.id
+         where po.tenant_id = $4::uuid
+           and ${dateWindow('po.created_at')}
+           and ($5::uuid is null or po.store_id = $5::uuid)
+         group by sup.id, sup.name
+         order by ordered_value desc, sup.name`,
+        args.from,
+        args.to,
+        args.zone,
+        args.tenantId,
+        args.storeId,
+      )
+
+      return {
+        ...base,
+        description: 'Purchase orders created in this range. Received and outstanding quantities are measured from receipt events through the range end; receipt cost comes from receipt lines.',
+        columns: [
+          { key: 'supplier', label: 'Supplier', align: 'left', money: false },
+          { key: 'po_count', label: 'POs', align: 'right', money: false },
+          { key: 'ordered_value', label: 'Ordered value', align: 'right', money: true },
+          { key: 'received_quantity', label: 'Quantity received', align: 'right', money: false },
+          { key: 'received_value', label: 'Received value', align: 'right', money: true },
+          { key: 'outstanding_quantity', label: 'Outstanding quantity', align: 'right', money: false },
+          { key: 'outstanding_value', label: 'Outstanding ordered value', align: 'right', money: true },
+          { key: 'draft_count', label: 'Draft', align: 'right', money: false },
+          { key: 'sent_count', label: 'Sent', align: 'right', money: false },
+          { key: 'partial_count', label: 'Partial', align: 'right', money: false },
+          { key: 'received_count', label: 'Received', align: 'right', money: false },
+          { key: 'cancelled_count', label: 'Cancelled', align: 'right', money: false },
+        ],
+        rows: rows.map((row: any) => ({
+          ...row,
+          ordered_value: money(row.ordered_value),
+          received_quantity: money(row.received_quantity),
+          received_value: money(row.received_value),
+          outstanding_quantity: money(row.outstanding_quantity),
+          outstanding_value: money(row.outstanding_value),
+        })),
+        totals: {
+          supplier: 'Total',
+          po_count: sumCount(rows, 'po_count'),
+          ordered_value: sumMoney(rows, 'ordered_value'),
+          received_quantity: sumMoney(rows, 'received_quantity'),
+          received_value: sumMoney(rows, 'received_value'),
+          outstanding_quantity: sumMoney(rows, 'outstanding_quantity'),
+          outstanding_value: sumMoney(rows, 'outstanding_value'),
+          draft_count: sumCount(rows, 'draft_count'),
+          sent_count: sumCount(rows, 'sent_count'),
+          partial_count: sumCount(rows, 'partial_count'),
+          received_count: sumCount(rows, 'received_count'),
+          cancelled_count: sumCount(rows, 'cancelled_count'),
+        },
+        unavailable: [],
+      }
+    }
+
+    case 'goods-received-by-day': {
+      const rows = await tx.$queryRawUnsafe(
+        `select (r.received_at at time zone $3)::date::text as receipt_date,
+                sup.name as supplier,
+                po.po_number,
+                count(distinct r.id)::int as receipt_count,
+                coalesce(sum(rl.quantity_received), 0) as quantity_received,
+                coalesce(sum(rl.quantity_received * rl.unit_cost), 0) as receipt_cost,
+                case when bool_or(pol.quantity_received > pol.quantity_ordered) then 'Yes' else 'No' end as over_received
+         from purchase_order_receipts r
+         join purchase_orders po
+           on po.id = r.purchase_order_id
+          and po.tenant_id = $4::uuid
+         join suppliers sup on sup.id = po.supplier_id and sup.tenant_id = $4::uuid
+         join purchase_order_receipt_lines rl
+           on rl.receipt_id = r.id
+          and rl.tenant_id = $4::uuid
+         join purchase_order_lines pol
+           on pol.id = rl.purchase_order_line_id
+          and pol.tenant_id = $4::uuid
+          and pol.purchase_order_id = po.id
+         where r.tenant_id = $4::uuid
+           and ${dateWindow('r.received_at')}
+           and ($5::uuid is null or r.store_id = $5::uuid)
+         group by 1, sup.name, po.po_number
+         order by 1 desc, sup.name, po.po_number`,
+        args.from,
+        args.to,
+        args.zone,
+        args.tenantId,
+        args.storeId,
+      )
+
+      return {
+        ...base,
+        columns: [
+          { key: 'receipt_date', label: 'Receipt date', align: 'left', money: false },
+          { key: 'supplier', label: 'Supplier', align: 'left', money: false },
+          { key: 'po_number', label: 'PO number', align: 'left', money: false },
+          { key: 'receipt_count', label: 'Receipts', align: 'right', money: false },
+          { key: 'quantity_received', label: 'Quantity received', align: 'right', money: false },
+          { key: 'receipt_cost', label: 'Receipt cost', align: 'right', money: true },
+          { key: 'over_received', label: 'Over-received', align: 'left', money: false },
+        ],
+        rows: rows.map((row: any) => ({
+          ...row,
+          quantity_received: money(row.quantity_received),
+          receipt_cost: money(row.receipt_cost),
+        })),
+        totals: {
+          receipt_date: 'Total',
+          receipt_count: sumCount(rows, 'receipt_count'),
+          quantity_received: sumMoney(rows, 'quantity_received'),
+          receipt_cost: sumMoney(rows, 'receipt_cost'),
+          over_received: null,
+        },
+        unavailable: [],
+      }
+    }
+
+    case 'purchase-cost-by-product': {
+      const rows = await tx.$queryRawUnsafe(
+        `select p.name as product,
+                coalesce(nullif(concat_ws(' · ', v.size, v.color, v.material), ''), '') as variant,
+                v.sku,
+                coalesce(sum(rl.quantity_received), 0) as quantity_received,
+                coalesce(sum(rl.quantity_received * rl.unit_cost), 0) as total_receipt_cost,
+                case when sum(rl.quantity_received) = 0 then null
+                     else sum(rl.quantity_received * rl.unit_cost) / sum(rl.quantity_received) end as weighted_average_received_unit_cost,
+                v.moving_average_cost as current_moving_average_cost
+         from purchase_order_receipt_lines rl
+         join purchase_order_receipts r
+           on r.id = rl.receipt_id
+          and r.tenant_id = $4::uuid
+         join purchase_order_lines pol
+           on pol.id = rl.purchase_order_line_id
+          and pol.tenant_id = $4::uuid
+          and pol.purchase_order_id = r.purchase_order_id
+         join variants v on v.id = rl.variant_id and v.tenant_id = $4::uuid
+         join products p on p.id = v.product_id and p.tenant_id = $4::uuid
+         where rl.tenant_id = $4::uuid
+           and ${dateWindow('r.received_at')}
+           and ($5::uuid is null or r.store_id = $5::uuid)
+         group by p.name, v.id, v.size, v.color, v.material, v.sku, v.moving_average_cost
+         order by total_receipt_cost desc, p.name, v.sku`,
+        args.from,
+        args.to,
+        args.zone,
+        args.tenantId,
+        args.storeId,
+      )
+
+      const normalizedRows = rows.map((row: any) => ({
+        ...row,
+        quantity_received: money(row.quantity_received),
+        total_receipt_cost: money(row.total_receipt_cost),
+        weighted_average_received_unit_cost:
+          row.weighted_average_received_unit_cost === null ? null : money(row.weighted_average_received_unit_cost),
+        current_moving_average_cost: row.current_moving_average_cost === null ? null : money(row.current_moving_average_cost),
+      }))
+      const quantityTotal = sumMoney(rows, 'quantity_received')
+      const costTotal = sumMoney(rows, 'total_receipt_cost')
+
+      return {
+        ...base,
+        columns: [
+          { key: 'product', label: 'Product', align: 'left', money: false },
+          { key: 'variant', label: 'Variant', align: 'left', money: false },
+          { key: 'sku', label: 'SKU', align: 'left', money: false },
+          { key: 'quantity_received', label: 'Quantity received', align: 'right', money: false },
+          { key: 'total_receipt_cost', label: 'Total receipt cost', align: 'right', money: true },
+          { key: 'weighted_average_received_unit_cost', label: 'Weighted average receipt cost', align: 'right', money: true },
+          { key: 'current_moving_average_cost', label: 'Current moving-average cost', align: 'right', money: true },
+        ],
+        rows: normalizedRows,
+        totals: {
+          product: 'Total',
+          quantity_received: quantityTotal,
+          total_receipt_cost: costTotal,
+          weighted_average_received_unit_cost: quantityTotal === 0 ? null : new Prisma.Decimal(costTotal).div(quantityTotal).toNumber(),
+          current_moving_average_cost: null,
+        },
+        unavailable: [],
       }
     }
 

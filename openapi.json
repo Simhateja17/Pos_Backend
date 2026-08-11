@@ -5955,6 +5955,8 @@
                   "type": "string",
                   "enum": [
                     "sales",
+                    "payments",
+                    "purchases",
                     "stock",
                     "staff"
                   ]
@@ -5980,6 +5982,12 @@
           "sales-by-product",
           "sales-by-category",
           "sales-by-staff",
+          "payments-by-method",
+          "refunds-by-method",
+          "shift-tender-reconciliation",
+          "purchases-by-supplier",
+          "goods-received-by-day",
+          "purchase-cost-by-product",
           "stock-valuation",
           "stock-movements",
           "staff-exceptions"
