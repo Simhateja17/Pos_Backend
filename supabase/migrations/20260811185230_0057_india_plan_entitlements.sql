@@ -1,0 +1,3 @@
+-- The production Supabase ledger contains a second idempotent application of
+-- 0057_india_plan_entitlements from an interrupted MCP retry. Keep the local
+-- migration ledger aligned without re-running the schema/data migration.
