@@ -39,12 +39,15 @@ const supabaseAnon = createClient(
 )
 
 /**
- * POST /otp/request — sends a 6-digit email OTP via Supabase Auth. Always
- * responds 200 regardless of whether the account exists, to avoid leaking
- * account existence through response timing/shape (same enumeration
- * concern as /login below). `purpose: 'signup'` allows Supabase to create
- * the underlying Auth user on verification; `purpose: 'login'` does not,
- * so an OTP is only actually delivered to already-registered addresses.
+ * POST /otp/request — sends a 6-digit email OTP via Supabase Auth.
+ * `purpose: 'signup'` allows Supabase to create the underlying Auth user on
+ * verification; `purpose: 'login'` does not, so an OTP is only actually
+ * delivered to already-registered addresses.
+ *
+ * Login intentionally surfaces Supabase's no-account response so the UI can
+ * send a new store owner to signup instead of claiming that a code was sent
+ * when no code can arrive. Signup keeps the existing-account check in the
+ * final signup route, where the verified session can be inspected safely.
  */
 router.post('/otp/request', async (req, res) => {
   const parsed = OtpRequestSchema.safeParse(req.body)
@@ -67,12 +70,19 @@ router.post('/otp/request', async (req, res) => {
   }
 
   // A 422 here is Supabase's "no account exists and shouldCreateUser is
-  // false" response — the expected, privacy-preserving outcome for a login
-  // attempt against an unregistered email. Masked as success so the
-  // response never reveals whether the address has an account. Anything
-  // else (5xx: SMTP/provider failure, etc.) is a real delivery failure and
-  // must be surfaced — silently reporting "sent" when nothing was sent
-  // just strands the caller waiting for a code that will never arrive.
+  // false" response. For login, make that actionable instead of reporting a
+  // code that was never delivered. Signup still treats the same provider
+  // response as an intentionally idempotent request.
+  if (purpose === 'login' && error?.status === 422) {
+    console.log(`[auth:otp/request] returning 404 — no login account exists`)
+    return res.status(404).json({
+      error: 'No account found with this email. Create a store account first',
+    })
+  }
+
+  // Anything else (5xx: SMTP/provider failure, etc.) is a real delivery
+  // failure and must be surfaced — silently reporting "sent" when nothing was
+  // sent just strands the caller waiting for a code that will never arrive.
   if (error && error.status !== 422) {
     console.log(`[auth:otp/request] returning 502 — real send failure, not the expected 422`)
     return res.status(502).json({ error: 'Could not send the code. Please try again shortly.' })
@@ -289,9 +299,9 @@ router.post('/signup', async (req, res) => {
  * the request body — both are derived from the custom access token hook's
  * claims on the session verifyOtp returns.
  *
- * SECURITY (Information Disclosure, mitigated): both "no such user" and
- * "wrong/expired code" map to the same generic 401 copy, preventing user
- * enumeration.
+ * SECURITY: direct OTP verification failures still map to the same generic
+ * 401 copy. Account existence is intentionally surfaced earlier by
+ * /otp/request so an unregistered login can be routed to signup.
  */
 router.post('/login', async (req, res) => {
   const parsed = LoginSchema.safeParse(req.body)
@@ -458,9 +468,10 @@ router.post('/set-pin', authMiddleware, async (req, res) => {
  * not a typed code, is what /reset-owner-pin exchanges for a session.
  *
  * SECURITY: always 200 with the same body regardless of whether the email
- * belongs to an account — matches /otp/request and /login's enumeration
- * defence. A 502 is the one exception, and is a real provider failure, not
- * information about the account.
+ * belongs to an account. This recovery flow keeps its own enumeration
+ * defence; the login OTP request intentionally provides an account-creation
+ * prompt instead. A 502 is the one exception, and is a real provider
+ * failure, not information about the account.
  */
 router.post('/owner-pin-recovery/request', async (req, res) => {
   const parsed = OwnerPinRecoveryRequestSchema.safeParse(req.body)

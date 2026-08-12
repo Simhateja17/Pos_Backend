@@ -298,6 +298,23 @@ describe('POST /auth/signup and /auth/login', () => {
       options: { shouldCreateUser },
     })
   })
+
+  it('login OTP request tells an unregistered email to create an account', async () => {
+    signInWithOtpMock.mockResolvedValue({
+      data: {},
+      error: { status: 422, message: 'No account exists for this email' },
+    })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/auth/otp/request')
+      .send({ email: 'new-owner@example.com', purpose: 'login' })
+
+    expect(res.status).toBe(404)
+    expect(res.body).toEqual({
+      error: 'No account found with this email. Create a store account first',
+    })
+  })
 })
 
 describe('POST /auth/set-pin', () => {

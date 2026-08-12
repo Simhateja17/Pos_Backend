@@ -318,13 +318,17 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/auth/otp/request',
-  description: "Send a 6-digit email OTP via Supabase Auth. Always responds 200 regardless of whether the account exists, to avoid leaking account existence. `purpose: 'signup'` lets Supabase create the Auth user on verification; `purpose: 'login'` does not.",
+  description: "Send a 6-digit email OTP via Supabase Auth. Login returns 404 when no account exists so the caller can create one; signup keeps the existing-account check in the final signup step. `purpose: 'signup'` lets Supabase create the Auth user on verification; `purpose: 'login'` does not.",
   request: {
     body: { content: { 'application/json': { schema: OtpRequestSchema } } },
   },
   responses: {
     200: { description: 'Code sent (if applicable)', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
     400: { description: 'Invalid request' },
+    404: {
+      description: 'No account found for login',
+      content: { 'application/json': { schema: z.object({ error: z.string() }) } },
+    },
   },
 })
 
