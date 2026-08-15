@@ -111,11 +111,27 @@ describe('context and tenant record read routes', () => {
     expect(response.body).toEqual({
       staff: { id: 'staff-1', name: 'Real Owner', role: 'owner' },
       tenant: { id: 'tenant-real', businessName: 'Real Shop', locality: 'Mumbai, Maharashtra' },
-      store: { id: 'store-1', name: 'Bandra', locality: 'Mumbai, Maharashtra', combinedTaxRatePercent: '4.0000' },
+      store: { id: 'store-1', name: 'Bandra', locality: 'Mumbai, Maharashtra', combinedTaxRatePercent: '4.0000', taxTreatment: 'cgst_sgst' },
       onboarding: { step: 3, completed: false },
     })
     const { forTenantTransaction } = await import('../../src/db/tenantClient')
     expect(forTenantTransaction).toHaveBeenCalledWith('tenant-real', expect.any(Function))
+  })
+
+  it('reports interstate tax treatment when the configured place of supply differs', async () => {
+    tenantsFindFirstMock.mockResolvedValue({
+      id: 'tenant-real', business_name: 'Real Shop', city: 'Mumbai', state: 'Maharashtra', onboarding_step: 3, onboarding_completed_at: null,
+    })
+    staffFindFirstMock.mockResolvedValue({ id: 'staff-1', name: 'Real Owner' })
+    storesFindFirstMock.mockResolvedValue({
+      id: 'store-1', name: 'Bandra', city: 'Mumbai', state: 'Maharashtra', place_of_supply: 'Karnataka',
+      tax_rate_state: 0.09, tax_rate_county: 0.09, tax_rate_city: 0, tax_rate_district: 0,
+    })
+
+    const response = await request(await buildApp()).get('/context').set('Authorization', `Bearer ${tokenFor()}`)
+
+    expect(response.status).toBe(200)
+    expect(response.body.store.taxTreatment).toBe('igst')
   })
 
   it('caps invalid pagination and returns an honest empty customer record page', async () => {

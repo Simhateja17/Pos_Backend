@@ -1,7 +1,6 @@
 import type { NextFunction, Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
-import { getAuthCookies, setAuthCookies } from '../lib/authCookies'
 import { resolveRequestAccess } from './requestAccess'
 
 // supabase-js 2.110 initialises a Realtime client even though this API only
@@ -71,24 +70,18 @@ export function getStaffRoleClaim(claims: Record<string, unknown>): StaffRole | 
  */
 export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization
-  const cookies = getAuthCookies(req)
   const bearerToken = header?.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : undefined
-  let token = bearerToken ?? cookies.accessToken
 
-  if (!token) {
+  if (!bearerToken) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
-  let { data, error } = await supabase.auth.getUser(token)
-  if ((error || !data?.user) && !bearerToken && cookies.refreshToken) {
-    const refreshed = await supabase.auth.setSession({ access_token: token, refresh_token: cookies.refreshToken })
-    if (refreshed.data.session) {
-      token = refreshed.data.session.access_token
-      setAuthCookies(res, token, refreshed.data.session.refresh_token)
-      data = await supabase.auth.getUser(token).then((result) => result.data)
-      error = null
-    }
-  }
+  // The browser Supabase client is the sole owner of refresh-token rotation.
+  // Refreshing an HttpOnly-cookie copy here creates two independent owners of
+  // the same one-time token family; after an idle tab wakes, Supabase detects
+  // the older browser token as reused and revokes the whole session.
+  const token = bearerToken
+  const { data, error } = await supabase.auth.getUser(token)
   if (error || !data?.user) {
     return res.status(401).json({ error: 'Unauthorized' })
   }

@@ -6,7 +6,7 @@ import { SignupSchema, LoginSchema, OtpRequestSchema, SetPinSchema, OwnerPinReco
 import { STARTER_CATEGORIES } from '../contracts/schemas/category'
 import { authMiddleware, decodeJwtPayload, getStaffRoleClaim } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
-import { clearAuthCookies, getAuthCookies, setAuthCookies } from '../lib/authCookies'
+import { clearAuthCookies, getAuthCookies } from '../lib/authCookies'
 import { clearRegisterLockedCookie } from '../lib/counterDevice'
 
 const router = Router()
@@ -263,7 +263,9 @@ router.post('/signup', async (req, res) => {
 
     console.log(`[auth:signup] tenant=${tenantId} userId=${newUser.id} complete — 201`)
     res.set('Cache-Control', 'no-store')
-    setAuthCookies(res, refreshed.session.access_token, refreshed.session.refresh_token)
+    // Supabase's browser client owns this refresh-token family. Remove any
+    // cookie copies left by older releases so the backend cannot race it.
+    clearAuthCookies(res)
     // Older releases wrote a tenant-agnostic register-lock cookie. It must
     // never make this new store look like a locked counter before setup.
     clearRegisterLockedCookie(res)
@@ -346,7 +348,9 @@ router.post('/login', async (req, res) => {
   console.log(`[auth:login] userId=${data.user.id} role=${role} tenantId=${tenantId} — 200`)
 
   res.set('Cache-Control', 'no-store')
-  setAuthCookies(res, data.session.access_token, data.session.refresh_token)
+  // Supabase's browser client owns this refresh-token family. Remove any
+  // cookie copies left by older releases so the backend cannot race it.
+  clearAuthCookies(res)
   // A successful login may replace a prior tenant on this browser. Pairing is
   // still enforced from the database, but an old unscoped lock must not
   // strand the newly authenticated tenant at /context.
@@ -387,16 +391,15 @@ router.post('/logout', async (req, res) => {
 })
 
 router.get('/session', async (req, res) => {
-  const { accessToken, refreshToken } = getAuthCookies(req)
-  if (!accessToken && !refreshToken) return res.json({ authenticated: false })
-  const session = accessToken && refreshToken
-    ? await supabaseAnon.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-    : null
-  if (!session?.data.session) {
+  // Compatibility-only check for cookies issued by older deployments. Never
+  // refresh them: the current browser client is the single refresh owner.
+  const { accessToken } = getAuthCookies(req)
+  if (!accessToken) return res.json({ authenticated: false })
+  const { data, error } = await supabaseAnon.auth.getUser(accessToken)
+  if (error || !data.user) {
     clearAuthCookies(res)
     return res.json({ authenticated: false })
   }
-  setAuthCookies(res, session.data.session.access_token, session.data.session.refresh_token)
   return res.json({ authenticated: true })
 })
 

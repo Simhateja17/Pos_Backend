@@ -22,6 +22,7 @@ export const AppContextSchema = z
         name: z.string(),
         locality: z.string().nullable(),
         combinedTaxRatePercent: z.string(),
+        taxTreatment: z.enum(['cgst_sgst', 'igst']),
       })
       .nullable(),
     onboarding: z.object({

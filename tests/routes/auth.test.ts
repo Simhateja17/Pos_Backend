@@ -200,6 +200,10 @@ describe('POST /auth/signup and /auth/login', () => {
       accessToken: expect.any(String),
       refreshToken: 'refresh-token-1',
     })
+    expect(res.headers['set-cookie']).toEqual(expect.arrayContaining([
+      expect.stringContaining('couture_access_token=; Max-Age=0'),
+      expect.stringContaining('couture_refresh_token=; Max-Age=0'),
+    ]))
     expect(verifyOtpMock).toHaveBeenCalledWith({ email: 'owner@example.com', token: '123456', type: 'email' })
     expect(refreshSessionMock).toHaveBeenCalledWith({ refresh_token: 'temporary-refresh-token' })
     expect(tenantsCreateMock).toHaveBeenCalled()
@@ -262,6 +266,10 @@ describe('POST /auth/signup and /auth/login', () => {
       accessToken,
       refreshToken: 'refresh-token-2',
     })
+    expect(res.headers['set-cookie']).toEqual(expect.arrayContaining([
+      expect.stringContaining('couture_access_token=; Max-Age=0'),
+      expect.stringContaining('couture_refresh_token=; Max-Age=0'),
+    ]))
     expect(staffMembersFindFirstMock).not.toHaveBeenCalled()
   })
 
@@ -596,5 +604,33 @@ describe('POST /auth/logout', () => {
     expect(response.headers['set-cookie']).toEqual(expect.arrayContaining([
       expect.stringContaining('couture_access_token='),
     ]))
+  })
+})
+
+describe('GET /auth/session legacy-cookie compatibility', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    getUserMock.mockReset()
+    setSessionMock.mockReset()
+  })
+
+  it('validates an old access cookie without rotating its refresh-token family', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
+    const { default: authRouter } = await import('../../src/routes/auth')
+    const app = express()
+    app.use(express.json())
+    app.use('/auth', authRouter)
+
+    const response = await request(app)
+      .get('/auth/session')
+      .set('Cookie', [
+        'couture_access_token=legacy-access-token',
+        'couture_refresh_token=legacy-refresh-token',
+      ])
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ authenticated: true })
+    expect(getUserMock).toHaveBeenCalledWith('legacy-access-token')
+    expect(setSessionMock).not.toHaveBeenCalled()
   })
 })

@@ -19,11 +19,6 @@ function cookieOptions(maxAge: number) {
   ].join('; ')
 }
 
-export function setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
-  res.append('Set-Cookie', `${ACCESS_COOKIE}=${encodeURIComponent(accessToken)}; ${cookieOptions(60 * 60)}`)
-  res.append('Set-Cookie', `${REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; ${cookieOptions(60 * 60 * 24 * 30)}`)
-}
-
 export function clearAuthCookies(res: Response) {
   res.append('Set-Cookie', `${ACCESS_COOKIE}=; ${cookieOptions(0)}`)
   res.append('Set-Cookie', `${REFRESH_COOKIE}=; ${cookieOptions(0)}`)

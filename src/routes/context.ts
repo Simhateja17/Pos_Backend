@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { forTenantTransaction } from '../db/tenantClient'
+import { statesMatch } from '../services/taxDocuments'
 
 const router = Router()
 
@@ -53,6 +54,11 @@ router.get('/', async (req, res) => {
             .plus(store.tax_rate_district)
             .times(100)
             .toFixed(4),
+          // Keep the preview aligned with the GST document service. A missing
+          // place of supply means the sale is local to the store's state.
+          taxTreatment: statesMatch(store.state ?? tenant.state, store.place_of_supply ?? store.state ?? tenant.state)
+            ? 'cgst_sgst'
+            : 'igst',
         }
       : null,
     onboarding: {

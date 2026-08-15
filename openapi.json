@@ -579,13 +579,21 @@
               },
               "combinedTaxRatePercent": {
                 "type": "string"
+              },
+              "taxTreatment": {
+                "type": "string",
+                "enum": [
+                  "cgst_sgst",
+                  "igst"
+                ]
               }
             },
             "required": [
               "id",
               "name",
               "locality",
-              "combinedTaxRatePercent"
+              "combinedTaxRatePercent",
+              "taxTreatment"
             ]
           },
           "onboarding": {

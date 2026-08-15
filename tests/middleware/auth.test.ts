@@ -5,6 +5,7 @@ import request from 'supertest'
 // Mock @supabase/supabase-js BEFORE importing the module under test, since
 // auth.ts instantiates createClient() at module load time.
 const getUserMock = vi.fn()
+const setSessionMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 const billingFindFirstMock = vi.fn()
 const billingUpdateManyMock = vi.fn()
@@ -21,7 +22,7 @@ const forTenantTransactionMock = vi.fn(async (_tenantId: string, callback: (tx: 
 }))
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    auth: { getUser: getUserMock },
+    auth: { getUser: getUserMock, setSession: setSessionMock },
   }),
 }))
 
@@ -44,6 +45,7 @@ describe('authMiddleware', () => {
   beforeEach(() => {
     vi.resetModules()
     getUserMock.mockReset()
+    setSessionMock.mockReset().mockResolvedValue({ data: { session: null }, error: null })
     membershipFindFirstMock.mockReset()
     billingFindFirstMock.mockReset().mockResolvedValue(null)
     billingUpdateManyMock.mockReset()
@@ -116,6 +118,22 @@ describe('authMiddleware', () => {
 
     expect(res.status).toBe(401)
     expect(res.body).toEqual({ error: 'Unauthorized' })
+  })
+
+  it('never rotates a legacy refresh-token cookie when the browser session is unavailable', async () => {
+    getUserMock.mockResolvedValue({ data: { user: null }, error: { message: 'expired token' } })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .get('/whoami')
+      .set('Cookie', [
+        'couture_access_token=expired-access-token',
+        'couture_refresh_token=stale-refresh-token',
+      ])
+
+    expect(res.status).toBe(401)
+    expect(res.body).toEqual({ error: 'Unauthorized' })
+    expect(setSessionMock).not.toHaveBeenCalled()
   })
 
   it('Test 3: req.user.tenantId/role come only from JWT claims, never from a conflicting request body', async () => {

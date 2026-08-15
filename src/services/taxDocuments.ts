@@ -219,7 +219,7 @@ function stateNameFor(value: string | null | undefined): string | null {
   return Object.entries(INDIAN_STATE_CODES).find(([, code]) => code === canonical)?.[0] ?? canonical
 }
 
-function statesMatch(left: string | null, right: string | null): boolean {
+export function statesMatch(left: string | null, right: string | null): boolean {
   const leftCode = stateCodeFor(left)
   const rightCode = stateCodeFor(right)
   if (leftCode && rightCode) return leftCode === rightCode
