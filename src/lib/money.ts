@@ -22,6 +22,28 @@ export interface CheckoutResult {
   total: Prisma.Decimal
 }
 
+/**
+ * Tax rates in the database are decimal fractions: 0.18 means 18%.
+ *
+ * Keep this invariant at the money boundary as a last line of defence. A
+ * percentage-shaped value such as 18 would otherwise turn a ₹2,499 sale into
+ * ₹47,481 while still looking like valid Decimal arithmetic.
+ */
+export class InvalidTaxRateError extends Error {
+  readonly code = 'invalid_tax_rate'
+
+  constructor() {
+    super('Tax rate must be a decimal fraction between 0 and 1')
+    this.name = 'InvalidTaxRateError'
+  }
+}
+
+function assertTaxRateFraction(taxRate: Prisma.Decimal): void {
+  if (taxRate.isNegative() || taxRate.greaterThan(1)) {
+    throw new InvalidTaxRateError()
+  }
+}
+
 // Server-authoritative Decimal-based tax/discount computation. This is the
 // ONLY place checkout math happens — routes (03-03) call this rather than
 // re-deriving tax/discount logic inline. Partitions taxable vs. exempt line
@@ -30,6 +52,7 @@ export interface CheckoutResult {
 // discounted taxable subtotal using ROUND_HALF_UP (D-03).
 export function computeCheckout(input: CheckoutInput): CheckoutResult {
   const ZERO = new Prisma.Decimal(0)
+  assertTaxRateFraction(input.taxRate)
   let subtotal = ZERO
   let taxableSubtotal = ZERO
 

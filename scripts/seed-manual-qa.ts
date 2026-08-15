@@ -31,6 +31,12 @@ const PIN = {
 const START_DATE = new Date(Date.UTC(2025, 4, 1))
 const END_DATE = new Date(Date.UTC(2026, 7, 10))
 const INDIA_TZ = 'Asia/Kolkata'
+// Tax columns store decimal fractions, not human percentages: 0.18 means 18%.
+// Keeping the split derived from one constant prevents a seed reset from
+// reintroducing the percentage-vs-fraction billing bug.
+const QA_GST_RATE = 0.18
+const QA_STATE_TAX_RATE = QA_GST_RATE / 2
+const QA_COUNTY_TAX_RATE = QA_GST_RATE / 2
 
 type UUID = string
 type StoreSpec = {
@@ -339,8 +345,8 @@ async function main(): Promise<void> {
         'IN',
         store.active,
         store.starts,
-        9,
-        9,
+        QA_STATE_TAX_RATE,
+        QA_COUNTY_TAX_RATE,
         0,
         0,
         'per_invoice',
@@ -361,8 +367,8 @@ async function main(): Promise<void> {
       'IN',
       true,
       START_DATE,
-      9,
-      9,
+      QA_STATE_TAX_RATE,
+      QA_COUNTY_TAX_RATE,
       0,
       0,
       'per_invoice',
@@ -382,8 +388,8 @@ async function main(): Promise<void> {
       'IN',
       true,
       START_DATE,
-      9,
-      9,
+      QA_STATE_TAX_RATE,
+      QA_COUNTY_TAX_RATE,
       0,
       0,
       'per_invoice',
@@ -428,9 +434,9 @@ async function main(): Promise<void> {
     ]
 
     const tenantRows = [
-      [mainTenantId, 'QA - Anvaya Fashion House (Manual QA)', '1 QA Main Road', null, 'Bengaluru', 'Karnataka', '560001', 'IN', '29ABCDE1234F1Z5', 15, 9, 9, 0, 0, 'per_invoice', { qaSeed: QA_SEED, purpose: 'manual multi-store QA', historyStart: '2025-05-01', storeCount: 10 }, 8, new Date(), INDIA_TZ, 'QA - Anvaya', 'regular', 'ABCDE1234F', '29', 'fashion_retail', 'code128'],
-      [isolationATenantId, 'QA - Isolation Tenant A', '1 QA Isolation Road', null, 'Bengaluru', 'Karnataka', '560001', 'IN', null, 15, 9, 9, 0, 0, 'per_invoice', { qaSeed: QA_SEED, purpose: 'cross-tenant isolation A' }, 8, new Date(), INDIA_TZ, 'QA Isolation A', 'unregistered', null, '29', 'fashion_retail', 'code128'],
-      [isolationBTenantId, 'QA - Isolation Tenant B', '1 QA Isolation Road', null, 'Mysuru', 'Karnataka', '570001', 'IN', null, 15, 9, 9, 0, 0, 'per_invoice', { qaSeed: QA_SEED, purpose: 'cross-tenant isolation B' }, 8, new Date(), INDIA_TZ, 'QA Isolation B', 'unregistered', null, '29', 'fashion_retail', 'code128'],
+      [mainTenantId, 'QA - Anvaya Fashion House (Manual QA)', '1 QA Main Road', null, 'Bengaluru', 'Karnataka', '560001', 'IN', '29ABCDE1234F1Z5', 15, QA_STATE_TAX_RATE, QA_COUNTY_TAX_RATE, 0, 0, 'per_invoice', { qaSeed: QA_SEED, purpose: 'manual multi-store QA', historyStart: '2025-05-01', storeCount: 10 }, 8, new Date(), INDIA_TZ, 'QA - Anvaya', 'regular', 'ABCDE1234F', '29', 'fashion_retail', 'code128'],
+      [isolationATenantId, 'QA - Isolation Tenant A', '1 QA Isolation Road', null, 'Bengaluru', 'Karnataka', '560001', 'IN', null, 15, QA_STATE_TAX_RATE, QA_COUNTY_TAX_RATE, 0, 0, 'per_invoice', { qaSeed: QA_SEED, purpose: 'cross-tenant isolation A' }, 8, new Date(), INDIA_TZ, 'QA Isolation A', 'unregistered', null, '29', 'fashion_retail', 'code128'],
+      [isolationBTenantId, 'QA - Isolation Tenant B', '1 QA Isolation Road', null, 'Mysuru', 'Karnataka', '570001', 'IN', null, 15, QA_STATE_TAX_RATE, QA_COUNTY_TAX_RATE, 0, 0, 'per_invoice', { qaSeed: QA_SEED, purpose: 'cross-tenant isolation B' }, 8, new Date(), INDIA_TZ, 'QA Isolation B', 'unregistered', null, '29', 'fashion_retail', 'code128'],
     ]
 
     const subscriptionRows = [
@@ -558,7 +564,7 @@ async function main(): Promise<void> {
           const subtotal = roundMoney(lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0))
           const discountAmount = roundMoney(lines.reduce((sum, line) => sum + line.discountAmount, 0))
           const taxable = lines.filter((line) => line.variant.taxable).reduce((sum, line) => sum + line.lineTotal, 0)
-          const taxAmount = roundMoney(taxable * 0.18)
+          const taxAmount = roundMoney(taxable * QA_GST_RATE)
           const totalAmount = roundMoney(subtotal - discountAmount + taxAmount)
           const createdAt = atIstHour(day, 10 + ((saleIndex + dayIndex) % 8))
           const id = stableUuid(`sale:main:${store.key}:${dateKey(day)}:${saleIndex}`)
@@ -720,7 +726,7 @@ async function main(): Promise<void> {
         const lineId = stableUuid(`tax-invoice-line:${sale.id}:${line.id}`)
         lineIds.set(line.id, lineId)
         const lineTax = line.variant.taxable ? roundMoney((line.lineTotal / sale.lines.filter((candidate) => candidate.variant.taxable).reduce((sum, candidate) => sum + candidate.lineTotal, 0)) * sale.taxAmount) : 0
-        return [lineId, mainTenantId, invoiceId, index + 1, line.id, null, line.variant.id, `${line.variant.productName} ${line.variant.size ?? ''}`.trim(), line.variant.sku, line.variant.hsnSac, line.variant.unit, line.quantity, line.unitPrice, roundMoney(line.unitPrice * line.quantity), line.discountAmount, line.variant.taxable ? line.lineTotal : 0, line.variant.taxable ? 18 : 0, line.variant.taxable ? roundMoney(lineTax / 2) : 0, line.variant.taxable ? roundMoney(lineTax - roundMoney(lineTax / 2)) : 0, 0, 0, roundMoney(line.lineTotal + lineTax)]
+        return [lineId, mainTenantId, invoiceId, index + 1, line.id, null, line.variant.id, `${line.variant.productName} ${line.variant.size ?? ''}`.trim(), line.variant.sku, line.variant.hsnSac, line.variant.unit, line.quantity, line.unitPrice, roundMoney(line.unitPrice * line.quantity), line.discountAmount, line.variant.taxable ? line.lineTotal : 0, line.variant.taxable ? QA_GST_RATE * 100 : 0, line.variant.taxable ? roundMoney(lineTax / 2) : 0, line.variant.taxable ? roundMoney(lineTax - roundMoney(lineTax / 2)) : 0, 0, 0, roundMoney(line.lineTotal + lineTax)]
       })
       invoiceLineRows.push(...invoiceLineValues)
       invoiceRows.push([
@@ -742,7 +748,7 @@ async function main(): Promise<void> {
         JSON.stringify(sale.payments),
         sale.subtotal,
         sale.discountAmount,
-        roundMoney(sale.taxAmount / 0.18),
+        roundMoney(sale.taxAmount / QA_GST_RATE),
         cgst,
         roundMoney(sale.taxAmount - cgst),
         0,
@@ -764,7 +770,7 @@ async function main(): Promise<void> {
       const returnReferenceId = stableUuid(`return-reference:${sale.id}`)
       const documentNumber = `C${mainStoreIndex.get(sale.store.key)! + 1}-${invoice.fy.replace('-', '')}-${String(sequence).padStart(4, '0')}`
       const originalLineId = invoice.lineIds.get(returnedLine.id)!
-      const refundTax = returnedLine.variant.taxable ? roundMoney(returnedLine.lineTotal * 0.18) : 0
+      const refundTax = returnedLine.variant.taxable ? roundMoney(returnedLine.lineTotal * QA_GST_RATE) : 0
       const refundTotal = roundMoney(returnedLine.lineTotal + refundTax)
       creditNoteRows.push([
         creditId,
@@ -812,7 +818,7 @@ async function main(): Promise<void> {
         roundMoney(returnedLine.unitPrice * returnedLine.quantity),
         returnedLine.discountAmount,
         returnedLine.variant.taxable ? returnedLine.lineTotal : 0,
-        returnedLine.variant.taxable ? 18 : 0,
+        returnedLine.variant.taxable ? QA_GST_RATE * 100 : 0,
         returnedLine.variant.taxable ? roundMoney(refundTax / 2) : 0,
         returnedLine.variant.taxable ? roundMoney(refundTax - roundMoney(refundTax / 2)) : 0,
         0,

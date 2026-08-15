@@ -432,6 +432,12 @@ router.post('/', async (req, res) => {
       }
     }
   } catch (err: any) {
+    // A store tax profile is persisted as a decimal fraction. Refuse the sale
+    // if corrupted data ever bypasses the database guard; never record a sale
+    // using a percentage-shaped value such as 18.
+    if (err?.code === 'invalid_tax_rate') {
+      return res.status(500).json({ error: 'Store tax configuration is invalid. Sale was not recorded.' })
+    }
     // OFFLINE-01 race path. Two concurrent submissions of the same
     // client_sale_id both miss the fast-path lookup, both compute, and both
     // attempt the insert; the unique index from 0017 lets exactly one commit

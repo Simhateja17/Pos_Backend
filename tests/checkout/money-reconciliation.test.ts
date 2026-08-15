@@ -77,4 +77,23 @@ describe('computeCheckout', () => {
     expect(result.tax.toString()).toBe('2.89')
     expect(result.total.toString()).toBe('37.89')
   })
+
+  it('Test 6: an 18% rate is represented as 0.18 and produces the correct total', () => {
+    const result = computeCheckout({
+      lines: [{ price: D('2499.00'), quantity: 1, isTaxable: true }],
+      taxRate: D('0.18'),
+    })
+
+    expect(result.tax.toString()).toBe('449.82')
+    expect(result.total.toString()).toBe('2948.82')
+  })
+
+  it('Test 7: rejects a percentage-shaped rate before it can inflate a sale total', () => {
+    expect(() =>
+      computeCheckout({
+        lines: [{ price: D('2499.00'), quantity: 1, isTaxable: true }],
+        taxRate: D('18'),
+      }),
+    ).toThrow(/decimal fraction between 0 and 1/i)
+  })
 })
