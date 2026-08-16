@@ -1,5 +1,5 @@
 /**
- * ONBOARD-02 — server-side CSV parsing.
+ * ONBOARD-02 — server-side CSV parsing primitives.
  *
  * This runs on the server and never trusts client-parsed rows, because what it
  * produces is written to the sale ledger. It also has to survive what real POS
@@ -13,13 +13,13 @@
 export const MAX_FILE_BYTES = 5 * 1024 * 1024
 export const MAX_ROWS = 50_000
 
-export type CsvEncoding = 'utf-8' | 'utf-8-bom' | 'windows-1252'
+export type SourceEncoding = 'utf-8' | 'utf-8-bom' | 'windows-1252' | 'excel-xls' | 'excel-xlsx'
 
 export type ParsedCsv = {
   columns: string[]
   rows: Record<string, string>[]
   delimiter: string
-  encoding: CsvEncoding
+  encoding: SourceEncoding
   /** Rows that were entirely empty and dropped — reported, never silently eaten. */
   blankRowsSkipped: number
   /** Rows whose field count did not match the header. Padded, and counted here. */
@@ -34,7 +34,7 @@ export class CsvParseError extends Error {}
  * decoding it as UTF-8 with replacement characters would corrupt every accented
  * product name rather than fail loudly.
  */
-export function decodeCsvBuffer(buffer: Buffer): { text: string; encoding: CsvEncoding } {
+export function decodeCsvBuffer(buffer: Buffer): { text: string; encoding: SourceEncoding } {
   if (buffer.length > MAX_FILE_BYTES) {
     throw new CsvParseError(
       `File is ${(buffer.length / 1024 / 1024).toFixed(1)} MB. The limit is ${MAX_FILE_BYTES / 1024 / 1024} MB — split it and import in parts.`,
@@ -164,7 +164,7 @@ export function parseCsvUpload(buffer: Buffer, options: { delimiter?: string; ma
   return { ...parseCsv(text, options), encoding }
 }
 
-export function parseCsv(text: string, options: { delimiter?: string; maxRows?: number; encoding?: CsvEncoding } = {}): ParsedCsv {
+export function parseCsv(text: string, options: { delimiter?: string; maxRows?: number; encoding?: SourceEncoding } = {}): ParsedCsv {
   const maxRows = options.maxRows ?? MAX_ROWS
   const firstLineBreak = text.search(/\r?\n/)
   const headerLine = firstLineBreak === -1 ? text : text.slice(0, firstLineBreak)

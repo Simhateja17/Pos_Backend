@@ -10587,7 +10587,7 @@
     },
     "/import/uploads": {
       "post": {
-        "description": "Parse a catalog or sales CSV server-side and stage it for review. Writes nothing to the ledger. Owner-only.",
+        "description": "Parse a catalog or sales CSV/XLS/XLSX server-side and stage it for review. Writes nothing to the ledger. Owner-only.",
         "requestBody": {
           "content": {
             "application/json": {

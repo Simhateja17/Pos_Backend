@@ -8,8 +8,9 @@ import {
   targetFieldsFor,
   type ImportKind,
 } from '../contracts/schemas/import'
-import { CsvParseError, MAX_FILE_BYTES, decodeCsvBuffer, parseCsvUpload } from '../services/csv-parse'
+import { CsvParseError, MAX_FILE_BYTES, parseCsvUpload } from '../services/csv-parse'
 import { ImportCommitError, commitImport, hashFile } from '../services/import-commit'
+import { parseImportFile } from '../services/import-file-parse'
 import { suggestMapping } from '../services/import-mapping'
 
 const router = Router()
@@ -17,8 +18,8 @@ const router = Router()
 const SAMPLE_ROWS = 10
 
 function toBatchJson(batch: any) {
-  // Re-parse from the stored bytes rather than trusting anything a client
-  // holds between preview and commit.
+  // Re-parse from the stored normalized source rather than trusting anything
+  // a client holds between preview and commit.
   const parsed = parseCsvSafe(batch.source_text)
   const columns = (batch.source_columns as string[]) ?? parsed?.columns ?? []
 
@@ -81,7 +82,7 @@ router.post('/uploads', requireRole('owner'), async (req, res) => {
 
   let parsed
   try {
-    parsed = parseCsvUpload(buffer)
+    parsed = parseImportFile(buffer, parsedBody.data.fileName)
   } catch (error) {
     if (error instanceof CsvParseError) return res.status(400).json({ error: error.message })
     throw error
@@ -112,8 +113,9 @@ router.post('/uploads', requireRole('owner'), async (req, res) => {
       file_name: parsedBody.data.fileName,
       file_hash: fileHash,
       file_size_bytes: buffer.length,
-      // Stored decoded, so a Windows-1252 export re-parses identically at commit.
-      source_text: decodeCsvBuffer(buffer).text,
+      // Stored normalized, so CSV decoding and Excel worksheet extraction are
+      // identical at preview and commit time.
+      source_text: parsed.sourceText,
       source_columns: parsed.columns as any,
       row_count: parsed.rows.length,
       status: 'pending',

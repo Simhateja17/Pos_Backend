@@ -1352,7 +1352,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/import/uploads',
-  description: 'Parse a catalog or sales CSV server-side and stage it for review. Writes nothing to the ledger. Owner-only.',
+  description: 'Parse a catalog or sales CSV/XLS/XLSX server-side and stage it for review. Writes nothing to the ledger. Owner-only.',
   request: { body: { content: { 'application/json': { schema: UploadImportSchema } } } },
   responses: {
     201: { description: 'File parsed and staged', content: { 'application/json': { schema: ImportBatchSchema } } },
