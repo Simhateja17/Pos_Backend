@@ -7,7 +7,7 @@ export const ImportKindSchema = z.enum(['catalog', 'sales']).openapi('ImportKind
 
 /**
  * The fields an import can write to. Everything else in the file is preserved
- * in `source_metadata` rather than discarded (ONBOARD-03), so this list is
+ * in `source_metadata` rather than discarded (ONBOARD-03), so this  list is
  * deliberately small — it covers what the POS can act on, not everything a
  * previous system happened to store.
  */
