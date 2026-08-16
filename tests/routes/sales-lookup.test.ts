@@ -136,7 +136,12 @@ describe('returns sale lookup', () => {
     expect(response.body).toHaveLength(1)
     expect(response.body[0].id).toBe(saleId)
     expect(salesFindManyMock).toHaveBeenCalledWith({
-      where: { id: { startsWith: 'dcfb11a0' } },
+      where: {
+        id: {
+          gte: 'dcfb11a0-0000-0000-0000-000000000000',
+          lte: 'dcfb11a0-ffff-ffff-ffff-ffffffffffff',
+        },
+      },
       orderBy: { created_at: 'desc' },
       take: 50,
     })

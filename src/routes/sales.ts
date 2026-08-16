@@ -20,7 +20,7 @@ const ZERO = new Prisma.Decimal(0)
 const RECEIPT_RESEND_COOLDOWN_MS = 60 * 1000
 const RECEIPT_RESEND_TENANT_WINDOW_MS = 60 * 60 * 1000
 const RECEIPT_RESEND_TENANT_LIMIT = 100
-const SALE_ID_PREFIX_PATTERN = /^[0-9a-f]{8,36}$/i
+const SALE_ID_PREFIX_PATTERN = /^[0-9a-f]{8}$/i
 const LOOKUP_LOG_PREFIX = '[returns:lookup]'
 
 // D-05 body-dependent role gate — mirrors stockMovements.ts's isAllowedToAdjust
@@ -115,7 +115,17 @@ function toSaleJson(
 function saleIdSearchFilters(search: string): any[] {
   if (z.string().uuid().safeParse(search).success) return [{ id: search }]
   if (SALE_ID_PREFIX_PATTERN.test(search)) {
-    return [{ id: { startsWith: search.toLowerCase() } }]
+    // Prisma models this column as PostgreSQL UUID, whose filter does not
+    // support string operators such as startsWith. The Sales/Bills fallback
+    // is exactly the UUID's first eight hex characters, so an inclusive UUID
+    // range represents that prefix without raw SQL or a tenant-scope bypass.
+    const prefix = search.toLowerCase()
+    return [{
+      id: {
+        gte: `${prefix}-0000-0000-0000-000000000000`,
+        lte: `${prefix}-ffff-ffff-ffff-ffffffffffff`,
+      },
+    }]
   }
   return []
 }
