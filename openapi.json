@@ -2531,6 +2531,12 @@
           "price": {
             "type": "string"
           },
+          "movingAverageCost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "isTaxable": {
             "type": "boolean"
           },
@@ -2557,6 +2563,7 @@
           "color",
           "material",
           "price",
+          "movingAverageCost",
           "isTaxable",
           "reorderThreshold",
           "identityLocked",

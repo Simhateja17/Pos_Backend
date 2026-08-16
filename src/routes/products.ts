@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type Request } from 'express'
 import { z } from 'zod'
 import { CreateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
 import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
@@ -22,13 +22,24 @@ type VariantRow = {
   color: string | null
   material: string | null
   price: unknown // Prisma Decimal
+  moving_average_cost: unknown | null // Prisma Decimal; null until cost basis exists
   is_taxable: boolean
   reorder_threshold: unknown // Prisma Decimal since 0031
   identity_locked: boolean
   created_at: Date
 }
 
-function toVariantJson(row: VariantRow, currentStock: number, effectivePrice: unknown = row.price) {
+function canReadCostBasis(req: Request): boolean {
+  const role = req.actingStaff?.role ?? req.user?.role
+  return role === 'owner' || role === 'manager'
+}
+
+function toVariantJson(
+  row: VariantRow,
+  currentStock: number,
+  effectivePrice: unknown = row.price,
+  includeCostBasis = true,
+) {
   return {
     id: row.id,
     productId: row.product_id,
@@ -39,6 +50,10 @@ function toVariantJson(row: VariantRow, currentStock: number, effectivePrice: un
     color: row.color,
     material: row.material,
     price: effectivePrice!.toString(),
+    // Unit costs are a management fact. Cashiers still receive the catalog
+    // needed for checkout, but not supplier cost data through that endpoint.
+    movingAverageCost:
+      includeCostBasis && row.moving_average_cost != null ? row.moving_average_cost.toString() : null,
     isTaxable: row.is_taxable,
     reorderThreshold: Number(row.reorder_threshold),
     identityLocked: row.identity_locked,
@@ -176,13 +191,14 @@ router.get('/', async (req, res) => {
     ? await effectivePricesForVariants(client, activeStoreId(req), variantRows as any)
     : variantRows.map((variant) => variant.price)
   const effectivePriceByVariant = new Map(variantRows.map((variant, index) => [variant.id, effectivePrices[index]]))
+  const includeCostBasis = canReadCostBasis(req)
 
   res.json(
     products.map((product: any) =>
       toProductJson(
         product,
         product.variants.map((v: VariantRow) =>
-          toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0), effectivePriceByVariant.get(v.id)),
+          toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0), effectivePriceByVariant.get(v.id), includeCostBasis),
         ),
         categoryNameById,
       ),
@@ -209,8 +225,9 @@ router.get('/:productId', async (req, res) => {
   const effectivePrices = req.storeContext?.scope === 'store'
     ? await effectivePricesForVariants(client, activeStoreId(req), variants)
     : variants.map((variant: any) => variant.price)
+  const includeCostBasis = canReadCostBasis(req)
   const variantJson = variants.map((v: VariantRow, index: number) =>
-    toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0), effectivePrices[index]),
+    toVariantJson(v, Number(stockByVariant.get(v.id) ?? 0), effectivePrices[index], includeCostBasis),
   )
   res.json(toProductJson(product, variantJson, await categoryNames(client)))
 })

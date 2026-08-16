@@ -91,6 +91,7 @@ describe('products routes — variants (CATALOG-01)', () => {
       tenant_id: 'tenant-abc',
     }))
     variantsFindFirstMock.mockResolvedValue(null) // no SKU collisions by default
+    variantStockLevelsFindManyMock.mockResolvedValue([])
   })
 
   async function buildApp() {
@@ -98,6 +99,12 @@ describe('products routes — variants (CATALOG-01)', () => {
     const { default: productsRouter } = await import('../../src/routes/products')
     const app = express()
     app.use(express.json())
+    // The production router is mounted after storeContextMiddleware. This
+    // fixture exercises the business-wide read shape used by an owner.
+    app.use((req, _res, next) => {
+      req.storeContext = { scope: 'business', activeStoreId: null, actingRemotely: false }
+      next()
+    })
     app.use('/products', authMiddleware, productsRouter)
     return app
   }
@@ -173,5 +180,44 @@ describe('products routes — variants (CATALOG-01)', () => {
 
     expect(res.status).toBe(400)
     expect(productsCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('GET /products includes the moving-average cost used for inventory valuation', async () => {
+    productsFindManyMock.mockResolvedValue([
+      {
+        id: 'product-3',
+        name: 'Costed Kurta',
+        category_id: null,
+        category: null,
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        variants: [
+          {
+            id: 'variant-3',
+            product_id: 'product-3',
+            sku: 'COST-0001',
+            barcode: null,
+            unit_of_measure: 'piece',
+            size: 'M',
+            color: 'Blue',
+            material: null,
+            price: '1000.00',
+            moving_average_cost: '400.00',
+            is_taxable: true,
+            reorder_threshold: '3',
+            identity_locked: false,
+            created_at: new Date('2026-01-01T00:00:00Z'),
+          },
+        ],
+      },
+    ])
+    variantStockLevelsFindManyMock.mockResolvedValue([{ variant_id: 'variant-3', quantity: '3' }])
+
+    const app = await buildApp()
+    const res = await request(app)
+      .get('/products')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body[0].variants[0]).toEqual(expect.objectContaining({ movingAverageCost: '400.00', currentStock: 3 }))
   })
 })
