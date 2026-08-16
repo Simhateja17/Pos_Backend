@@ -67,13 +67,13 @@ export const CustomerPurchaseListSchema = z
   .openapi('CustomerPurchaseList')
 
 const customerAddressFields = {
-  addressLine1: z.string().trim().max(200).optional(),
-  addressLine2: z.string().trim().max(200).optional(),
-  city: z.string().trim().max(100).optional(),
-  stateCode: z.string().trim().max(100).optional(),
-  postalCode: z.string().trim().max(20).optional(),
-  country: z.string().trim().max(2).optional(),
-  notes: z.string().trim().max(1000).optional(),
+  addressLine1: z.string().trim().max(200).nullable().optional(),
+  addressLine2: z.string().trim().max(200).nullable().optional(),
+  city: z.string().trim().max(100).nullable().optional(),
+  stateCode: z.string().trim().max(100).nullable().optional(),
+  postalCode: z.string().trim().max(20).nullable().optional(),
+  country: z.string().trim().max(2).nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
 }
 
 // CUST-01: a fully anonymous walk-in sale is allowed (per UI-SPEC copy contract),
@@ -83,11 +83,11 @@ export const CreateCustomerInputSchema = z
   .object({
     // `name` is retained for checkout compatibility. Manual profile writes
     // should use billingName, but both fields describe the same customer name.
-    name: z.string().trim().max(200).optional(),
-    billingName: z.string().trim().max(200).optional(),
-    phone: z.string().trim().max(40).optional(),
-    email: z.string().trim().email().max(200).optional(),
-    gstin: z.string().trim().max(15).optional(),
+    name: z.string().trim().max(200).nullable().optional(),
+    billingName: z.string().trim().max(200).nullable().optional(),
+    phone: z.string().trim().max(40).nullable().optional(),
+    email: z.string().trim().email().max(200).nullable().optional(),
+    gstin: z.string().trim().max(15).nullable().optional(),
     ...customerAddressFields,
   })
   .refine((c) => !!c.phone || !!c.email, {

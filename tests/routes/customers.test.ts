@@ -123,6 +123,44 @@ describe('customer profile routes', () => {
     }))
   })
 
+  it('accepts null for optional fields sent by the manual customer form', async () => {
+    const app = await buildApp('cashier')
+    const response = await request(app).post('/customers').send({
+      billingName: 'hi',
+      phone: '+916309599582',
+      email: 'simhateja17@gmail.co',
+      gstin: null,
+      addressLine1: '2/61, Eguva Mandapalli',
+      addressLine2: null,
+      city: 'Rajampet',
+      stateCode: '28',
+      postalCode: '516150',
+      country: 'IN',
+      notes: null,
+    })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toMatchObject({
+      billingName: 'hi',
+      phone: '+916309599582',
+      email: 'simhateja17@gmail.co',
+      addressLine1: '2/61, Eguva Mandapalli',
+      addressLine2: null,
+      city: 'Rajampet',
+      stateCode: '28',
+      postalCode: '516150',
+      country: 'IN',
+      notes: null,
+    })
+    expect(customersCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        gstin: null,
+        address_line2: null,
+        notes: null,
+      }),
+    }))
+  })
+
   it('returns 409 for an existing identity and never guesses a collision', async () => {
     const app = await buildApp()
     customersFindManyMock.mockResolvedValue([customerRow()])
