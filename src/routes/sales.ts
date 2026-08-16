@@ -21,6 +21,7 @@ const RECEIPT_RESEND_COOLDOWN_MS = 60 * 1000
 const RECEIPT_RESEND_TENANT_WINDOW_MS = 60 * 60 * 1000
 const RECEIPT_RESEND_TENANT_LIMIT = 100
 const SALE_ID_PREFIX_PATTERN = /^[0-9a-f]{8,36}$/i
+const LOOKUP_LOG_PREFIX = '[returns:lookup]'
 
 // D-05 body-dependent role gate — mirrors stockMovements.ts's isAllowedToAdjust
 // exactly, reusing the same ROLE_RANK import and acting-identity precedence
@@ -117,6 +118,36 @@ function saleIdSearchFilters(search: string): any[] {
     return [{ id: { startsWith: search.toLowerCase() } }]
   }
   return []
+}
+
+function lookupLogContext(req: import('express').Request): string {
+  const tenantId = req.user?.tenantId
+  const storeId = req.storeContext?.activeStoreId ?? req.user?.storeId
+  const role = req.actingStaff?.role ?? req.user?.role ?? 'unknown'
+  const scope = req.storeContext?.scope ?? 'unknown'
+  return `tenant=${tenantId?.slice(0, 8) ?? 'unknown'} store=${storeId?.slice(0, 8) ?? 'unknown'} role=${role} scope=${scope}`
+}
+
+function lookupLogValue(value: string | undefined): string {
+  if (!value) return 'none'
+  return value.length <= 24 ? value : `${value.slice(0, 12)}…${value.slice(-6)}`
+}
+
+function logLookup(req: import('express').Request, message: string) {
+  console.log(`${LOOKUP_LOG_PREFIX} ${lookupLogContext(req)} ${message}`)
+}
+
+async function withLookupLogging<T>(
+  req: import('express').Request,
+  operation: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await action()
+  } catch (error) {
+    console.error(`${LOOKUP_LOG_PREFIX} ${lookupLogContext(req)} operation=${operation} failed`, error)
+    throw error
+  }
 }
 
 async function searchTaxInvoiceSaleIds(client: any, req: import('express').Request, search: string): Promise<string[]> {
@@ -642,8 +673,13 @@ router.get('/', async (req, res) => {
   const receiptLookup = receiptNumber?.trim()
   const customerLookup = customerSearch?.trim()
   if (!receiptLookup && !customerLookup) {
+    logLookup(req, 'rejected reason=missing_search_input')
     return res.status(400).json({ error: 'receiptNumber or customerSearch query parameter is required' })
   }
+  logLookup(
+    req,
+    `start mode=${receiptLookup ? 'receipt' : 'customer'} receipt=${lookupLogValue(receiptLookup)} customerSearchLength=${customerLookup?.length ?? 0}`,
+  )
   const client = forTenant(req.user!.tenantId) as any
   let sales: any[] = []
   if (receiptLookup) {
@@ -657,27 +693,37 @@ router.get('/', async (req, res) => {
     // fallback reference here too. Use findMany for prefixes so a collision
     // is presented to the operator instead of silently choosing one sale.
     if (z.string().uuid().safeParse(receiptLookup).success) {
-      const sale = await client.sales.findFirst({ where: { id: receiptLookup } })
+      logLookup(req, `branch=receipt_uuid value=${lookupLogValue(receiptLookup)}`)
+      const sale = await withLookupLogging<any>(req, 'sale-by-uuid', () => client.sales.findFirst({ where: { id: receiptLookup } }))
       sales = sale ? [sale] : []
     } else {
-      const document = await client.tax_documents.findFirst({
-        where: {
-          document_type: 'tax_invoice',
-          document_number: { equals: receiptLookup, mode: 'insensitive' },
-        },
-        select: { sale_id: true },
-      })
+      logLookup(req, `branch=tax_invoice_or_prefix value=${lookupLogValue(receiptLookup)}`)
+      const document = await withLookupLogging<{ sale_id: string } | null>(req, 'tax-invoice-by-number', () =>
+        client.tax_documents.findFirst({
+          where: {
+            document_type: 'tax_invoice',
+            document_number: { equals: receiptLookup, mode: 'insensitive' },
+          },
+          select: { sale_id: true },
+        }),
+      )
       if (document) {
-        const sale = await client.sales.findFirst({ where: { id: document.sale_id } })
+        const sale = await withLookupLogging<any>(req, 'sale-by-tax-invoice', () => client.sales.findFirst({ where: { id: document.sale_id } }))
         sales = sale ? [sale] : []
+        logLookup(req, `branch=tax_invoice sale=${lookupLogValue(document.sale_id)} matches=${sales.length}`)
       } else {
         const saleIdFilter = saleIdSearchFilters(receiptLookup)[0]
         if (saleIdFilter) {
-          sales = await client.sales.findMany({
-            where: saleIdFilter,
-            orderBy: { created_at: 'desc' },
-            take: 50,
-          })
+          sales = await withLookupLogging<any[]>(req, 'sale-by-prefix', () =>
+            client.sales.findMany({
+              where: saleIdFilter,
+              orderBy: { created_at: 'desc' },
+              take: 50,
+            }),
+          )
+          logLookup(req, `branch=sale_prefix matches=${sales.length}`)
+        } else {
+          logLookup(req, 'branch=unsupported_receipt_format matches=0')
         }
       }
     }
@@ -686,16 +732,23 @@ router.get('/', async (req, res) => {
     // operator-facing customer search, so names, email addresses, and phone
     // numbers should all resolve instead of cashier requests being silently
     // reduced to phone-only matches.
-    const customers = await searchCustomers(client, customerLookup)
+    logLookup(req, `branch=customer_search searchLength=${customerLookup.length}`)
+    const customers = await withLookupLogging<Array<{ id: string }>>(req, 'customer-search', () => searchCustomers(client, customerLookup))
     const customerIds = customers.map((c: { id: string }) => c.id)
-    sales = customerIds.length > 0 ? await client.sales.findMany({ where: { customer_id: { in: customerIds } }, orderBy: { created_at: 'desc' } }) : []
+    sales = customerIds.length > 0
+      ? await withLookupLogging<any[]>(req, 'sales-by-customer', () => client.sales.findMany({ where: { customer_id: { in: customerIds } }, orderBy: { created_at: 'desc' } }))
+      : []
+    logLookup(req, `branch=customer_search customers=${customerIds.length} matches=${sales.length}`)
   }
+  if (sales.length === 0) logLookup(req, 'result=no_match')
   const result = []
   for (const sale of sales) {
-    const lines = await client.sale_line_items.findMany({ where: { sale_id: sale.id } })
-    const payments = await client.payments.findMany({ where: { sale_id: sale.id } })
+    const saleKey = lookupLogValue(sale.id)
+    const lines = await withLookupLogging<any[]>(req, `sale-lines:${saleKey}`, () => client.sale_line_items.findMany({ where: { sale_id: sale.id } }))
+    const payments = await withLookupLogging<any[]>(req, `sale-payments:${saleKey}`, () => client.payments.findMany({ where: { sale_id: sale.id } }))
     result.push(toSaleJson(sale, lines, payments))
   }
+  logLookup(req, `result=ok matches=${sales.length} responseRows=${result.length}`)
   return res.json(result)
 })
 
