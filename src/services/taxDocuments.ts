@@ -808,17 +808,23 @@ export async function readTaxDocument(tx: any, tenantId: string, documentId: str
   return result
 }
 
+async function lockTaxInvoiceSale(tx: any, tenantId: string, saleId: string): Promise<string | null> {
+  const rows = await tx.$queryRaw<Array<{ sale_id: string | null }>>`
+    SELECT public.lock_tax_invoice_sale(
+      ${tenantId}::uuid,
+      ${saleId}::uuid
+    ) AS sale_id
+  `
+  return rows[0]?.sale_id ?? null
+}
+
 /**
  * Creates or returns the one invoice for a sale. The sale row is locked before
  * checking/allocating so concurrent first reads do not burn sequence numbers.
  */
 export async function ensureTaxInvoice(tx: any, input: { tenantId: string; saleId: string; createdBy?: string | null }) {
-  const locked = await tx.$queryRaw<Array<{ id: string }>>`
-    SELECT id FROM public.sales
-    WHERE id = ${input.saleId}::uuid AND tenant_id = ${input.tenantId}::uuid
-    FOR UPDATE
-  `
-  if (!locked[0]) return null
+  const lockedSaleId = await lockTaxInvoiceSale(tx, input.tenantId, input.saleId)
+  if (!lockedSaleId) return null
 
   const existing = await tx.tax_documents.findFirst({
     where: { tenant_id: input.tenantId, sale_id: input.saleId, document_type: 'tax_invoice' },

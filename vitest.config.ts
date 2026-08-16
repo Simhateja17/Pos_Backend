@@ -19,6 +19,7 @@ const DB_BACKED = [
   'tests/checkout/shift-reconciliation.test.ts',
   'tests/checkout/stock-floor-sale.test.ts',
   'tests/inventory/stock-trigger.test.ts',
+  'tests/tax-documents/tax-document-runtime.test.ts',
   'tests/tenancy/purchase-orders-rls.test.ts',
   'tests/tenancy/rls-enforcement.test.ts',
   'tests/tenancy/suppliers-rls.test.ts',
