@@ -32,11 +32,11 @@ export async function sendReceiptEmail(input: ReceiptEmailInput): Promise<{ ok: 
     await resend.emails.send({
       from: 'receipts@couture-pos.example.com',
       to: input.to,
-      subject: `Receipt from ${input.businessName} — ${input.totalAmount}`,
-      text: `Thank you for your purchase. Sale ${input.saleId}: ${input.totalAmount} total.`,
+      subject: `Bill from ${input.businessName} — ${input.totalAmount}`,
+      text: `Thank you for your purchase. Bill ${input.saleId}: ${input.totalAmount} total.`,
     })
     return { ok: true }
   } catch (err: any) {
-    return { ok: false, error: err.message ?? 'Unknown error sending receipt email' }
+    return { ok: false, error: err.message ?? 'Unknown error sending bill email' }
   }
 }

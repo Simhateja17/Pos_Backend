@@ -468,13 +468,13 @@ router.post('/', async (req, res) => {
             kind: 'receipt',
             to: receiptEmailTarget,
             saleId: successBody.id,
-            subject: `Receipt from ${businessName ?? ''} — ${successBody.totalAmount}`,
+            subject: `Bill from ${businessName ?? ''} — ${successBody.totalAmount}`,
             businessName: businessName ?? '',
             totalAmount: successBody.totalAmount,
           }).then((outcome) => {
             if (outcome.status !== 'sent') {
               // eslint-disable-next-line no-console
-              console.error(`Receipt email ${outcome.status} for sale ${successBody.id}: ${outcome.reason ?? ''}`)
+              console.error(`Bill email ${outcome.status} for sale ${successBody.id}: ${outcome.reason ?? ''}`)
             }
           })
         }
