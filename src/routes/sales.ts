@@ -464,11 +464,11 @@ router.post('/', async (req, res) => {
 
 /**
  * GET /?receiptNumber=&customerSearch= — D-09 lookup by receipt/order number
- * (the sale's own UUID, shown to cashiers as the "receipt number" — no new
- * column needed) OR by customer search (phone/email/name, delegating to
- * searchCustomers). Every matched sale is serialized with BOTH its lines and
- * payments, matching SaleSchema — 03-04's returns route and 03-08's returns
- * page both need this shape.
+ * or by customer search (phone/email/name). Human-facing receipt numbers are
+ * the immutable tax_documents.document_number; the sale UUID remains a
+ * backwards-compatible lookup for older clients. Every matched sale is
+ * serialized with BOTH its lines and payments, matching SaleSchema — 03-04's
+ * returns route and 03-08's returns page both need this shape.
  */
 router.get('/payments', requireRole('manager'), async (req, res) => {
   const parsed = PaymentReadQuerySchema.safeParse(req.query)
@@ -584,26 +584,37 @@ router.get('/records', async (req, res) => {
 router.get('/', async (req, res) => {
   const receiptNumber = req.query.receiptNumber as string | undefined
   const customerSearch = req.query.customerSearch as string | undefined
-  if (!receiptNumber && !customerSearch) {
+  const receiptLookup = receiptNumber?.trim()
+  const customerLookup = customerSearch?.trim()
+  if (!receiptLookup && !customerLookup) {
     return res.status(400).json({ error: 'receiptNumber or customerSearch query parameter is required' })
   }
   const client = forTenant(req.user!.tenantId) as any
-  const actingRole = req.actingStaff?.role ?? req.user!.role
   let sales: any[] = []
-  if (receiptNumber) {
-    if (!z.string().uuid().safeParse(receiptNumber).success) {
-      return res.status(400).json({ error: 'Invalid receiptNumber' })
-    }
-    const sale = await client.sales.findFirst({ where: { id: receiptNumber } })
+  if (receiptLookup) {
+    // The old implementation treated the UI's receipt field as a sale UUID,
+    // so a real invoice such as Q9-202627-0003 failed validation before the
+    // database was queried. Look up the user-facing tax document first, while
+    // retaining UUID lookup for clients that still send the internal sale id.
+    const sale = z.string().uuid().safeParse(receiptLookup).success
+      ? await client.sales.findFirst({ where: { id: receiptLookup } })
+      : await (async () => {
+          const document = await client.tax_documents.findFirst({
+            where: {
+              document_type: 'tax_invoice',
+              document_number: { equals: receiptLookup, mode: 'insensitive' },
+            },
+            select: { sale_id: true },
+          })
+          return document ? client.sales.findFirst({ where: { id: document.sale_id } }) : null
+        })()
     sales = sale ? [sale] : []
-  } else if (customerSearch) {
-    const customers = actingRole === 'cashier'
-      ? await client.customers.findMany({
-          where: { phone: { contains: customerSearch.trim() } },
-          orderBy: { created_at: 'desc' },
-          take: 20,
-        })
-      : await searchCustomers(client, customerSearch)
+  } else if (customerLookup) {
+    // Keep this consistent with GET /customers: the returns picker is an
+    // operator-facing customer search, so names, email addresses, and phone
+    // numbers should all resolve instead of cashier requests being silently
+    // reduced to phone-only matches.
+    const customers = await searchCustomers(client, customerLookup)
     const customerIds = customers.map((c: { id: string }) => c.id)
     sales = customerIds.length > 0 ? await client.sales.findMany({ where: { customer_id: { in: customerIds } }, orderBy: { created_at: 'desc' } }) : []
   }

@@ -644,8 +644,8 @@ registry.registerPath({
 registry.registerPath({
   method: 'get',
   path: '/sales',
-  description: 'Look up prior sales by receipt number or customer search for returns compatibility.',
-  request: { query: z.object({ receiptNumber: z.string().uuid().optional(), customerSearch: z.string().max(100).optional() }) },
+  description: 'Look up prior sales by a human tax invoice number (or legacy sale UUID) or by customer phone, email, or name for returns compatibility.',
+  request: { query: z.object({ receiptNumber: z.string().trim().min(1).max(100).optional(), customerSearch: z.string().trim().min(1).max(100).optional() }) },
   responses: {
     200: { description: 'Matching sales', content: { 'application/json': { schema: z.array(SaleSchema) } } },
     400: { description: 'A receipt number or customer search is required' },

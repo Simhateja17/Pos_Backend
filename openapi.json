@@ -8550,12 +8550,13 @@
         }
       },
       "get": {
-        "description": "Look up prior sales by receipt number or customer search for returns compatibility.",
+        "description": "Look up prior sales by a human tax invoice number (or legacy sale UUID) or by customer phone, email, or name for returns compatibility.",
         "parameters": [
           {
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "minLength": 1,
+              "maxLength": 100
             },
             "required": false,
             "name": "receiptNumber",
@@ -8564,6 +8565,7 @@
           {
             "schema": {
               "type": "string",
+              "minLength": 1,
               "maxLength": 100
             },
             "required": false,
