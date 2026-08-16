@@ -80,6 +80,9 @@ export const SaleSchema = z
     status: z.string(),
     createdBy: z.string().uuid().nullable(),
     createdAt: z.string(),
+    // A persisted GST invoice number when one exists. Older sales may not
+    // have a tax-document snapshot yet, so the field remains nullable.
+    invoiceNumber: z.string().max(16).nullable().optional(),
     lines: z.array(SaleLineItemSchema),
     payments: z.array(PaymentSchema),
     // Populated on the POST /sales success response only (the tenant row is

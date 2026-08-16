@@ -20,6 +20,7 @@ const ZERO = new Prisma.Decimal(0)
 const RECEIPT_RESEND_COOLDOWN_MS = 60 * 1000
 const RECEIPT_RESEND_TENANT_WINDOW_MS = 60 * 60 * 1000
 const RECEIPT_RESEND_TENANT_LIMIT = 100
+const SALE_ID_PREFIX_PATTERN = /^[0-9a-f]{8,36}$/i
 
 // D-05 body-dependent role gate — mirrors stockMovements.ts's isAllowedToAdjust
 // exactly, reusing the same ROLE_RANK import and acting-identity precedence
@@ -84,7 +85,13 @@ function toLineJson(row: any) {
   }
 }
 
-function toSaleJson(sale: any, lines: any[], payments: any[], businessName?: string | null) {
+function toSaleJson(
+  sale: any,
+  lines: any[],
+  payments: any[],
+  businessName?: string | null,
+  invoiceNumber?: string | null,
+) {
   return {
     id: sale.id,
     clientSaleId: sale.client_sale_id,
@@ -97,10 +104,53 @@ function toSaleJson(sale: any, lines: any[], payments: any[], businessName?: str
     status: sale.status,
     createdBy: sale.created_by,
     createdAt: sale.created_at.toISOString(),
+    ...(invoiceNumber !== undefined ? { invoiceNumber } : {}),
     lines: lines.map(toLineJson),
     payments: payments.map(toPaymentJson),
     businessName: businessName ?? null,
   }
+}
+
+function saleIdSearchFilters(search: string): any[] {
+  if (z.string().uuid().safeParse(search).success) return [{ id: search }]
+  if (SALE_ID_PREFIX_PATTERN.test(search)) {
+    return [{ id: { startsWith: search.toLowerCase() } }]
+  }
+  return []
+}
+
+async function searchTaxInvoiceSaleIds(client: any, req: import('express').Request, search: string): Promise<string[]> {
+  if (typeof client.tax_documents?.findMany !== 'function') return []
+  const documents = await client.tax_documents.findMany({
+    where: {
+      ...storeScopeWhere(req),
+      document_type: 'tax_invoice',
+      document_number: { contains: search, mode: 'insensitive' },
+    },
+    select: { sale_id: true },
+    take: 50,
+  })
+  return documents.map((document: { sale_id: string }) => document.sale_id)
+}
+
+async function invoiceNumbersForSales(
+  client: any,
+  req: import('express').Request,
+  saleIds: string[],
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>()
+  if (saleIds.length === 0 || typeof client.tax_documents?.findMany !== 'function') return result
+
+  const documents = await client.tax_documents.findMany({
+    where: {
+      ...storeScopeWhere(req),
+      document_type: 'tax_invoice',
+      sale_id: { in: saleIds },
+    },
+    select: { sale_id: true, document_number: true },
+  })
+  for (const document of documents) result.set(document.sale_id, document.document_number)
+  return result
 }
 
 /**
@@ -551,10 +601,14 @@ router.get('/records', async (req, res) => {
     }
   }
   if (parsed.data.search) {
-    const customers = await searchCustomers(client, parsed.data.search)
+    const [customers, taxInvoiceSaleIds] = await Promise.all([
+      searchCustomers(client, parsed.data.search),
+      searchTaxInvoiceSaleIds(client, req, parsed.data.search),
+    ])
     const customerIds = customers.map((customer) => customer.id)
     where.OR = [
-      ...(z.string().uuid().safeParse(parsed.data.search).success ? [{ id: parsed.data.search }] : []),
+      ...saleIdSearchFilters(parsed.data.search),
+      ...(taxInvoiceSaleIds.length ? [{ id: { in: taxInvoiceSaleIds } }] : []),
       ...(customerIds.length ? [{ customer_id: { in: customerIds } }] : []),
     ]
     if (where.OR.length === 0) return res.json({ items: [], total: 0, nextCursor: null })
@@ -566,13 +620,14 @@ router.get('/records', async (req, res) => {
   ])
   const hasMore = rows.length > parsed.data.limit
   const page = rows.slice(0, parsed.data.limit)
+  const invoiceNumberBySaleId = await invoiceNumbersForSales(client, req, page.map((sale: any) => sale.id))
   const items = []
   for (const sale of page) {
     const [lines, payments] = await Promise.all([
       client.sale_line_items.findMany({ where: { sale_id: sale.id } }),
       client.payments.findMany({ where: { sale_id: sale.id } }),
     ])
-    items.push(toSaleJson(sale, lines, payments))
+    items.push(toSaleJson(sale, lines, payments, undefined, invoiceNumberBySaleId.get(sale.id) ?? null))
   }
   return res.json({
     items,
