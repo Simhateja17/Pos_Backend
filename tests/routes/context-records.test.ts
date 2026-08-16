@@ -14,6 +14,7 @@ const customersFindManyMock = vi.fn()
 const customersCountMock = vi.fn()
 const salesFindManyMock = vi.fn()
 const salesCountMock = vi.fn()
+const taxDocumentsFindManyMock = vi.fn()
 const linesFindManyMock = vi.fn()
 const paymentsFindManyMock = vi.fn()
 const paymentsCountMock = vi.fn()
@@ -32,6 +33,7 @@ vi.mock('../../src/db/tenantClient', () => ({
     },
     customers: { findMany: customersFindManyMock, count: customersCountMock },
     sales: { findMany: salesFindManyMock, count: salesCountMock },
+    tax_documents: { findMany: taxDocumentsFindManyMock },
     sale_line_items: { findMany: linesFindManyMock },
     payments: { findMany: paymentsFindManyMock, count: paymentsCountMock, groupBy: paymentsGroupByMock },
   })),
@@ -88,6 +90,7 @@ describe('context and tenant record read routes', () => {
     customersCountMock.mockReset().mockResolvedValue(0)
     salesFindManyMock.mockReset().mockResolvedValue([])
     salesCountMock.mockReset().mockResolvedValue(0)
+    taxDocumentsFindManyMock.mockReset().mockResolvedValue([])
     linesFindManyMock.mockReset().mockResolvedValue([])
     paymentsFindManyMock.mockReset().mockResolvedValue([])
     paymentsCountMock.mockReset().mockResolvedValue(0)
@@ -160,6 +163,74 @@ describe('context and tenant record read routes', () => {
     }))
     const { forTenant } = await import('../../src/db/tenantClient')
     expect(forTenant).toHaveBeenLastCalledWith('tenant-real')
+  })
+
+  it('finds a sale by the invoice reference rendered in the orders table', async () => {
+    const sale = {
+      id: 'dcfb11a0-1111-4111-8111-111111111111',
+      client_sale_id: '21111111-1111-4111-8111-111111111111',
+      shift_id: null,
+      customer_id: null,
+      subtotal: { toString: () => '1532.82' },
+      discount_amount: { toString: () => '0.00' },
+      tax_amount: { toString: () => '0.00' },
+      total_amount: { toString: () => '1532.82' },
+      status: 'completed',
+      created_by: null,
+      created_at: new Date('2026-08-15T13:11:00.000Z'),
+    }
+    salesFindManyMock.mockResolvedValue([sale])
+    salesCountMock.mockResolvedValue(1)
+    linesFindManyMock.mockResolvedValue([])
+    paymentsFindManyMock.mockResolvedValue([])
+
+    const response = await request(await buildApp())
+      .get('/sales/records')
+      .query({ search: 'DCFB11A0', limit: 25 })
+      .set('Authorization', `Bearer ${tokenFor()}`)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      items: [{ id: sale.id, invoiceNumber: null }],
+      total: 1,
+    })
+    expect(salesFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([{ id: { startsWith: 'dcfb11a0' } }]),
+      }),
+    }))
+  })
+
+  it('finds a sale by its persisted tax invoice number and returns that number', async () => {
+    const sale = {
+      id: 'eafb11a0-1111-4111-8111-111111111111',
+      client_sale_id: '31111111-1111-4111-8111-111111111111',
+      shift_id: null,
+      customer_id: null,
+      subtotal: { toString: () => '2500.00' },
+      discount_amount: { toString: () => '0.00' },
+      tax_amount: { toString: () => '0.00' },
+      total_amount: { toString: () => '2500.00' },
+      status: 'completed',
+      created_by: null,
+      created_at: new Date('2026-08-15T14:00:00.000Z'),
+    }
+    salesFindManyMock.mockResolvedValue([sale])
+    salesCountMock.mockResolvedValue(1)
+    taxDocumentsFindManyMock.mockResolvedValue([{ sale_id: sale.id, document_number: 'AMB/26-27/000001' }])
+    linesFindManyMock.mockResolvedValue([])
+    paymentsFindManyMock.mockResolvedValue([])
+
+    const response = await request(await buildApp())
+      .get('/sales/records')
+      .query({ search: 'AMB/26-27/000001', limit: 25 })
+      .set('Authorization', `Bearer ${tokenFor()}`)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      items: [{ id: sale.id, invoiceNumber: 'AMB/26-27/000001' }],
+      total: 1,
+    })
   })
 
   it('returns payment totals from persisted groupBy results, not client supplied totals', async () => {
