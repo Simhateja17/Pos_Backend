@@ -649,21 +649,38 @@ router.get('/', async (req, res) => {
   if (receiptLookup) {
     // The old implementation treated the UI's receipt field as a sale UUID,
     // so a real invoice such as Q9-202627-0003 failed validation before the
-    // database was queried. Look up the user-facing tax document first, while
-    // retaining UUID lookup for clients that still send the internal sale id.
-    const sale = z.string().uuid().safeParse(receiptLookup).success
-      ? await client.sales.findFirst({ where: { id: receiptLookup } })
-      : await (async () => {
-          const document = await client.tax_documents.findFirst({
-            where: {
-              document_type: 'tax_invoice',
-              document_number: { equals: receiptLookup, mode: 'insensitive' },
-            },
-            select: { sale_id: true },
+    // database was queried. Resolve full UUIDs directly. For other values,
+    // keep exact tax-document numbers authoritative, then fall back to the
+    // short sale reference shown by Sales/Bills when no document exists.
+    // Sales/Bills also displays the first eight characters of the sale UUID
+    // when a tax invoice has not been generated yet, so resolve that exact
+    // fallback reference here too. Use findMany for prefixes so a collision
+    // is presented to the operator instead of silently choosing one sale.
+    if (z.string().uuid().safeParse(receiptLookup).success) {
+      const sale = await client.sales.findFirst({ where: { id: receiptLookup } })
+      sales = sale ? [sale] : []
+    } else {
+      const document = await client.tax_documents.findFirst({
+        where: {
+          document_type: 'tax_invoice',
+          document_number: { equals: receiptLookup, mode: 'insensitive' },
+        },
+        select: { sale_id: true },
+      })
+      if (document) {
+        const sale = await client.sales.findFirst({ where: { id: document.sale_id } })
+        sales = sale ? [sale] : []
+      } else {
+        const saleIdFilter = saleIdSearchFilters(receiptLookup)[0]
+        if (saleIdFilter) {
+          sales = await client.sales.findMany({
+            where: saleIdFilter,
+            orderBy: { created_at: 'desc' },
+            take: 50,
           })
-          return document ? client.sales.findFirst({ where: { id: document.sale_id } }) : null
-        })()
-    sales = sale ? [sale] : []
+        }
+      }
+    }
   } else if (customerLookup) {
     // Keep this consistent with GET /customers: the returns picker is an
     // operator-facing customer search, so names, email addresses, and phone

@@ -30,7 +30,7 @@ vi.mock('../../src/services/email', () => ({
   sendLoggedEmail: vi.fn(),
 }))
 
-const saleId = '11111111-1111-4111-8111-111111111111'
+const saleId = 'dcfb11a0-1111-4111-8111-111111111111'
 const customerId = '22222222-2222-4222-8222-222222222222'
 
 function decimal(value: string) {
@@ -124,6 +124,29 @@ describe('returns sale lookup', () => {
     expect(response.body).toHaveLength(1)
     expect(response.body[0]).toMatchObject({ id: saleId, totalAmount: '118.00' })
     expect(salesFindFirstMock).toHaveBeenCalledWith({ where: { id: saleId } })
+  })
+
+  it('resolves the short sale-id reference shown by Sales/Bills', async () => {
+    const app = await buildApp()
+    salesFindManyMock.mockResolvedValue([saleRow()])
+
+    const response = await request(app).get('/sales').query({ receiptNumber: 'DCFB11A0' })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toHaveLength(1)
+    expect(response.body[0].id).toBe(saleId)
+    expect(salesFindManyMock).toHaveBeenCalledWith({
+      where: { id: { startsWith: 'dcfb11a0' } },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+    })
+    expect(taxDocumentsFindFirstMock).toHaveBeenCalledWith({
+      where: {
+        document_type: 'tax_invoice',
+        document_number: { equals: 'DCFB11A0', mode: 'insensitive' },
+      },
+      select: { sale_id: true },
+    })
   })
 
   it('keeps customer-name search working for cashier returns lookups', async () => {
