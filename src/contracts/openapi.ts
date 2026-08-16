@@ -329,6 +329,10 @@ registry.registerPath({
       description: 'No account found for login',
       content: { 'application/json': { schema: z.object({ error: z.string() }) } },
     },
+    429: {
+      description: 'Supabase OTP send cooldown is active',
+      content: { 'application/json': { schema: z.object({ error: z.string() }) } },
+    },
   },
 })
 

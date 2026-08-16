@@ -7738,6 +7738,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Supabase OTP send cooldown is active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }

@@ -38,6 +38,19 @@ const supabaseAnon = createClient(
   process.env.SUPABASE_ANON_KEY as string,
 )
 
+const DEFAULT_OTP_RETRY_AFTER_SECONDS = 60
+
+function otpRetryAfterSeconds(error: { message?: string | null }): number {
+  const message = error.message ?? ''
+  const secondsMatch = message.match(/(?:after|in)\s+(\d+)\s+seconds?/i)
+  if (secondsMatch) return Math.max(1, Number(secondsMatch[1]))
+
+  const minutesMatch = message.match(/(?:after|in)\s+(\d+)\s+minutes?/i)
+  if (minutesMatch) return Math.max(1, Number(minutesMatch[1]) * 60)
+
+  return DEFAULT_OTP_RETRY_AFTER_SECONDS
+}
+
 /**
  * POST /otp/request — sends a 6-digit email OTP via Supabase Auth.
  * `purpose: 'signup'` allows Supabase to create the underlying Auth user on
@@ -77,6 +90,16 @@ router.post('/otp/request', async (req, res) => {
     console.log(`[auth:otp/request] returning 404 — no login account exists`)
     return res.status(404).json({
       error: 'No account found with this email. Create a store account first',
+    })
+  }
+
+  const providerCode = (error as { code?: string } | null)?.code
+  if (error && (error.status === 429 || providerCode === 'over_email_send_rate_limit' || providerCode === 'over_sms_send_rate_limit')) {
+    const retryAfter = otpRetryAfterSeconds(error)
+    res.set('Retry-After', String(retryAfter))
+    console.log(`[auth:otp/request] returning 429 — provider cooldown retryAfter=${retryAfter}s`)
+    return res.status(429).json({
+      error: `Too many code requests. Please try again in ${retryAfter} seconds.`,
     })
   }
 

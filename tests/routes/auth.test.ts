@@ -323,6 +323,26 @@ describe('POST /auth/signup and /auth/login', () => {
       error: 'No account found with this email. Create a store account first',
     })
   })
+
+  it('preserves the Supabase OTP cooldown as a 429 with Retry-After', async () => {
+    signInWithOtpMock.mockResolvedValue({
+      data: {},
+      error: {
+        status: 429,
+        code: 'over_email_send_rate_limit',
+        message: 'For security purposes, you can only request this after 34 seconds.',
+      },
+    })
+
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/auth/otp/request')
+      .send({ email: 'owner@example.com', purpose: 'login' })
+
+    expect(res.status).toBe(429)
+    expect(res.headers['retry-after']).toBe('34')
+    expect(res.body).toEqual({ error: 'Too many code requests. Please try again in 34 seconds.' })
+  })
 })
 
 describe('POST /auth/set-pin', () => {
