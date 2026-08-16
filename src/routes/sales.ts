@@ -112,7 +112,7 @@ function toSaleJson(
   }
 }
 
-function saleIdSearchFilters(search: string): any[] {
+function saleIdSearchFilters(search: string): Prisma.salesWhereInput[] {
   if (z.string().uuid().safeParse(search).success) return [{ id: search }]
   if (SALE_ID_PREFIX_PATTERN.test(search)) {
     // Prisma models this column as PostgreSQL UUID, whose filter does not
