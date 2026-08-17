@@ -55,6 +55,7 @@ export const XReportSchema = z
     expectedCash: z.string(),
     cashSalesTotal: z.string(),
     cardSalesTotal: z.string(),
+    upiSalesTotal: z.string(),
     checkSalesTotal: z.string(),
     refundsTotal: z.string(),
     saleCount: z.number().int(),

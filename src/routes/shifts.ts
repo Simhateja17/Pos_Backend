@@ -93,7 +93,7 @@ function toTerminalContextJson(row: any, hasOpenShift: boolean) {
  * This is a PURE READ — it performs no writes and can be called any number of
  * times without mutating the shift.
  */
-async function computeXReport(client: any, shift: any) {
+export async function computeXReport(client: any, shift: any) {
   const sales = await client.sales.findMany({ where: { shift_id: shift.id } })
   const saleIds = sales.map((s: any) => s.id)
   const payments = saleIds.length > 0
@@ -105,6 +105,9 @@ async function computeXReport(client: any, shift: any) {
   )
   const cardSalesTotal = sumBy(payments, (p: any) =>
     p.direction === 'payment' && p.method === 'card' ? new Prisma.Decimal(p.amount) : ZERO,
+  )
+  const upiSalesTotal = sumBy(payments, (p: any) =>
+    p.direction === 'payment' && p.method === 'upi' ? new Prisma.Decimal(p.amount) : ZERO,
   )
   const checkSalesTotal = sumBy(payments, (p: any) =>
     p.direction === 'payment' && p.method === 'check' ? new Prisma.Decimal(p.amount) : ZERO,
@@ -121,6 +124,7 @@ async function computeXReport(client: any, shift: any) {
     expectedCash: expectedCash.toString(),
     cashSalesTotal: cashSalesTotal.toString(),
     cardSalesTotal: cardSalesTotal.toString(),
+    upiSalesTotal: upiSalesTotal.toString(),
     checkSalesTotal: checkSalesTotal.toString(),
     refundsTotal: refundsTotal.toString(),
     saleCount: sales.length,
