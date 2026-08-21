@@ -802,6 +802,8 @@ model billing_subscriptions {
   tax_rate_bps                  Int
   included_store_count          Int                            @default(1)
   additional_store_count        Int                            @default(0)
+  additional_register_count     Int                            @default(0)
+  additional_user_count         Int                            @default(0)
   status                        String                         @default("created")
   entitlement_status            String                         @default("blocked")
   cancel_at_cycle_end           Boolean                        @default(false)

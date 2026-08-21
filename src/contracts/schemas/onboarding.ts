@@ -22,7 +22,7 @@ const optionalPhone = z.string().trim().min(7).max(24).optional()
  */
 export const PlanSelectionStepSchema = z
   .object({
-    trialPlan: z.enum(['starter', 'growth', 'enterprise']),
+    trialPlan: z.enum(['starter', 'growth', 'pro']),
     billingCycle: z.enum(['monthly', 'annual']),
   })
   .strict()

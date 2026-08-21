@@ -30,7 +30,7 @@ Razorpay's Plans API is `POST /v1/plans`. The request uses:
   "interval": 1,
   "item": {
     "name": "Starter - Monthly",
-    "amount": 99900,
+    "amount": 79900,
     "currency": "INR",
     "description": "..."
   },
@@ -42,9 +42,11 @@ Razorpay's Plans API is `POST /v1/plans`. The request uses:
 
 Annual billing is represented as `period: "yearly"` and `interval: 1`. Amounts
 are sent in the smallest currency unit: paise for INR and cents for USD. For
-India, the catalog amount is already the GST-inclusive customer total. For US
-plans, the script uses the backend quote total, so a configured tax amount is
-also reflected in the provider Plan.
+India, the catalog amount is already the GST-inclusive customer total. For
+international plans, the script uses the backend quote total, so a configured
+tax amount is also reflected in the provider Plan. Annual amounts currently
+equal twelve monthly payments; the catalogue does not advertise an annual
+discount.
 
 Plans are immutable after creation, so the script validates an existing Plan's
 frequency, amount and currency rather than attempting to edit it. It records a

@@ -1,11 +1,10 @@
 import { forTenantTransaction } from '../db/tenantClient'
-import type { BillingCycle, BillingRegion } from '../contracts/schemas/billing'
+import type { BillingRegion } from '../contracts/schemas/billing'
 import {
   ENTITLEMENT_KEYS,
-  calculateQuote,
+  canonicalBillingRegion,
   getPlan,
   getPlans,
-  includedStoresForPlan,
   type BillingEntitlementLimits,
   type EntitlementKey,
   type EntitlementValue,
@@ -77,15 +76,6 @@ export class EntitlementAccessError extends Error {
   }
 }
 
-export class EntitlementPlanError extends Error {
-  public readonly expose = true
-
-  constructor(public readonly status: number, message: string) {
-    super(message)
-    this.name = 'EntitlementPlanError'
-  }
-}
-
 function isEntitlementValue(value: unknown): value is EntitlementValue {
   return value === 'unlimited' || (Number.isSafeInteger(value) && Number(value) >= 0)
 }
@@ -97,7 +87,7 @@ function isLimits(value: unknown): value is BillingEntitlementLimits {
 }
 
 function isRegion(value: unknown): value is BillingRegion {
-  return value === 'IN' || value === 'US'
+  return value === 'IN' || value === 'INTL' || value === 'US'
 }
 
 function lowestPlan(region: BillingRegion) {
@@ -114,7 +104,7 @@ function lowestPlan(region: BillingRegion) {
 }
 
 function safePlanKey(region: BillingRegion): string {
-  return lowestPlan(region)?.key ?? (region === 'IN' ? 'free' : 'essentials')
+  return lowestPlan(region)?.key ?? 'starter'
 }
 
 /**
@@ -123,13 +113,14 @@ function safePlanKey(region: BillingRegion): string {
  * plan in the backend-owned catalogue. A malformed snapshot is never trusted.
  */
 export function snapshotForPlan(region: BillingRegion, planKey: string): EntitlementSnapshot {
+  const canonicalRegion = canonicalBillingRegion(region)
   try {
-    const plan = getPlan(region, planKey) ?? lowestPlan(region)
+    const plan = getPlan(canonicalRegion, planKey) ?? lowestPlan(canonicalRegion)
     if (plan) {
       return {
         version: ENTITLEMENT_VERSION,
         planKey: plan.key,
-        region,
+        region: canonicalRegion,
         limits: { ...plan.entitlements },
       }
     }
@@ -138,17 +129,17 @@ export function snapshotForPlan(region: BillingRegion, planKey: string): Entitle
     // defaults below, rather than granting the requested unknown plan.
   }
 
-  const fallback: BillingEntitlementLimits = region === 'IN'
+  const fallback: BillingEntitlementLimits = canonicalRegion === 'IN'
     ? {
-        maxLocations: 1,
-        maxActiveUsers: 1,
-        maxActiveRegisters: 1,
-        monthlyPosTransactions: 50,
-        monthlySalesOrders: 50,
-        monthlyEcommerceOrders: 50,
-        monthlyPurchaseOrders: 20,
-        monthlyBills: 20,
-        dailyApiCalls: 1_500,
+        maxLocations: 2,
+        maxActiveUsers: 5,
+        maxActiveRegisters: 3,
+        monthlyPosTransactions: 'unlimited',
+        monthlySalesOrders: 'unlimited',
+        monthlyEcommerceOrders: 'unlimited',
+        monthlyPurchaseOrders: 'unlimited',
+        monthlyBills: 'unlimited',
+        dailyApiCalls: 'unlimited',
         integrations: 0,
       }
     : {
@@ -163,17 +154,19 @@ export function snapshotForPlan(region: BillingRegion, planKey: string): Entitle
         dailyApiCalls: 'unlimited',
         integrations: 0,
       }
-  return { version: ENTITLEMENT_VERSION, planKey: safePlanKey(region), region, limits: fallback }
+  return { version: ENTITLEMENT_VERSION, planKey: safePlanKey(canonicalRegion), region: canonicalRegion, limits: fallback }
 }
 
 function parseStoredSnapshot(value: unknown, region: BillingRegion, fallbackPlanKey: string): EntitlementSnapshot {
+  const canonicalRegion = canonicalBillingRegion(region)
   if (!value || typeof value !== 'object') return snapshotForPlan(region, fallbackPlanKey)
   const candidate = value as Record<string, unknown>
+  const candidateRegion = candidate.region === 'US' ? 'INTL' : candidate.region
   if (
     candidate.version !== ENTITLEMENT_VERSION
     || typeof candidate.planKey !== 'string'
     || !isRegion(candidate.region)
-    || candidate.region !== region
+    || candidateRegion !== canonicalRegion
     || !isLimits(candidate.limits)
   ) {
     return snapshotForPlan(region, fallbackPlanKey)
@@ -185,16 +178,62 @@ function parseStoredSnapshot(value: unknown, region: BillingRegion, fallbackPlan
   return {
     version: candidate.version,
     planKey: candidate.planKey,
-    region,
+    region: canonicalRegion,
     limits: { ...(candidate.limits as BillingEntitlementLimits) },
   }
 }
 
-export function snapshotFromStoredRow(row: any, region: BillingRegion, fallbackPlanKey = 'free'): EntitlementSnapshot {
+function legacySnapshotForPlan(region: BillingRegion, planKey: string): EntitlementSnapshot | null {
+  const canonicalRegion = canonicalBillingRegion(region)
+  const limits: BillingEntitlementLimits | null = canonicalRegion === 'IN'
+    ? planKey === 'free'
+      ? { maxLocations: 1, maxActiveUsers: 1, maxActiveRegisters: 1, monthlyPosTransactions: 50, monthlySalesOrders: 50, monthlyEcommerceOrders: 50, monthlyPurchaseOrders: 20, monthlyBills: 20, dailyApiCalls: 1_500, integrations: 0 }
+      : planKey === 'standard'
+        ? { maxLocations: 1, maxActiveUsers: 3, maxActiveRegisters: 1, monthlyPosTransactions: 'unlimited', monthlySalesOrders: 500, monthlyEcommerceOrders: 500, monthlyPurchaseOrders: 500, monthlyBills: 500, dailyApiCalls: 2_500, integrations: 0 }
+        : planKey === 'professional'
+          ? { maxLocations: 3, maxActiveUsers: 10, maxActiveRegisters: 3, monthlyPosTransactions: 'unlimited', monthlySalesOrders: 5_000, monthlyEcommerceOrders: 5_000, monthlyPurchaseOrders: 2_500, monthlyBills: 2_500, dailyApiCalls: 5_000, integrations: 0 }
+          : planKey === 'premium'
+            ? { maxLocations: 5, maxActiveUsers: 15, maxActiveRegisters: 5, monthlyPosTransactions: 'unlimited', monthlySalesOrders: 10_000, monthlyEcommerceOrders: 10_000, monthlyPurchaseOrders: 5_000, monthlyBills: 5_000, dailyApiCalls: 7_500, integrations: 0 }
+            : null
+    : planKey === 'essentials'
+      ? { maxLocations: 1, maxActiveUsers: 'unlimited', maxActiveRegisters: 'unlimited', monthlyPosTransactions: 'unlimited', monthlySalesOrders: 'unlimited', monthlyEcommerceOrders: 'unlimited', monthlyPurchaseOrders: 'unlimited', monthlyBills: 'unlimited', dailyApiCalls: 'unlimited', integrations: 0 }
+      : planKey === 'professional'
+        ? { maxLocations: 5, maxActiveUsers: 'unlimited', maxActiveRegisters: 'unlimited', monthlyPosTransactions: 'unlimited', monthlySalesOrders: 'unlimited', monthlyEcommerceOrders: 'unlimited', monthlyPurchaseOrders: 'unlimited', monthlyBills: 'unlimited', dailyApiCalls: 'unlimited', integrations: 0 }
+        : null
+  return limits ? { version: ENTITLEMENT_VERSION, planKey, region: canonicalRegion, limits } : null
+}
+
+export function snapshotFromStoredRow(row: any, region: BillingRegion, fallbackPlanKey = 'starter'): EntitlementSnapshot {
   if (row?.entitlement_snapshot === undefined || row?.entitlement_snapshot === null) {
+    const legacy = legacySnapshotForPlan(region, row?.plan_key ?? fallbackPlanKey)
+    if (legacy) return legacy
     return snapshotForPlan(region, row?.plan_key ?? fallbackPlanKey)
   }
   return parseStoredSnapshot(row.entitlement_snapshot, region, fallbackPlanKey)
+}
+
+function addToFiniteLimit(value: EntitlementValue, additional: number): EntitlementValue {
+  return value === 'unlimited' ? value : value + additional
+}
+
+/**
+ * Apply recurring Pro add-on quantities to a durable base snapshot. The base
+ * snapshot is never rewritten; only the effective request-time limits change.
+ */
+export function effectiveEntitlementLimits(
+  limits: BillingEntitlementLimits,
+  row: { additional_store_count?: unknown; additional_register_count?: unknown; additional_user_count?: unknown } | null | undefined,
+): BillingEntitlementLimits {
+  const numberValue = (value: unknown) => {
+    const number = Number(value ?? 0)
+    return Number.isSafeInteger(number) && number >= 0 ? number : 0
+  }
+  return {
+    ...limits,
+    maxLocations: addToFiniteLimit(limits.maxLocations, numberValue(row?.additional_store_count)),
+    maxActiveRegisters: addToFiniteLimit(limits.maxActiveRegisters, numberValue(row?.additional_register_count)),
+    maxActiveUsers: addToFiniteLimit(limits.maxActiveUsers, numberValue(row?.additional_user_count)),
+  }
 }
 
 export function resolveCurrentAccessState(subscriptionRow: any, trialRow: any, now = new Date()): SubscriptionAccess {
@@ -355,19 +394,20 @@ export async function resolveEntitlementSummary(tx: any, tenantId: string, now =
     readTrialRow(tx, tenantId),
   ])
 
-  const region: BillingRegion = (tenant?.country ?? '').trim().toUpperCase() === 'IN' ? 'IN' : 'US'
+  const region: BillingRegion = (tenant?.country ?? '').trim().toUpperCase() === 'IN' ? 'IN' : 'INTL'
   const source: EntitlementSource = subscription
     ? 'subscription'
     : trial
       ? 'trial'
-      : region === 'IN'
-        ? 'free'
-        : 'blocked'
-  const snapshot = subscription
+      : 'blocked'
+  const baseSnapshot = subscription
     ? snapshotFromStoredRow(subscription, region)
     : trial
       ? snapshotFromStoredRow(trial, region)
-      : snapshotForPlan(region, region === 'IN' ? 'free' : 'essentials')
+      : snapshotForPlan(region, 'starter')
+  const snapshot = subscription || trial
+    ? { ...baseSnapshot, limits: effectiveEntitlementLimits(baseSnapshot.limits, subscription ?? trial) }
+    : baseSnapshot
 
   return {
     planKey: snapshot.planKey,
@@ -391,113 +431,6 @@ export function entitlementStatusFields(summary: EntitlementSummary) {
     entitlementVersion: summary.snapshot.version,
     entitlements: summary.snapshot.limits,
     usage: summary.usage,
-  }
-}
-
-export type FreeSubscriptionInput = {
-  billingCycle: BillingCycle
-  idempotencyKey: string
-}
-
-/**
- * Activate the zero-cost India plan without creating a provider attempt.
- *
- * The billing table still remains the access source of truth: using an active
- * row lets the existing onboarding and request gates work unchanged, while
- * the migration trigger gives the row the same durable entitlement snapshot
- * as a paid subscription. Locking the tenant row makes two first-time Free
- * clicks converge on one subscription instead of racing the open-subscription
- * partial unique index.
- */
-export async function activateFreeSubscription(tenantId: string, input: FreeSubscriptionInput) {
-  const plan = getPlan('IN', 'free')
-  if (!plan) throw new EntitlementPlanError(500, 'The India Free plan is not configured')
-  const quote = calculateQuote(plan, input.billingCycle)
-
-  return forTenantTransaction(tenantId, async (tx) => {
-    const tenants = await tx.$queryRaw<Array<{ id: string; country: string | null }>>`
-      SELECT id, country
-      FROM public.tenants
-      WHERE id = ${tenantId}::uuid
-      FOR UPDATE
-    `
-    if (tenants.length === 0) throw new EntitlementPlanError(404, 'Tenant not found')
-    if ((tenants[0].country ?? '').trim().toUpperCase() !== 'IN') {
-      throw new EntitlementPlanError(400, 'The Free plan is available only in the India catalogue')
-    }
-
-    const existing = await tx.$queryRaw<any[]>`
-      SELECT *
-      FROM public.billing_subscriptions
-      WHERE tenant_id = ${tenantId}::uuid
-        AND status IN (${OPEN_SUBSCRIPTION_STATUSES[0]}, ${OPEN_SUBSCRIPTION_STATUSES[1]}, ${OPEN_SUBSCRIPTION_STATUSES[2]}, ${OPEN_SUBSCRIPTION_STATUSES[3]}, ${OPEN_SUBSCRIPTION_STATUSES[4]})
-      ORDER BY updated_at DESC
-      LIMIT 1
-      FOR UPDATE
-    `
-    if (existing[0]) {
-      if (existing[0].region === 'IN' && existing[0].plan_key === 'free' && existing[0].entitlement_status === 'active') {
-        return freeSubscriptionResponse(existing[0], input, quote)
-      }
-      throw new EntitlementPlanError(409, 'This account already has an active subscription. Plan changes are scheduled for a future billing cycle.')
-    }
-
-    const providerSubscriptionId = `free_${tenantId}_${input.idempotencyKey}`
-    const created = await tx.$queryRaw<any[]>`
-      INSERT INTO public.billing_subscriptions (
-        tenant_id,
-        provider_subscription_id,
-        provider_plan_id,
-        region,
-        plan_key,
-        billing_cycle,
-        currency,
-        base_amount_minor,
-        tax_amount_minor,
-        total_amount_minor,
-        tax_rate_bps,
-        included_store_count,
-        additional_store_count,
-        status,
-        entitlement_status,
-        current_start_at,
-        provider_payload
-      ) VALUES (
-        ${tenantId}::uuid,
-        ${providerSubscriptionId},
-        'free',
-        'IN',
-        'free',
-        ${input.billingCycle},
-        'INR',
-        ${quote.baseAmountMinor},
-        ${quote.taxAmountMinor},
-        ${quote.totalAmountMinor},
-        ${quote.taxRateBps},
-        ${includedStoresForPlan('free')},
-        0,
-        'active',
-        'active',
-        now(),
-        jsonb_build_object('source', 'free_plan', 'idempotency_key', ${input.idempotencyKey})
-      )
-      RETURNING *
-    `
-    return freeSubscriptionResponse(created[0], input, quote)
-  })
-}
-
-function freeSubscriptionResponse(row: any, input: FreeSubscriptionInput, quote: ReturnType<typeof calculateQuote>) {
-  return {
-    attemptId: row.id,
-    razorpayKeyId: '',
-    razorpaySubscriptionId: row.provider_subscription_id,
-    status: row.status,
-    region: 'IN' as const,
-    planKey: 'free',
-    billingCycle: row.billing_cycle ?? input.billingCycle,
-    currency: 'INR' as const,
-    quote,
   }
 }
 

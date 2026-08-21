@@ -224,7 +224,7 @@ export function buildPlanRequest(
 
 function providerAmount(plan: BillingPlanDefinition, billingCycle: BillingCycle, quote: { totalAmountMinor: number }): number {
   // Razorpay charges the total provider amount. Indian catalog prices are
-  // already GST-inclusive; US tax, when configured, is added by the quote.
+  // already GST-inclusive; international tax, when configured, is added by the quote.
   if (!Number.isSafeInteger(quote.totalAmountMinor) || quote.totalAmountMinor < 0) {
     throw new Error(`${plan.region}/${plan.key}/${billingCycle} has an invalid total amount`)
   }
@@ -340,7 +340,7 @@ async function main(): Promise<void> {
   }
 
   const { getPlans, calculateQuote, getPeriod } = await import('../src/services/billingCatalog')
-  const sourcePlans = [...getPlans('IN'), ...getPlans('US')]
+  const sourcePlans = [...getPlans('IN'), ...getPlans('INTL')]
   assertUniqueCatalog(sourcePlans)
   if (sourcePlans.length === 0) throw new Error('The billing catalog is empty')
   const outputPlans = cloneCatalog(sourcePlans)

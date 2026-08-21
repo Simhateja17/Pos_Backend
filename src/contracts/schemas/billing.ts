@@ -5,7 +5,9 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 // extension guard just like the other standalone schema modules.
 extendZodWithOpenApi(z)
 
-export const BillingRegionSchema = z.enum(['IN', 'US']).openapi('BillingRegion')
+// `US` remains accepted for clients and rows created before the international
+// catalogue was introduced. New responses and subscriptions use `INTL`.
+export const BillingRegionSchema = z.enum(['IN', 'INTL', 'US']).openapi('BillingRegion')
 export const BillingCycleSchema = z.enum(['monthly', 'annual']).openapi('BillingCycle')
 export const BillingCurrencySchema = z.enum(['INR', 'USD']).openapi('BillingCurrency')
 
@@ -51,6 +53,15 @@ export const BillingQuoteSchema = z
   })
   .openapi('BillingQuote')
 
+export const BillingAddonSchema = z
+  .object({
+    key: z.enum(['location', 'register', 'user']),
+    label: z.string(),
+    unitAmountMinor: z.number().int().nonnegative(),
+  })
+  .strict()
+  .openapi('BillingAddon')
+
 export const BillingPlanOptionSchema = z
   .object({
     key: z.string(),
@@ -62,6 +73,7 @@ export const BillingPlanOptionSchema = z
     popular: z.boolean(),
     features: z.array(z.string()),
     entitlements: EntitlementLimitsSchema,
+    addons: z.array(BillingAddonSchema),
     monthly: BillingQuoteSchema,
     annual: BillingQuoteSchema,
     monthlyAvailable: z.boolean(),
@@ -148,6 +160,7 @@ export const CancelSubscriptionSchema = z
 export type BillingRegion = z.infer<typeof BillingRegionSchema>
 export type BillingCycle = z.infer<typeof BillingCycleSchema>
 export type BillingCurrency = z.infer<typeof BillingCurrencySchema>
+export type BillingAddon = z.infer<typeof BillingAddonSchema>
 export type EntitlementValue = z.infer<typeof EntitlementValueSchema>
 export type EntitlementLimits = z.infer<typeof EntitlementLimitsSchema>
 export type EntitlementUsage = z.infer<typeof EntitlementUsageSchema>

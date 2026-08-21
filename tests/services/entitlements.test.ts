@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   decideEntitlement,
   ENTITLEMENT_VERSION,
+  effectiveEntitlementLimits,
   reservePosTransaction,
   snapshotForPlan,
   snapshotFromStoredRow,
@@ -76,11 +77,11 @@ function fakeTransaction(initialUsed = 0, posLimit = 50) {
 }
 
 describe('entitlement projection and enforcement', () => {
-  it('resolves an unknown plan downward to Free and never trusts malformed stored limits', () => {
+  it('resolves an unknown plan downward to Starter and never trusts malformed stored limits', () => {
     const unknown = snapshotForPlan('IN', 'does-not-exist')
-    expect(unknown.planKey).toBe('free')
-    expect(unknown.limits.maxActiveUsers).toBe(1)
-    expect(unknown.limits.monthlyPosTransactions).toBe(50)
+    expect(unknown.planKey).toBe('starter')
+    expect(unknown.limits.maxActiveUsers).toBe(5)
+    expect(unknown.limits.monthlyPosTransactions).toBe('unlimited')
 
     const malformed = snapshotFromStoredRow({
       plan_key: 'premium',
@@ -102,8 +103,8 @@ describe('entitlement projection and enforcement', () => {
         },
       },
     }, 'IN')
-    expect(malformed.planKey).toBe('free')
-    expect(malformed.limits.maxLocations).toBe(1)
+    expect(malformed.planKey).toBe('starter')
+    expect(malformed.limits.maxLocations).toBe(2)
 
     const retiredSnapshot = snapshotFromStoredRow({
       plan_key: 'starter',
@@ -127,6 +128,18 @@ describe('entitlement projection and enforcement', () => {
     }, 'IN')
     expect(retiredSnapshot.planKey).toBe('retired-india-plan')
     expect(retiredSnapshot.limits.maxLocations).toBe(2)
+  })
+
+  it('applies Pro add-on quantities to effective limits without changing the base snapshot', () => {
+    const base = snapshotForPlan('IN', 'pro')
+    const effective = effectiveEntitlementLimits(base.limits, {
+      additional_store_count: 2,
+      additional_register_count: 3,
+      additional_user_count: 4,
+    })
+
+    expect(base.limits).toMatchObject({ maxLocations: 6, maxActiveRegisters: 6, maxActiveUsers: 10 })
+    expect(effective).toMatchObject({ maxLocations: 8, maxActiveRegisters: 9, maxActiveUsers: 14 })
   })
 
   it('blocks exactly at a finite boundary and leaves unlimited values open', () => {

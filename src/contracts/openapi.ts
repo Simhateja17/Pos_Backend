@@ -109,6 +109,7 @@ import {
 } from './schemas/purchaseOrder'
 import {
   BillingPlanCatalogSchema,
+  BillingRegionSchema,
   BillingStatusSchema,
   CancelSubscriptionSchema,
   CreateSubscriptionResponseSchema,
@@ -128,7 +129,7 @@ registry.registerPath({
   method: 'get',
   path: '/billing/plans',
   description: 'Read the backend-owned subscription catalog for the authenticated tenant region. Provider Plan IDs are never sent to the browser.',
-  request: { query: z.object({ region: z.enum(['IN', 'US']).optional() }) },
+  request: { query: z.object({ region: BillingRegionSchema.optional() }) },
   responses: {
     200: { description: 'Subscription plan catalog', content: { 'application/json': { schema: BillingPlanCatalogSchema } } },
     400: { description: 'Region does not match the tenant account' },

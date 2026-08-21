@@ -41,8 +41,10 @@ function isUniqueViolation(error: unknown): boolean {
 
 export function regionForCountry(country: string | null | undefined): BillingRegion {
   if ((country ?? '').trim().toUpperCase() === 'IN') return 'IN'
-  if ((country ?? '').trim().toUpperCase() === 'US') return 'US'
-  throw new BillingHttpError(400, 'Subscriptions are currently available for India and the United States only')
+  // The international catalogue is denominated in USD. Keep country
+  // matching broad enough for the stated US/UK/Gulf rollout without creating
+  // a new billing region for every country code.
+  return 'INTL'
 }
 
 async function tenantRegion(tenantId: string): Promise<BillingRegion> {
@@ -173,7 +175,10 @@ async function projectSubscription(tenantId: string, attempt: any, provider: Raz
       // bought a 3-shop plan keeps 3 shops even if that tier is later
       // redefined — repricing an existing customer by editing a config file
       // should not be possible by accident.
-      included_store_count: includedStoresForPlan(attempt.plan_key),
+      included_store_count: includedStoresForPlan(attempt.plan_key, attempt.region),
+      additional_store_count: 0,
+      additional_register_count: 0,
+      additional_user_count: 0,
       status: provider.status === 'active' ? 'active' : 'created',
       entitlement_status: provider.status === 'active' ? 'active' : 'blocked',
       ...providerSnapshotDates(provider),

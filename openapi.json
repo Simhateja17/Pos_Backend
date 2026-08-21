@@ -36,6 +36,7 @@
         "type": "string",
         "enum": [
           "IN",
+          "INTL",
           "US"
         ]
       },
@@ -72,6 +73,12 @@
           },
           "entitlements": {
             "$ref": "#/components/schemas/EntitlementLimits"
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingAddon"
+            }
           },
           "monthly": {
             "$ref": "#/components/schemas/BillingQuote"
@@ -111,6 +118,7 @@
           "popular",
           "features",
           "entitlements",
+          "addons",
           "monthly",
           "annual",
           "monthlyAvailable",
@@ -186,6 +194,32 @@
             "minimum": 0
           }
         ]
+      },
+      "BillingAddon": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "location",
+              "register",
+              "user"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "unitAmountMinor": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "unitAmountMinor"
+        ],
+        "additionalProperties": false
       },
       "BillingQuote": {
         "type": "object",
@@ -1048,7 +1082,7 @@
             "enum": [
               "starter",
               "growth",
-              "enterprise"
+              "pro"
             ]
           },
           "billingCycle": {
@@ -7235,11 +7269,7 @@
         "parameters": [
           {
             "schema": {
-              "type": "string",
-              "enum": [
-                "IN",
-                "US"
-              ]
+              "$ref": "#/components/schemas/BillingRegion"
             },
             "required": false,
             "name": "region",
