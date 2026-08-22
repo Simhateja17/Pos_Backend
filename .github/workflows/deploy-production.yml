@@ -1,4 +1,4 @@
-name: Deploy backend to Azure VM
+name: Deploy backend to GCP VMs
 
 on:
   push:
@@ -7,50 +7,56 @@ on:
 
 permissions:
   contents: read
+  id-token: write # required for GCP Workload Identity Federation — no stored key
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
-      - name: Check out backend
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js 24
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+      - run: npm install
+      - run: npm run build
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build backend
-        run: npm run build
-
-  migrate:
+  deploy:
     needs: verify
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - region: india
+            instance: ambel-india-backend
+            zone: asia-south1-c
+            api_host: api-in.ambelpos.com
+            database_url_secret: DATABASE_URL_IN
+            rls_database_url_secret: RLS_DATABASE_URL_IN
+          - region: international
+            instance: instance-20260821-044801
+            zone: us-central1-c
+            api_host: api-us.ambelpos.com
+            database_url_secret: DATABASE_URL_INTL
+            rls_database_url_secret: RLS_DATABASE_URL_INTL
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      RLS_DATABASE_URL: ${{ secrets.RLS_DATABASE_URL }}
+      GCP_PROJECT: refreshing-oven-489212-j9
+      DATABASE_URL: ${{ secrets[matrix.database_url_secret] }}
+      RLS_DATABASE_URL: ${{ secrets[matrix.rls_database_url_secret] }}
     steps:
-      - name: Check out backend
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           # The migration decision compares this commit with its immediate
           # predecessor. A shallow one-commit checkout cannot make that safe.
           fetch-depth: 2
 
-      - name: Set up Node.js 24
-        uses: actions/setup-node@v4
+      - id: auth
+        uses: google-github-actions/auth@v2
         with:
-          node-version: 24
-          cache: npm
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Install dependencies
-        run: npm install
+      - uses: google-github-actions/setup-gcloud@v2
 
       - name: Detect checked-in migration changes
         id: migration_changes
@@ -64,61 +70,34 @@ jobs:
             echo "SQL migration change detected; db push is required."
           fi
 
-      - name: Apply checked-in Supabase migrations
+      - name: Apply checked-in Supabase migrations (${{ matrix.region }})
         if: steps.migration_changes.outputs.changed == 'true'
         run: npm exec --yes supabase@latest -- db push --db-url "$DATABASE_URL" --include-all
 
-      - name: Verify production schema and runtime identity
-        run: npm run db:verify-production
-
-  deploy:
-    needs: migrate
-    runs-on: ubuntu-latest
-    env:
-      VM_HOST: ${{ secrets.AZURE_VM_HOST }}
-      VM_USER: ${{ secrets.AZURE_VM_USER }}
-      SSH_KEY: ${{ secrets.AZURE_VM_SSH_KEY }}
-      KNOWN_HOSTS: ${{ secrets.AZURE_VM_KNOWN_HOSTS }}
-    steps:
-      - name: Configure SSH
+      - name: Deploy and verify backend (${{ matrix.region }})
         run: |
-          install -d -m 700 "$HOME/.ssh"
-          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/azure_vm_ed25519"
-          chmod 600 "$HOME/.ssh/azure_vm_ed25519"
-          printf '%s\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 644 "$HOME/.ssh/known_hosts"
+          gcloud compute ssh "${{ matrix.instance }}" \
+            --zone="${{ matrix.zone }}" \
+            --project="$GCP_PROJECT" \
+            --tunnel-through-iap \
+            --command='
+              set -euo pipefail
+              export NVM_DIR="$HOME/.nvm"
+              . "$NVM_DIR/nvm.sh"
+              nvm use 24 >/dev/null
+              cd "$HOME/Ambel_pos/backend" && git pull --ff-only origin main
+              cd "$HOME/Ambel_pos" && bash deploy/deploy.sh
+              if ! curl --fail --silent --show-error \
+                --retry 15 --retry-delay 2 --retry-connrefused \
+                http://127.0.0.1:4000/health; then
+                pm2 status
+                pm2 logs backend --lines 60 --nostream
+                exit 1
+              fi
+            '
 
-      - name: Deploy and verify backend
-        run: |
-          ssh -i "$HOME/.ssh/azure_vm_ed25519" \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            "$VM_USER@$VM_HOST" 'bash -s' <<'REMOTE'
-          set -euo pipefail
-          export NVM_DIR="$HOME/.nvm"
-          . "$NVM_DIR/nvm.sh"
-          nvm use 24 >/dev/null
-          cd "$HOME/backend"
-          git pull --ff-only origin main
-          npm install
-          npm run build
-          pm2 reload couture-backend --update-env
-          pm2 save
-          if ! curl --fail --silent --show-error \
-            --retry 15 \
-            --retry-delay 2 \
-            --retry-connrefused \
-            http://127.0.0.1:4000/health; then
-            pm2 status
-            pm2 logs couture-backend --lines 60 --nostream
-            exit 1
-          fi
-          REMOTE
-
-      - name: Verify public HTTPS endpoint
+      - name: Verify public HTTPS endpoint (${{ matrix.region }})
         run: |
           curl --fail --silent --show-error \
-            --retry 15 \
-            --retry-delay 2 \
-            --retry-connrefused \
-            https://posbackend.withcouture.me/health
+            --retry 15 --retry-delay 2 --retry-connrefused \
+            "https://${{ matrix.api_host }}/health"
