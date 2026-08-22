@@ -6,6 +6,255 @@
   },
   "components": {
     "schemas": {
+      "HardwareOverview": {
+        "type": "object",
+        "properties": {
+          "terminals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "cashMode": {
+                  "type": "string"
+                },
+                "isCurrentDevice": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "cashMode",
+                "isCurrentDevice"
+              ]
+            }
+          },
+          "companions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "terminalId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "machineName": {
+                  "type": "string"
+                },
+                "os": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "capabilities": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "lastSeenAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "online": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "terminalId",
+                "machineName",
+                "os",
+                "version",
+                "capabilities",
+                "lastSeenAt",
+                "online"
+              ]
+            }
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "terminalId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "attempts": {
+                  "type": "integer"
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "id",
+                "terminalId",
+                "kind",
+                "status",
+                "attempts",
+                "error",
+                "createdAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "terminals",
+          "companions",
+          "jobs"
+        ]
+      },
+      "CreateHardwarePairing": {
+        "type": "object",
+        "properties": {
+          "terminalId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "terminalId"
+        ],
+        "additionalProperties": false
+      },
+      "CreateHardwareTestJob": {
+        "type": "object",
+        "properties": {
+          "terminalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "test_print",
+              "open_drawer"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          }
+        },
+        "required": [
+          "terminalId",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "HardwarePair": {
+        "type": "object",
+        "properties": {
+          "pairingCode": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 300
+          },
+          "machineName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "os": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          }
+        },
+        "required": [
+          "pairingCode",
+          "machineName",
+          "os",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "HardwareHeartbeat": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": {},
+            "default": {}
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "HardwareJobResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed"
+            ]
+          },
+          "error": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "result": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
       "BillingPlanCatalog": {
         "type": "object",
         "properties": {
@@ -3055,6 +3304,15 @@
           "totalAmount": {
             "type": "string"
           },
+          "cashReceived": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "changeDue": {
+            "type": "string"
+          },
           "status": {
             "type": "string"
           },
@@ -3103,6 +3361,8 @@
           "discountAmount",
           "taxAmount",
           "totalAmount",
+          "cashReceived",
+          "changeDue",
           "status",
           "createdBy",
           "createdAt",
@@ -3266,6 +3526,10 @@
               "$ref": "#/components/schemas/PaymentInput"
             },
             "minItems": 1
+          },
+          "cashReceived": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d{2}$"
           },
           "customer": {
             "type": "object",
@@ -7325,6 +7589,222 @@
     "parameters": {}
   },
   "paths": {
+    "/hardware": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Hardware state for the active store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareOverview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hardware/pairing-codes": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHardwarePairing"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Short-lived single-use pairing code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pairingCode": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "terminalId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "pairingCode",
+                    "expiresAt",
+                    "terminalId"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hardware/jobs": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHardwareTestJob"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Hardware job queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hardware/companions/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Companion revoked"
+          }
+        }
+      }
+    },
+    "/hardware/companion/pair": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HardwarePair"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Companion paired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "companionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "terminalId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "companionId",
+                    "terminalId",
+                    "token"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hardware/companion/heartbeat": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HardwareHeartbeat"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Heartbeat recorded"
+          }
+        }
+      }
+    },
+    "/hardware/companion/jobs/next": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Next job or null"
+          }
+        }
+      }
+    },
+    "/hardware/companion/jobs/{id}/result": {
+      "post": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HardwareJobResult"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Result recorded"
+          }
+        }
+      }
+    },
     "/billing/plans": {
       "get": {
         "description": "Read the backend-owned subscription catalog for the authenticated tenant region. Provider Plan IDs are never sent to the browser.",

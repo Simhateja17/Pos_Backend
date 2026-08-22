@@ -116,6 +116,13 @@ import {
   CreateSubscriptionSchema,
   VerifySubscriptionSchema,
 } from './schemas/billing'
+import {
+  CreateHardwarePairingSchema,
+  CreateHardwareTestJobSchema,
+  HardwareHeartbeatSchema,
+  HardwareJobResultSchema,
+  HardwarePairSchema,
+} from './schemas/hardware'
 
 // extendZodWithOpenApi(z) is NOT called here — `./schemas/auth.ts` already
 // calls it exactly once at process load, and this file imports schemas from
@@ -124,6 +131,21 @@ import {
 // comment for the authoritative single-call-site note.
 
 const registry = new OpenAPIRegistry()
+
+const HardwareOverviewSchema = z.object({
+  terminals: z.array(z.object({ id: z.string().uuid(), name: z.string(), cashMode: z.string(), isCurrentDevice: z.boolean() })),
+  companions: z.array(z.object({ id: z.string().uuid(), terminalId: z.string().uuid(), machineName: z.string(), os: z.string(), version: z.string(), capabilities: z.record(z.string(), z.unknown()), lastSeenAt: z.string().datetime().nullable(), online: z.boolean() })),
+  jobs: z.array(z.object({ id: z.string().uuid(), terminalId: z.string().uuid(), kind: z.string(), status: z.string(), attempts: z.number().int(), error: z.string().nullable(), createdAt: z.string().datetime() })),
+}).openapi('HardwareOverview')
+
+registry.registerPath({ method: 'get', path: '/hardware', responses: { 200: { description: 'Hardware state for the active store', content: { 'application/json': { schema: HardwareOverviewSchema } } } } })
+registry.registerPath({ method: 'post', path: '/hardware/pairing-codes', request: { body: { content: { 'application/json': { schema: CreateHardwarePairingSchema } } } }, responses: { 201: { description: 'Short-lived single-use pairing code', content: { 'application/json': { schema: z.object({ pairingCode: z.string(), expiresAt: z.string().datetime(), terminalId: z.string().uuid() }) } } } } })
+registry.registerPath({ method: 'post', path: '/hardware/jobs', request: { body: { content: { 'application/json': { schema: CreateHardwareTestJobSchema } } } }, responses: { 202: { description: 'Hardware job queued', content: { 'application/json': { schema: z.object({ id: z.string().uuid(), status: z.string() }) } } } } })
+registry.registerPath({ method: 'delete', path: '/hardware/companions/{id}', request: { params: z.object({ id: z.string().uuid() }) }, responses: { 204: { description: 'Companion revoked' } } })
+registry.registerPath({ method: 'post', path: '/hardware/companion/pair', request: { body: { content: { 'application/json': { schema: HardwarePairSchema } } } }, responses: { 201: { description: 'Companion paired', content: { 'application/json': { schema: z.object({ companionId: z.string().uuid(), terminalId: z.string().uuid(), token: z.string() }) } } } } })
+registry.registerPath({ method: 'post', path: '/hardware/companion/heartbeat', request: { body: { content: { 'application/json': { schema: HardwareHeartbeatSchema } } } }, responses: { 200: { description: 'Heartbeat recorded' } } })
+registry.registerPath({ method: 'get', path: '/hardware/companion/jobs/next', responses: { 200: { description: 'Next job or null' } } })
+registry.registerPath({ method: 'post', path: '/hardware/companion/jobs/{id}/result', request: { params: z.object({ id: z.string().uuid() }), body: { content: { 'application/json': { schema: HardwareJobResultSchema } } } }, responses: { 200: { description: 'Result recorded' } } })
 
 registry.registerPath({
   method: 'get',

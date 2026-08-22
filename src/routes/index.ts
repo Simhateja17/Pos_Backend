@@ -35,6 +35,8 @@ import { requireRole } from '../middleware/requireRole'
 import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
 import { storeContextMiddleware } from '../middleware/storeContext'
 import setupRouter from './setup'
+import hardwareRouter from './hardware'
+import hardwareCompanionRouter from './hardwareCompanion'
 
 const router = Router()
 
@@ -47,6 +49,9 @@ router.use('/auth', authRouter)
 // the tenant-aware, auth-gated /billing/plans route above is never confused
 // with this one.
 router.use('/public', publicPlansRouter)
+// The installed Companion authenticates with its own revocable, high-entropy
+// machine token rather than a staff browser session.
+router.use('/hardware/companion', hardwareCompanionRouter)
 
 // /terminal/pin/* (PIN-switch) and /members/* both require an already
 // authenticated terminal session (the owner/manager who is logged in on this
@@ -129,6 +134,7 @@ router.use('/email', ...appAccess, requireRole('manager'), emailRouter)
 // authority for checkout.  A store context is still mandatory so setup state
 // cannot bleed between outlets.
 router.use('/setup', authMiddleware, operatorContext, storeContextMiddleware, requireRole('manager'), requireOperatorOnSpecificStore, setupRouter)
+router.use('/hardware', authMiddleware, requireSubscription, operatorContext, storeContextMiddleware, requireRole('manager'), requireOperatorOnSpecificStore, hardwareRouter)
 
 router.use('/onboarding', authMiddleware, operatorContext, requireOperatorOnPairedDevice, requireRole('manager'), onboardingRouter)
 router.use('/billing', authMiddleware, operatorContext, requireOperatorOnPairedDevice, billingRouter)

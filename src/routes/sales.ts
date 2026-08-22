@@ -13,6 +13,7 @@ import { sendLoggedEmail } from '../services/email'
 import { findPairedTerminal } from '../lib/counterDevice'
 import { consumeRateLimit } from '../lib/rateLimit'
 import { effectivePricesForVariants } from '../lib/storePricing'
+import { calculateCashChange } from '../lib/cashTender'
 
 const router = Router()
 
@@ -102,6 +103,8 @@ function toSaleJson(
     discountAmount: sale.discount_amount.toString(),
     taxAmount: sale.tax_amount.toString(),
     totalAmount: sale.total_amount.toString(),
+    cashReceived: sale.cash_received?.toString() ?? null,
+    changeDue: sale.change_due?.toString() ?? '0.00',
     status: sale.status,
     createdBy: sale.created_by,
     createdAt: sale.created_at.toISOString(),
@@ -216,6 +219,38 @@ async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string, st
   ])
 
   return toSaleJson(sale, lines, payments, tenant?.business_name ?? null)
+}
+
+async function enqueueHardwareOutputs(input: {
+  tenantId: string
+  storeId: string
+  terminalId: string
+  sale: { id: string; totalAmount: string; cashReceived?: string | null; changeDue?: string }
+  businessName: string
+  createdBy: string | null
+}) {
+  await forTenantTransaction(input.tenantId, async (tx) => {
+    const companion = await tx.hardware_companions.findFirst({
+      where: { terminal_id: input.terminalId, store_id: input.storeId, revoked_at: null },
+      select: { id: true },
+    })
+    if (!companion) return
+    const jobs: any[] = []
+    if (input.sale.cashReceived) {
+      jobs.push({
+        tenant_id: input.tenantId, store_id: input.storeId, terminal_id: input.terminalId,
+        companion_id: companion.id, sale_id: input.sale.id, kind: 'open_drawer', payload: {},
+        idempotency_key: `sale:${input.sale.id}:drawer`, created_by: input.createdBy,
+      })
+    }
+    jobs.push({
+      tenant_id: input.tenantId, store_id: input.storeId, terminal_id: input.terminalId,
+      companion_id: companion.id, sale_id: input.sale.id, kind: 'print_receipt',
+      payload: { text: `${input.businessName}\nBill #${input.sale.id.slice(0, 8)}\nTotal: INR ${input.sale.totalAmount}\n${input.sale.cashReceived ? `Cash received: INR ${input.sale.cashReceived}\nChange: INR ${input.sale.changeDue ?? '0.00'}\n` : ''}Thank you\n` },
+      idempotency_key: `sale:${input.sale.id}:receipt:original`, created_by: input.createdBy,
+    })
+    if (jobs.length) await tx.hardware_jobs.createMany({ data: jobs, skipDuplicates: true })
+  })
 }
 
 /**
@@ -388,6 +423,10 @@ router.post('/', async (req, res) => {
         }
       }
 
+      const cashTender = calculateCashChange(parsed.data.payments, parsed.data.cashReceived)
+      if (!cashTender.ok) return { status: 400, body: { error: cashTender.error } }
+      const { cashPayment, cashReceived, changeDue } = cashTender
+
       const customer = await findOrCreateCustomer(tx, tenantId, parsed.data.customer)
       const createdBy = await resolveActingStaffId(tx, req)
 
@@ -402,6 +441,8 @@ router.post('/', async (req, res) => {
           discount_amount: cartDiscount.toString(),
           tax_amount: tax.toString(),
           total_amount: total.toString(),
+          cash_received: cashPayment.greaterThan(0) ? cashReceived.toString() : null,
+          change_due: changeDue.toString(),
           created_by: createdBy,
         },
       })
@@ -493,6 +534,17 @@ router.post('/', async (req, res) => {
       default: {
         const successBody = result.body as { id: string; totalAmount: string }
         res.status(201).json(successBody)
+        if (pairedTerminal) {
+          const hardwareSale = result.body as { id: string; totalAmount: string; cashReceived?: string | null; changeDue?: string; createdBy?: string | null }
+          void enqueueHardwareOutputs({
+            tenantId,
+            storeId,
+            terminalId: pairedTerminal.id,
+            sale: hardwareSale,
+            businessName: (result as any).businessName ?? '',
+            createdBy: hardwareSale.createdBy ?? null,
+          }).catch((error) => console.error(`[hardware] failed to enqueue sale outputs sale=${hardwareSale.id}`, error))
+        }
         // CHECK-06: fire-and-forget — deliberately NOT awaited. A slow/failed
         // email must never delay or fail the sale's own HTTP response (the
         // sale already committed above). `void` makes the intentional

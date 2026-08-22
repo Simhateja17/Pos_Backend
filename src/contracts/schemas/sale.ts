@@ -28,6 +28,10 @@ export const CreateSaleSchema = z
     cartDiscountPercent: z.string().regex(/^\d{1,2}(\.\d{1,2})?$/).optional(),
     cartDiscountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
     payments: z.array(PaymentInputSchema).min(1),
+    // Amount of physical cash handed over. Payment rows continue to record
+    // only the amount allocated to the bill; this separate value lets the
+    // server calculate change without inflating revenue or tender totals.
+    cashReceived: z.string().regex(/^\d+\.\d{2}$/).optional(),
     customer: z
       .object({
         id: z.string().uuid().optional(),
@@ -77,6 +81,8 @@ export const SaleSchema = z
     discountAmount: z.string(),
     taxAmount: z.string(),
     totalAmount: z.string(),
+    cashReceived: z.string().nullable(),
+    changeDue: z.string(),
     status: z.string(),
     createdBy: z.string().uuid().nullable(),
     createdAt: z.string(),
