@@ -26,6 +26,7 @@ import importRouter from './import'
 import reportsRouter from './reports'
 import emailRouter from './email'
 import billingRouter from './billing'
+import publicPlansRouter from './publicPlans'
 import storesRouter from './stores'
 import availabilityRouter from './availability'
 import transfersRouter from './transfers'
@@ -40,6 +41,12 @@ const router = Router()
 // /auth/* (signup, login) is deliberately NOT gated by authMiddleware — a
 // caller has no session yet when signing up or logging in.
 router.use('/auth', authRouter)
+
+// /public/* is the marketing site's surface: no session, no tenant, region
+// comes from the caller's own IP/switcher detection. Kept out of /billing so
+// the tenant-aware, auth-gated /billing/plans route above is never confused
+// with this one.
+router.use('/public', publicPlansRouter)
 
 // /terminal/pin/* (PIN-switch) and /members/* both require an already
 // authenticated terminal session (the owner/manager who is logged in on this

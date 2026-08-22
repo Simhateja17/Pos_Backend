@@ -31,8 +31,12 @@ export const SignupSchema = z
     state: z.string().min(1),
     postalCode: z.string().min(1),
     country: z.string().default('IN'),
-    /** GSTIN. Stored in tenants.tax_id. */
-    taxId: z.string().max(15).optional(),
+    /**
+     * GSTIN for India signups (15 chars, fixed format); VAT/EIN/TRN for
+     * International signups, which vary in length and aren't format-checked
+     * here. Stored as-is in tenants.tax_id either way.
+     */
+    taxId: z.string().max(30).optional(),
     gstStatus: z.enum(['regular', 'composition', 'unregistered']).optional(),
     pan: z.string().max(10).optional(),
     placeOfSupply: z.string().max(100).optional(),

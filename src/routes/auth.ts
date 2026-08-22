@@ -36,6 +36,16 @@ const supabaseAdmin = createClient(
 const supabaseAnon = createClient(
   process.env.SUPABASE_URL as string,
   process.env.SUPABASE_ANON_KEY as string,
+  {
+    // This server client only verifies OTPs and hands the minted session to
+    // the browser. If it retains or auto-refreshes that session, the server
+    // and browser become competing owners of Supabase's one-time refresh
+    // token family and can revoke an otherwise long-lived POS login.
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  },
 )
 
 const DEFAULT_OTP_RETRY_AFTER_SECONDS = 60

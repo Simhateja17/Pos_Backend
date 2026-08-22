@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import express from 'express'
 import request from 'supertest'
+import { createClient } from '@supabase/supabase-js'
 
 process.env.SUPABASE_URL = 'http://localhost:54321'
 process.env.SUPABASE_ANON_KEY = 'anon-key'
@@ -117,6 +118,7 @@ function validSignupBody() {
 describe('POST /auth/signup and /auth/login', () => {
   beforeEach(() => {
     vi.resetModules()
+    vi.mocked(createClient).mockClear()
     createUserMock.mockReset()
     deleteUserMock.mockReset()
     adminSignOutMock.mockReset()
@@ -152,6 +154,21 @@ describe('POST /auth/signup and /auth/login', () => {
     app.use('/auth', authRouter)
     return app
   }
+
+  it('does not retain or auto-refresh browser-owned sessions in the backend OTP client', async () => {
+    await buildApp()
+
+    expect(createClient).toHaveBeenCalledWith(
+      'http://localhost:54321',
+      'anon-key',
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      },
+    )
+  })
 
   it('Test 1: valid signup creates a Supabase Auth user, a tenants row, and an owner staff_members row, returning 201 with { user, session }', async () => {
     verifyOtpMock.mockResolvedValue({

@@ -191,8 +191,13 @@ async function createPlan(
   })
 }
 
+// v2: the original catalog_key namespace (no version suffix) has stale Plans
+// from the pre-Ambel-pricing catalog (old region codes, old amounts) that
+// Razorpay's immutability rules block from ever being corrected. Versioning
+// the key lets provisioning create fresh Plans under the current catalog
+// without touching those orphaned records.
 export function catalogKey(plan: BillingPlanDefinition, billingCycle: BillingCycle): string {
-  return `couture:${plan.region}:${plan.key}:${billingCycle}`
+  return `couture:v2:${plan.region}:${plan.key}:${billingCycle}`
 }
 
 export function razorpayPeriod(billingCycle: BillingCycle): 'monthly' | 'yearly' {
