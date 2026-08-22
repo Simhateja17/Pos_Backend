@@ -12,6 +12,11 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      # prisma generate (npm install's postinstall) just needs a resolvable
+      # connection string to introspect the schema — both regions' DBs are
+      # schema-identical, so either works for this build-only check.
+      DATABASE_URL: ${{ secrets.DATABASE_URL_IN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
