@@ -81,9 +81,9 @@ jobs:
 
       - name: Deploy and verify backend (${{ matrix.region }})
         run: |
-          # The app and its PM2 daemon live under the `simhateja` account on the
+          # The app and its PM2 daemon live under the `teja` account on the
           # VM. OS Login logs CI in as a per-service-account user, so the remote
-          # script must be re-entered as `simhateja` (`-H` fixes $HOME) or
+          # script must be re-entered as `teja` (`-H` fixes $HOME) or
           # $HOME/Ambel_pos does not exist and `pm2 reload` finds no daemon.
           # Piped over stdin rather than passed via --command to avoid nesting
           # three levels of shell quoting.
@@ -106,7 +106,7 @@ jobs:
             --zone="${{ matrix.zone }}" \
             --project="$GCP_PROJECT" \
             --tunnel-through-iap \
-            --command='sudo -u simhateja -H bash -s' < remote-deploy.sh
+            --command='sudo -u teja -H bash -s' < remote-deploy.sh
 
       - name: Verify public HTTPS endpoint (${{ matrix.region }})
         run: |
