@@ -67,6 +67,42 @@ async function findOpenSubscription(tenantId: string): Promise<any | null> {
   })
 }
 
+async function resumeUnpaidCreatedSubscription(
+  tenantId: string,
+  subscription: any,
+  input: CreateSubscriptionInput,
+  region: BillingRegion,
+): Promise<any | null> {
+  const isSameUnpaidCheckout = subscription.status === 'created'
+    && subscription.entitlement_status === 'blocked'
+    && !subscription.last_payment_id
+    && subscription.plan_key === input.planKey
+    && subscription.billing_cycle === input.billingCycle
+    && subscription.region === region
+    && typeof subscription.attempt_id === 'string'
+    && typeof subscription.provider_subscription_id === 'string'
+
+  if (!isSameUnpaidCheckout) return null
+
+  const attempt = await findAttempt(tenantId, subscription.attempt_id)
+  if (!attempt || attempt.provider_subscription_id !== subscription.provider_subscription_id) return null
+
+  let provider: RazorpaySubscription
+  try {
+    provider = await fetchRazorpaySubscription(subscription.provider_subscription_id)
+  } catch {
+    throw new BillingHttpError(503, 'We could not check your unfinished payment. Please retry in a moment.')
+  }
+
+  // Creating a Razorpay Subscription is not a successful payment. While it
+  // remains `created`, Checkout can safely be opened again with the original
+  // provider subscription and attempt IDs, even if the browser lost its old
+  // sessionStorage idempotency key after navigating away or closing the tab.
+  if (provider.status !== 'created' || provider.plan_id !== attempt.provider_plan_id) return null
+
+  return subscriptionResponse(attempt, region)
+}
+
 function amount(value: unknown): number {
   return Number(value ?? 0)
 }
@@ -239,14 +275,24 @@ export async function createSubscription(tenantId: string, input: CreateSubscrip
   let attempt: any
   // Look up the idempotency row before checking for an open subscription. A
   // user who closed Checkout must be able to reopen the exact same provider
-  // subscription; creating a new idempotency key while one is open remains a
-  // conflict.
+  // subscription. The recovery below also handles a browser that lost the
+  // original key, but only for the same unpaid plan and billing cycle.
   attempt = await client.billing_subscription_attempts.findFirst({
     where: { tenant_id: tenantId, idempotency_key: input.idempotencyKey },
   })
   if (!attempt) {
     const existingOpen = await findOpenSubscription(tenantId)
     if (existingOpen) {
+      const resumed = await resumeUnpaidCreatedSubscription(tenantId, existingOpen, input, region)
+      if (resumed) return resumed
+      if (existingOpen.status === 'created'
+        && existingOpen.entitlement_status === 'blocked'
+        && !existingOpen.last_payment_id) {
+        throw new BillingHttpError(
+          409,
+          `An unfinished ${existingOpen.plan_key} ${existingOpen.billing_cycle} payment exists. Select that plan to resume checkout.`,
+        )
+      }
       throw new BillingHttpError(409, 'This account already has a subscription. Plan changes will be available from a future billing cycle.')
     }
   }
