@@ -19,7 +19,7 @@ const OWNER_ONLY_FIELDS = [
 
 type SettingsRole = 'owner' | 'manager'
 
-function editableFields(role: SettingsRole) {
+function editableFields(role: SettingsRole, international: boolean) {
   const owner = role === 'owner'
   return {
     businessName: owner,
@@ -29,18 +29,20 @@ function editableFields(role: SettingsRole) {
     city: true,
     state: true,
     postalCode: true,
-    gstStatus: owner,
-    gstin: owner,
-    pan: owner,
-    placeOfSupply: true,
+    gstStatus: international ? false : owner,
+    gstin: international ? false : owner,
+    pan: international ? false : owner,
+    placeOfSupply: international ? false : true,
     businessType: owner,
-    combinedTaxRatePercent: true,
+    combinedTaxRatePercent: international ? false : true,
+    salesTaxRates: international,
     discountThresholdPercent: owner,
     barcodeLabelFormat: owner,
   }
 }
 
 function toSettingsJson(tenant: any, store: any, role: SettingsRole) {
+  const international = tenant.country !== 'IN'
   const combinedFraction =
     Number(store.tax_rate_state ?? 0) +
     Number(store.tax_rate_county ?? 0) +
@@ -50,7 +52,8 @@ function toSettingsJson(tenant: any, store: any, role: SettingsRole) {
   // Address and locality are store facts.  Empty strings preserve the stable
   // response shape for legacy stores whose address was not filled in yet;
   // they are never silently replaced with the registered tenant address.
-  const result = {
+  const common = {
+    region: international ? 'INTL' as const : 'IN' as const,
     businessName: tenant.business_name,
     tradeName: tenant.trade_name,
     addressLine1: store.address_line1 ?? '',
@@ -58,18 +61,33 @@ function toSettingsJson(tenant: any, store: any, role: SettingsRole) {
     city: store.city ?? '',
     state: store.state ?? '',
     postalCode: store.postal_code ?? '',
+    businessType: tenant.business_type,
+    discountThresholdPercent: Number(tenant.discount_threshold_percent ?? 0).toFixed(2),
+    barcodeLabelFormat: tenant.barcode_label_format ?? 'code128',
+  }
+
+  if (international) {
+    return {
+      ...common,
+      salesTaxRates: {
+        state: (Number(store.tax_rate_state ?? 0) * 100).toFixed(4),
+        county: (Number(store.tax_rate_county ?? 0) * 100).toFixed(4),
+        city: (Number(store.tax_rate_city ?? 0) * 100).toFixed(4),
+        district: (Number(store.tax_rate_district ?? 0) * 100).toFixed(4),
+      },
+      editableFields: editableFields(role, true),
+    }
+  }
+
+  return {
+    ...common,
     gstStatus: tenant.gst_status,
     gstin: tenant.tax_id,
     pan: tenant.pan,
     placeOfSupply: store.place_of_supply,
-    businessType: tenant.business_type,
     combinedTaxRatePercent: (combinedFraction * 100).toFixed(4),
-    discountThresholdPercent: Number(tenant.discount_threshold_percent ?? 0).toFixed(2),
-    barcodeLabelFormat: tenant.barcode_label_format ?? 'code128',
-    editableFields: editableFields(role),
+    editableFields: editableFields(role, false),
   }
-
-  return result
 }
 
 /**
@@ -117,7 +135,7 @@ router.get('/', requireRole('manager'), async (req, res) => {
   return readSettings(req, res, storeId)
 })
 
-router.patch('/', requireRole('manager'), async (req, res) => {
+async function updateSettings(req: Request, res: Response) {
   const storeId = singleStoreId(req, res)
   if (!storeId) return
 
@@ -158,51 +176,75 @@ router.patch('/', requireRole('manager'), async (req, res) => {
     state,
     postalCode,
     placeOfSupply,
+    salesTaxRates,
   } = parsed.data
 
-  const tenantData: Record<string, unknown> = {}
-  if (businessName !== undefined) tenantData.business_name = businessName
-  if (tradeName !== undefined) tenantData.trade_name = tradeName
-  if (gstStatus !== undefined) tenantData.gst_status = gstStatus
-  if (gstin !== undefined) tenantData.tax_id = gstin
-  if (pan !== undefined) tenantData.pan = pan
-  if (businessType !== undefined) tenantData.business_type = businessType
-  if (discountThresholdPercent !== undefined) tenantData.discount_threshold_percent = discountThresholdPercent
-  if (barcodeLabelFormat !== undefined) tenantData.barcode_label_format = barcodeLabelFormat
-
-  const storeData: Record<string, unknown> = {}
-  if (addressLine1 !== undefined) storeData.address_line1 = addressLine1
-  if (addressLine2 !== undefined) storeData.address_line2 = addressLine2
-  if (city !== undefined) storeData.city = city
-  if (state !== undefined) storeData.state = state
-  if (postalCode !== undefined) storeData.postal_code = postalCode
-  if (placeOfSupply !== undefined) storeData.place_of_supply = placeOfSupply
-
-  if (combinedTaxRatePercent !== undefined) {
-    // The API speaks in human percentages (8 means 8%), while checkout reads
-    // four decimal fractions.  Keep the existing deterministic split.
-    const quarter = combinedTaxRatePercent / 100 / 4
-    storeData.tax_rate_state = quarter
-    storeData.tax_rate_county = quarter
-    storeData.tax_rate_city = quarter
-    storeData.tax_rate_district = quarter
-  }
-
   try {
-    const [updatedTenant, updatedStore] = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+    const result = await forTenantTransaction(req.user!.tenantId, async (tx: any) => {
+      const currentTenant = await tx.tenants.findFirst({ where: { id: req.user!.tenantId } })
+      if (!currentTenant) return { error: 'Tenant not found' as const }
+
+      const international = currentTenant.country !== 'IN'
+      const indianOnlyFieldsPresent = [gstStatus, gstin, pan, placeOfSupply, combinedTaxRatePercent]
+        .some((field) => field !== undefined)
+      if (international && indianOnlyFieldsPresent) {
+        return { error: 'International tenants must use salesTaxRates for sales-tax settings' as const }
+      }
+      if (!international && salesTaxRates !== undefined) {
+        return { error: 'salesTaxRates is only available for International tenants' as const }
+      }
+
+      const tenantData: Record<string, unknown> = {}
+      if (businessName !== undefined) tenantData.business_name = businessName
+      if (tradeName !== undefined) tenantData.trade_name = tradeName
+      if (!international) {
+        if (gstStatus !== undefined) tenantData.gst_status = gstStatus
+        if (gstin !== undefined) tenantData.tax_id = gstin
+        if (pan !== undefined) tenantData.pan = pan
+      }
+      if (businessType !== undefined) tenantData.business_type = businessType
+      if (discountThresholdPercent !== undefined) tenantData.discount_threshold_percent = discountThresholdPercent
+      if (barcodeLabelFormat !== undefined) tenantData.barcode_label_format = barcodeLabelFormat
+
+      const storeData: Record<string, unknown> = {}
+      if (addressLine1 !== undefined) storeData.address_line1 = addressLine1
+      if (addressLine2 !== undefined) storeData.address_line2 = addressLine2
+      if (city !== undefined) storeData.city = city
+      if (state !== undefined) storeData.state = state
+      if (postalCode !== undefined) storeData.postal_code = postalCode
+      if (!international && placeOfSupply !== undefined) storeData.place_of_supply = placeOfSupply
+
+      if (international && salesTaxRates !== undefined) {
+        storeData.tax_rate_state = salesTaxRates.state / 100
+        storeData.tax_rate_county = salesTaxRates.county / 100
+        storeData.tax_rate_city = salesTaxRates.city / 100
+        storeData.tax_rate_district = salesTaxRates.district / 100
+      } else if (!international && combinedTaxRatePercent !== undefined) {
+        // India keeps the existing human combined-rate API. The value is
+        // spread evenly across the four persisted fractions for compatibility.
+        const quarter = combinedTaxRatePercent / 100 / 4
+        storeData.tax_rate_state = quarter
+        storeData.tax_rate_county = quarter
+        storeData.tax_rate_city = quarter
+        storeData.tax_rate_district = quarter
+      }
+
       const updatedTenant = Object.keys(tenantData).length > 0
         ? await tx.tenants.update({ where: { id: req.user!.tenantId }, data: tenantData })
-        : await tx.tenants.findFirst({ where: { id: req.user!.tenantId } })
+        : currentTenant
       const updatedStore = Object.keys(storeData).length > 0
         ? await tx.stores.update({ where: { id: storeId }, data: storeData })
         : await tx.stores.findFirst({ where: { id: storeId, is_active: true } })
-      return [updatedTenant, updatedStore]
+      return { updatedTenant, updatedStore }
     })
 
-    if (!updatedTenant || !updatedStore) {
-      return res.status(404).json({ error: !updatedTenant ? 'Tenant not found' : 'Store not found' })
+    if ('error' in result) {
+      return res.status(result.error === 'Tenant not found' ? 404 : 400).json({ error: result.error })
     }
-    return res.json(toSettingsJson(updatedTenant, updatedStore, role))
+    if (!result.updatedTenant || !result.updatedStore) {
+      return res.status(404).json({ error: !result.updatedTenant ? 'Tenant not found' : 'Store not found' })
+    }
+    return res.json(toSettingsJson(result.updatedTenant, result.updatedStore, role))
   } catch (error: any) {
     // Same-state store invariants are enforced by the database trigger.  Keep
     // that business rule a useful client response instead of leaking a 500.
@@ -211,6 +253,9 @@ router.patch('/', requireRole('manager'), async (req, res) => {
     }
     throw error
   }
-})
+}
+
+router.patch('/', requireRole('manager'), updateSettings)
+router.put('/', requireRole('manager'), updateSettings)
 
 export default router

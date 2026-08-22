@@ -2,4 +2,6 @@
 /dist
 .env*.local
 .env
+.env.production
+.env.international
 .DS_Store

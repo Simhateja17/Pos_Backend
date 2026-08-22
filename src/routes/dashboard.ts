@@ -5,18 +5,67 @@ import { storeScopeWhere } from '../middleware/storeContext'
 import { forTenantTransaction } from '../db/tenantClient'
 
 const router = Router()
-const INDIA_OFFSET_MS = 5.5 * 60 * 60 * 1000
 const RANGE_DAYS = { '7d': 7, '14d': 14, '30d': 30 } as const
 
-function indiaDayBoundary(now: Date, days: number): Date {
-  const indiaNow = new Date(now.getTime() + INDIA_OFFSET_MS)
-  indiaNow.setUTCHours(0, 0, 0, 0)
-  return new Date(indiaNow.getTime() - INDIA_OFFSET_MS - days * 24 * 60 * 60 * 1000)
+type ZonedParts = { year: number; month: number; day: number; hour: number; minute: number; second: number }
+
+function zonedParts(value: Date, timeZone: string): ZonedParts {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(value)
+
+  const values = Object.fromEntries(
+    parts.filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]),
+  ) as Record<string, number>
+
+  return {
+    year: values.year,
+    month: values.month,
+    day: values.day,
+    hour: values.hour % 24,
+    minute: values.minute,
+    second: values.second,
+  }
 }
 
-function formatIndiaDate(value: Date): string {
+/** Offset resolution is delegated to the runtime tz database, including DST. */
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = zonedParts(instant, timeZone)
+  const wallClockAsUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+  )
+  return wallClockAsUtc - instant.getTime()
+}
+
+/** Convert a wall-clock midnight represented as a UTC-shaped Date to an instant. */
+function wallClockToInstant(wallClockAsUtc: number, timeZone: string): Date {
+  const firstGuess = new Date(wallClockAsUtc - zoneOffsetMs(new Date(wallClockAsUtc), timeZone))
+  // The first guess can cross a DST transition. Refine once at the candidate
+  // instant so the returned boundary is the tenant's actual local midnight.
+  return new Date(wallClockAsUtc - zoneOffsetMs(firstGuess, timeZone))
+}
+
+function businessDayBoundary(now: Date, timeZone: string, days: number): Date {
+  const localNow = zonedParts(now, timeZone)
+  const localMidnight = Date.UTC(localNow.year, localNow.month - 1, localNow.day - days, 0, 0, 0)
+  return wallClockToInstant(localMidnight, timeZone)
+}
+
+function formatBusinessDate(value: Date, timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
+    timeZone,
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(value)
 }
@@ -35,16 +84,21 @@ router.get('/', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: 'Invalid dashboard range' })
 
   const now = new Date()
-  const startsAt = indiaDayBoundary(now, RANGE_DAYS[parsed.data.range])
   // Phase 8: every fact below is per-shop. Under store scope this narrows to
   // one shop; under an owner's explicit business scope (X-Store-Id: all) the
   // fragment is empty and the dashboard genuinely covers the whole business.
   // Without it, an owner drilled into Andheri would see the business's takings
   // labelled as Andheri's.
   const storeScope = storeScopeWhere(req)
-  const { sales, saleLines, openShift, variants, stockLevels, products } = await forTenantTransaction(
+  const { sales, saleLines, openShift, variants, stockLevels, products, timeZone } = await forTenantTransaction(
     req.user!.tenantId,
     async (tx) => {
+      const tenant = await tx.tenants.findFirst({
+        where: { id: req.user!.tenantId },
+        select: { timezone: true },
+      })
+      const timeZone = tenant?.timezone?.trim() || 'UTC'
+      const startsAt = businessDayBoundary(now, timeZone, RANGE_DAYS[parsed.data.range])
       // One short read transaction is materially cheaper than five concurrent
       // transactions against the same tenant. Keep the transaction limited to
       // database reads; all calculations happen after commit below.
@@ -68,9 +122,11 @@ router.get('/', async (req, res) => {
       const products = productIds.length > 0
         ? await tx.products.findMany({ where: { id: { in: productIds } } })
         : []
-      return { sales, saleLines, openShift, variants, stockLevels, products }
+      return { sales, saleLines, openShift, variants, stockLevels, products, timeZone, startsAt }
     },
   )
+
+  const startsAt = businessDayBoundary(now, timeZone, RANGE_DAYS[parsed.data.range])
 
   // Additive, not assignment: under business scope a variant has one row PER
   // SHOP, and the old map shape silently kept only the last one.
@@ -141,7 +197,7 @@ router.get('/', async (req, res) => {
       }
   const revenueByDate = new Map<string, Prisma.Decimal>()
   for (const sale of sales) {
-    const date = formatIndiaDate(sale.created_at)
+    const date = formatBusinessDate(sale.created_at, timeZone)
     revenueByDate.set(date, (revenueByDate.get(date) ?? new Prisma.Decimal(0)).plus(sale.total_amount))
   }
 

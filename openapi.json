@@ -2297,7 +2297,7 @@
           },
           "taxId": {
             "type": "string",
-            "maxLength": 15
+            "maxLength": 30
           },
           "gstStatus": {
             "type": "string",
@@ -5368,6 +5368,13 @@
       "StoreSettings": {
         "type": "object",
         "properties": {
+          "region": {
+            "type": "string",
+            "enum": [
+              "IN",
+              "INTL"
+            ]
+          },
           "businessName": {
             "type": "string"
           },
@@ -5444,6 +5451,29 @@
           "combinedTaxRatePercent": {
             "type": "string"
           },
+          "salesTaxRates": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string"
+              },
+              "county": {
+                "type": "string"
+              },
+              "city": {
+                "type": "string"
+              },
+              "district": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "county",
+              "city",
+              "district"
+            ]
+          },
           "discountThresholdPercent": {
             "type": "string"
           },
@@ -5492,6 +5522,9 @@
               "combinedTaxRatePercent": {
                 "type": "boolean"
               },
+              "salesTaxRates": {
+                "type": "boolean"
+              },
               "discountThresholdPercent": {
                 "type": "boolean"
               },
@@ -5513,12 +5546,14 @@
               "placeOfSupply",
               "businessType",
               "combinedTaxRatePercent",
+              "salesTaxRates",
               "discountThresholdPercent",
               "barcodeLabelFormat"
             ]
           }
         },
         "required": [
+          "region",
           "businessName",
           "tradeName",
           "addressLine1",
@@ -5526,12 +5561,7 @@
           "city",
           "state",
           "postalCode",
-          "gstStatus",
-          "gstin",
-          "pan",
-          "placeOfSupply",
           "businessType",
-          "combinedTaxRatePercent",
           "discountThresholdPercent",
           "barcodeLabelFormat",
           "editableFields"
@@ -5641,6 +5671,38 @@
             "type": "number",
             "minimum": 0,
             "maximum": 100
+          },
+          "salesTaxRates": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "county": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "city": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "district": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "state",
+              "county",
+              "city",
+              "district"
+            ],
+            "additionalProperties": false
           },
           "discountThresholdPercent": {
             "type": "number",
@@ -10071,7 +10133,7 @@
         }
       },
       "patch": {
-        "description": "Update settings for one selected store. Managers may edit store address, locality, place of supply and tax rate; company identity and policy fields are owner-only.",
+        "description": "Update settings for one selected store. India uses the combined tax rate; International tenants use explicit state, county, city and district sales-tax rates. Company identity and policy fields are owner-only.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10094,6 +10156,36 @@
           },
           "400": {
             "description": "Invalid request"
+          },
+          "403": {
+            "description": "The submitted fields are owner-only or the caller is not management"
+          }
+        }
+      },
+      "put": {
+        "description": "Update settings for one selected store. International tenants use explicit state, county, city and district sales-tax rates without GST fields.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoreSettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Store settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or region-specific tax fields"
           },
           "403": {
             "description": "The submitted fields are owner-only or the caller is not management"

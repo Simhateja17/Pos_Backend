@@ -12,6 +12,7 @@ const shiftsFindFirstMock = vi.fn()
 const variantsFindManyMock = vi.fn()
 const stockLevelsFindManyMock = vi.fn()
 const productsFindManyMock = vi.fn()
+const tenantsFindFirstMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -34,6 +35,7 @@ vi.mock('../../src/db/tenantClient', () => ({
       billing_subscriptions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       terminals: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
+      tenants: { findFirst: tenantsFindFirstMock },
       sales: { findMany: salesFindManyMock },
       sale_line_items: { findMany: saleLineItemsFindManyMock },
       shifts: { findFirst: shiftsFindFirstMock },
@@ -75,6 +77,7 @@ describe('dashboard route', () => {
     variantsFindManyMock.mockReset().mockResolvedValue([])
     stockLevelsFindManyMock.mockReset().mockResolvedValue([])
     productsFindManyMock.mockReset().mockResolvedValue([])
+    tenantsFindFirstMock.mockReset().mockResolvedValue({ timezone: 'Asia/Kolkata' })
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
       tenant_id: '11111111-1111-4111-8111-111111111111',
@@ -144,6 +147,40 @@ describe('dashboard route', () => {
     const { forTenantTransaction } = await import('../../src/db/tenantClient')
     expect(forTenantTransaction).toHaveBeenLastCalledWith('11111111-1111-4111-8111-111111111111', expect.any(Function))
     expect(salesFindManyMock).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ status: 'completed' }) }))
+  })
+
+  it('uses the tenant timezone for the business-day boundary and revenue buckets', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-24T01:30:00.000Z'))
+    tenantsFindFirstMock.mockResolvedValue({ timezone: 'America/Los_Angeles' })
+    salesFindManyMock.mockResolvedValue([
+      // 23:30 on July 22 in Los Angeles, still July 22 for the business day.
+      { total_amount: '25.00', created_at: new Date('2026-07-23T06:30:00.000Z') },
+    ])
+
+    try {
+      const app = await buildApp()
+      const response = await request(app)
+        .get('/dashboard?range=7d')
+        .set('Authorization', `Bearer ${tokenFor()}`)
+
+      expect(response.status).toBe(200)
+      expect(response.body.period).toEqual({
+        startsAt: '2026-07-16T07:00:00.000Z',
+        endsAt: '2026-07-24T01:30:00.000Z',
+      })
+      expect(response.body.trend.revenue).toEqual([{ date: '2026-07-22', amount: '25.00' }])
+      expect(salesFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          created_at: {
+            gte: new Date('2026-07-16T07:00:00.000Z'),
+            lte: new Date('2026-07-24T01:30:00.000Z'),
+          },
+        }),
+      }))
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not expose cross-tenant records from a separate tenant-scoped fixture', async () => {

@@ -52,6 +52,7 @@ function storeRow(overrides: Record<string, unknown> = {}) {
     tax_rate_county: 0,
     tax_rate_city: 0,
     tax_rate_district: 0,
+    country: 'IN',
     place_of_supply: null,
     ...overrides,
   }
@@ -77,6 +78,7 @@ function tenantRow(overrides: Record<string, unknown> = {}) {
     tax_rate_city: 0,
     tax_rate_district: 0,
     discount_threshold_percent: 15,
+    country: 'IN',
     ...overrides,
   }
 }
@@ -89,6 +91,7 @@ describe('settings routes', () => {
     tenantsUpdateMock.mockReset()
     storesFindFirstMock.mockReset().mockResolvedValue(storeRow())
     storesUpdateMock.mockReset()
+    tenantsFindFirstMock.mockResolvedValue(tenantRow())
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
       tenant_id: 'tenant-real', store_id: 'store-1', is_active: true,
@@ -225,5 +228,70 @@ describe('settings routes', () => {
     expect(tenantsUpdateMock).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ tax_id: '27ABCDE1234F1Z5' }) }),
     )
+  })
+
+  it('round-trips International sales-tax jurisdiction rates through PUT without GST fields', async () => {
+    let currentTenant = tenantRow({
+      country: 'US',
+      gst_status: 'regular',
+      tax_id: 'should-not-be-touched',
+    })
+    let currentStore = storeRow()
+    tenantsFindFirstMock.mockImplementation(async () => currentTenant)
+    storesFindFirstMock.mockImplementation(async () => currentStore)
+    storesUpdateMock.mockImplementation(async ({ data }: { data: any }) => {
+      currentStore = storeRow({ ...currentStore, ...data })
+      return currentStore
+    })
+    tenantsUpdateMock.mockImplementation(async ({ data }: { data: any }) => {
+      currentTenant = tenantRow({ ...currentTenant, ...data })
+      return currentTenant
+    })
+    const app = await buildApp()
+
+    const response = await request(app)
+      .put('/settings')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send({ salesTaxRates: { state: 4.5, county: 1.25, city: 0.5, district: 0 } })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      region: 'INTL',
+      salesTaxRates: { state: '4.5000', county: '1.2500', city: '0.5000', district: '0.0000' },
+    })
+    expect(response.body).not.toHaveProperty('gstStatus')
+    expect(response.body).not.toHaveProperty('gstin')
+    expect(tenantsUpdateMock).not.toHaveBeenCalled()
+    expect(storesUpdateMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        tax_rate_state: 0.045,
+        tax_rate_county: 0.0125,
+        tax_rate_city: 0.005,
+        tax_rate_district: 0,
+      },
+    }))
+
+    const readback = await request(app)
+      .get('/settings')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+    expect(readback.status).toBe(200)
+    expect(readback.body.salesTaxRates).toEqual({
+      state: '4.5000', county: '1.2500', city: '0.5000', district: '0.0000',
+    })
+    expect(readback.body).not.toHaveProperty('gstStatus')
+    expect(readback.body).not.toHaveProperty('gstin')
+  })
+
+  it('rejects Indian combined-rate writes from an International tenant', async () => {
+    tenantsFindFirstMock.mockResolvedValue(tenantRow({ country: 'US' }))
+    const app = await buildApp()
+
+    const response = await request(app)
+      .put('/settings')
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+      .send({ combinedTaxRatePercent: 8 })
+
+    expect(response.status).toBe(400)
+    expect(storesUpdateMock).not.toHaveBeenCalled()
   })
 })

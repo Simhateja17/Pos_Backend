@@ -1147,11 +1147,23 @@ registry.registerPath({
 registry.registerPath({
   method: 'patch',
   path: '/settings',
-  description: 'Update settings for one selected store. Managers may edit store address, locality, place of supply and tax rate; company identity and policy fields are owner-only.',
+  description: 'Update settings for one selected store. India uses the combined tax rate; International tenants use explicit state, county, city and district sales-tax rates. Company identity and policy fields are owner-only.',
   request: { body: { content: { 'application/json': { schema: UpdateStoreSettingsSchema } } } },
   responses: {
     200: { description: 'Store settings updated', content: { 'application/json': { schema: StoreSettingsSchema } } },
     400: { description: 'Invalid request' },
+    403: { description: 'The submitted fields are owner-only or the caller is not management' },
+  },
+})
+
+registry.registerPath({
+  method: 'put',
+  path: '/settings',
+  description: 'Update settings for one selected store. International tenants use explicit state, county, city and district sales-tax rates without GST fields.',
+  request: { body: { content: { 'application/json': { schema: UpdateStoreSettingsSchema } } } },
+  responses: {
+    200: { description: 'Store settings updated', content: { 'application/json': { schema: StoreSettingsSchema } } },
+    400: { description: 'Invalid request or region-specific tax fields' },
     403: { description: 'The submitted fields are owner-only or the caller is not management' },
   },
 })

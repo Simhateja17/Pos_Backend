@@ -35,6 +35,7 @@ export const BarcodeLabelFormatSchema = z
  */
 export const StoreSettingsSchema = z
   .object({
+    region: z.enum(['IN', 'INTL']),
     businessName: z.string(),
     tradeName: z.string().nullable(),
     addressLine1: z.string(),
@@ -42,17 +43,26 @@ export const StoreSettingsSchema = z
     city: z.string(),
     state: z.string(),
     postalCode: z.string(),
-    gstStatus: z.enum(['regular', 'composition', 'unregistered']).nullable(),
-    gstin: z.string().nullable(),
-    pan: z.string().nullable(),
-    placeOfSupply: z.string().nullable(),
+    gstStatus: z.enum(['regular', 'composition', 'unregistered']).nullable().optional(),
+    gstin: z.string().nullable().optional(),
+    pan: z.string().nullable().optional(),
+    placeOfSupply: z.string().nullable().optional(),
     businessType: z
       .enum(['supermarket', 'grocery', 'bakery', 'general', 'apparel', 'electronics', 'other'])
       .nullable(),
     // Reported as one combined rate, matching how checkout and the dashboard
     // already treat state+county+city+district — the owner sets one number,
     // not four jurisdiction-specific ones they'd have to add up themselves.
-    combinedTaxRatePercent: z.string(),
+    combinedTaxRatePercent: z.string().optional(),
+    /** International tenants keep each sales-tax jurisdiction explicit. */
+    salesTaxRates: z
+      .object({
+        state: z.string(),
+        county: z.string(),
+        city: z.string(),
+        district: z.string(),
+      })
+      .optional(),
     discountThresholdPercent: z.string(),
     barcodeLabelFormat: BarcodeLabelFormatSchema,
     /**
@@ -75,6 +85,7 @@ export const StoreSettingsSchema = z
       placeOfSupply: z.boolean(),
       businessType: z.boolean(),
       combinedTaxRatePercent: z.boolean(),
+      salesTaxRates: z.boolean(),
       discountThresholdPercent: z.boolean(),
       barcodeLabelFormat: z.boolean(),
     }),
@@ -104,6 +115,16 @@ export const UpdateStoreSettingsSchema = z
     // column later should not find three-quarters of their rate sitting
     // somewhere unexpected.
     combinedTaxRatePercent: z.number().min(0).max(100).optional(),
+    /** Percentages written to the existing jurisdiction fraction columns. */
+    salesTaxRates: z
+      .object({
+        state: z.number().min(0).max(100),
+        county: z.number().min(0).max(100),
+        city: z.number().min(0).max(100),
+        district: z.number().min(0).max(100),
+      })
+      .strict()
+      .optional(),
     discountThresholdPercent: z.number().min(0).max(100).optional(),
     barcodeLabelFormat: BarcodeLabelFormatSchema.optional(),
   })
