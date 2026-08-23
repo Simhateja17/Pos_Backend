@@ -102,11 +102,32 @@ jobs:
             exit 1
           fi
           REMOTE
+          # A fresh hosted runner has no gcloud SSH key. Initialise it before
+          # piping the deployment script: otherwise the key-generation prompt
+          # consumes remote-deploy.sh from stdin and the remote `bash -s`
+          # receives an empty script while still exiting successfully.
           gcloud compute ssh "${{ matrix.instance }}" \
             --zone="${{ matrix.zone }}" \
             --project="$GCP_PROJECT" \
             --tunnel-through-iap \
+            --quiet \
+            --command=true </dev/null
+          gcloud compute ssh "${{ matrix.instance }}" \
+            --zone="${{ matrix.zone }}" \
+            --project="$GCP_PROJECT" \
+            --tunnel-through-iap \
+            --quiet \
             --command='sudo -u teja -H bash -s' < remote-deploy.sh
+          deployed_sha="$(gcloud compute ssh "${{ matrix.instance }}" \
+            --zone="${{ matrix.zone }}" \
+            --project="$GCP_PROJECT" \
+            --tunnel-through-iap \
+            --quiet \
+            --command='sudo -u teja -H git -C /home/teja/Ambel_pos/backend rev-parse HEAD')"
+          if [[ "$deployed_sha" != "$GITHUB_SHA" ]]; then
+            echo "Expected deployed commit $GITHUB_SHA, found $deployed_sha" >&2
+            exit 1
+          fi
 
       - name: Verify public HTTPS endpoint (${{ matrix.region }})
         run: |
