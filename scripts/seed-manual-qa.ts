@@ -62,6 +62,7 @@ type VariantMeta = {
   material: string | null
   price: number
   taxable: boolean
+  taxRate: number
   unit: string
   threshold: number
   barcode: string | null
@@ -292,6 +293,7 @@ async function main(): Promise<void> {
           material: variant.material,
           price: variant.price,
           taxable: product.taxable,
+          taxRate: product.taxable ? QA_GST_RATE : 0,
           unit: product.unit,
           threshold: product.key === 'BOUNDARY' ? 8 : product.key === 'ZERO' ? 4 : product.unit === 'metre' ? 12 : 6,
           barcode,
@@ -311,6 +313,7 @@ async function main(): Promise<void> {
           false,
           atIstHour(START_DATE, 9),
           meta.taxable,
+          meta.taxRate,
           Math.round(meta.price * 0.48 * 100) / 100,
           { qaSeed: QA_SEED, hsnSac: meta.hsnSac },
           meta.unit,
@@ -456,8 +459,8 @@ async function main(): Promise<void> {
       [stableUuid('product:isolation-b'), isolationBTenantId, 'QA - Isolation B Product', START_DATE, stableUuid('category:isolation-b')],
     ]
     const isolationVariantRows = [
-      [stableUuid('variant:isolation-a'), isolationATenantId, stableUuid('product:isolation-a'), 'QA-ISO-A-01', 'One Size', 'Blue', 'Cotton', 999, 4, false, START_DATE, true, 400, { qaSeed: QA_SEED }, 'piece', '890QA900001'],
-      [stableUuid('variant:isolation-b'), isolationBTenantId, stableUuid('product:isolation-b'), 'QA-ISO-B-01', 'One Size', 'Red', 'Cotton', 999, 4, false, START_DATE, true, 400, { qaSeed: QA_SEED }, 'piece', '890QA900002'],
+      [stableUuid('variant:isolation-a'), isolationATenantId, stableUuid('product:isolation-a'), 'QA-ISO-A-01', 'One Size', 'Blue', 'Cotton', 999, 4, false, START_DATE, true, QA_GST_RATE, 400, { qaSeed: QA_SEED }, 'piece', '890QA900001'],
+      [stableUuid('variant:isolation-b'), isolationBTenantId, stableUuid('product:isolation-b'), 'QA-ISO-B-01', 'One Size', 'Red', 'Cotton', 999, 4, false, START_DATE, true, QA_GST_RATE, 400, { qaSeed: QA_SEED }, 'piece', '890QA900002'],
     ]
 
     const customerRows: unknown[][] = []
@@ -563,8 +566,7 @@ async function main(): Promise<void> {
           })
           const subtotal = roundMoney(lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0))
           const discountAmount = roundMoney(lines.reduce((sum, line) => sum + line.discountAmount, 0))
-          const taxable = lines.filter((line) => line.variant.taxable).reduce((sum, line) => sum + line.lineTotal, 0)
-          const taxAmount = roundMoney(taxable * QA_GST_RATE)
+          const taxAmount = roundMoney(lines.reduce((sum, line) => sum + (line.variant.taxable ? line.lineTotal * line.variant.taxRate : 0), 0))
           const totalAmount = roundMoney(subtotal - discountAmount + taxAmount)
           const createdAt = atIstHour(day, 10 + ((saleIndex + dayIndex) % 8))
           const id = stableUuid(`sale:main:${store.key}:${dateKey(day)}:${saleIndex}`)
@@ -643,7 +645,7 @@ async function main(): Promise<void> {
     }
 
     const saleRows = salePlans.map((sale) => [sale.id, mainTenantId, sale.storeId, sale.clientSaleId, sale.shiftId, sale.customerId, sale.subtotal, sale.discountAmount, sale.taxAmount, sale.totalAmount, 'completed', sale.staffId, sale.createdAt, sale.source, { qaSeed: QA_SEED, scenario: sale.returnedLine ? 'return-candidate' : 'historical-sale' }, sale.source === 'import' ? stableUuid('import:main:historical-sales') : null])
-    const saleLineRows = salePlans.flatMap((sale) => sale.lines.map((line) => [line.id, mainTenantId, sale.id, line.variant.id, line.quantity, line.unitPrice, line.discountAmount > 0 ? roundMoney((line.discountAmount / (line.unitPrice * line.quantity)) * 100) : null, line.discountAmount, line.variant.taxable, line.lineTotal, sale.createdAt]))
+    const saleLineRows = salePlans.flatMap((sale) => sale.lines.map((line) => [line.id, mainTenantId, sale.id, line.variant.id, line.quantity, line.unitPrice, line.discountAmount > 0 ? roundMoney((line.discountAmount / (line.unitPrice * line.quantity)) * 100) : null, line.discountAmount, line.variant.taxable, line.variant.taxRate, line.lineTotal, sale.createdAt]))
     const paymentRows = salePlans.flatMap((sale) => sale.payments.map((payment, index) => [stableUuid(`payment:main:${sale.id}:${index}`), mainTenantId, sale.id, payment.method, 'payment', payment.amount, payment.referenceCode, sale.staffId, sale.createdAt]))
     const saleMovementRows = salePlans.flatMap((sale) => sale.lines.map((line) => [stableUuid(`movement:sale:${sale.id}:${line.id}`), mainTenantId, sale.storeId, line.variant.id, 'sale', -line.quantity, null, `QA historical sale ${sale.id}`, sale.id, sale.staffId, sale.createdAt]))
     const returnMovementRows = salePlans.filter((sale) => sale.returnedLine).map((sale) => [stableUuid(`movement:return:${sale.id}`), mainTenantId, sale.storeId, sale.returnedLine!.variant.id, 'return', sale.returnedLine!.quantity, null, 'QA historical customer return', sale.id, sale.staffId, addDays(sale.createdAt, 2)])
@@ -722,11 +724,12 @@ async function main(): Promise<void> {
       const customerIndex = sale.customerId ? customers.indexOf(sale.customerId) : -1
       const lineIds = new Map<UUID, UUID>()
       const cgst = roundMoney(sale.taxAmount / 2)
+      const taxableWeight = sale.lines.reduce((sum, line) => sum + (line.variant.taxable ? line.lineTotal * line.variant.taxRate : 0), 0)
       const invoiceLineValues = sale.lines.map((line, index) => {
         const lineId = stableUuid(`tax-invoice-line:${sale.id}:${line.id}`)
         lineIds.set(line.id, lineId)
-        const lineTax = line.variant.taxable ? roundMoney((line.lineTotal / sale.lines.filter((candidate) => candidate.variant.taxable).reduce((sum, candidate) => sum + candidate.lineTotal, 0)) * sale.taxAmount) : 0
-        return [lineId, mainTenantId, invoiceId, index + 1, line.id, null, line.variant.id, `${line.variant.productName} ${line.variant.size ?? ''}`.trim(), line.variant.sku, line.variant.hsnSac, line.variant.unit, line.quantity, line.unitPrice, roundMoney(line.unitPrice * line.quantity), line.discountAmount, line.variant.taxable ? line.lineTotal : 0, line.variant.taxable ? QA_GST_RATE * 100 : 0, line.variant.taxable ? roundMoney(lineTax / 2) : 0, line.variant.taxable ? roundMoney(lineTax - roundMoney(lineTax / 2)) : 0, 0, 0, roundMoney(line.lineTotal + lineTax)]
+        const lineTax = line.variant.taxable ? roundMoney((line.lineTotal * line.variant.taxRate / taxableWeight) * sale.taxAmount) : 0
+        return [lineId, mainTenantId, invoiceId, index + 1, line.id, null, line.variant.id, `${line.variant.productName} ${line.variant.size ?? ''}`.trim(), line.variant.sku, line.variant.hsnSac, line.variant.unit, line.quantity, line.unitPrice, roundMoney(line.unitPrice * line.quantity), line.discountAmount, line.variant.taxable ? line.lineTotal : 0, line.variant.taxable ? line.variant.taxRate * 100 : 0, line.variant.taxable ? roundMoney(lineTax / 2) : 0, line.variant.taxable ? roundMoney(lineTax - roundMoney(lineTax / 2)) : 0, 0, 0, roundMoney(line.lineTotal + lineTax)]
       })
       invoiceLineRows.push(...invoiceLineValues)
       invoiceRows.push([
@@ -748,7 +751,7 @@ async function main(): Promise<void> {
         JSON.stringify(sale.payments),
         sale.subtotal,
         sale.discountAmount,
-        roundMoney(sale.taxAmount / QA_GST_RATE),
+        roundMoney(sale.lines.reduce((sum, line) => sum + (line.variant.taxable ? line.lineTotal : 0), 0)),
         cgst,
         roundMoney(sale.taxAmount - cgst),
         0,
@@ -770,7 +773,7 @@ async function main(): Promise<void> {
       const returnReferenceId = stableUuid(`return-reference:${sale.id}`)
       const documentNumber = `C${mainStoreIndex.get(sale.store.key)! + 1}-${invoice.fy.replace('-', '')}-${String(sequence).padStart(4, '0')}`
       const originalLineId = invoice.lineIds.get(returnedLine.id)!
-      const refundTax = returnedLine.variant.taxable ? roundMoney(returnedLine.lineTotal * QA_GST_RATE) : 0
+      const refundTax = returnedLine.variant.taxable ? roundMoney(returnedLine.lineTotal * returnedLine.variant.taxRate) : 0
       const refundTotal = roundMoney(returnedLine.lineTotal + refundTax)
       creditNoteRows.push([
         creditId,
@@ -818,7 +821,7 @@ async function main(): Promise<void> {
         roundMoney(returnedLine.unitPrice * returnedLine.quantity),
         returnedLine.discountAmount,
         returnedLine.variant.taxable ? returnedLine.lineTotal : 0,
-        returnedLine.variant.taxable ? QA_GST_RATE * 100 : 0,
+        returnedLine.variant.taxable ? returnedLine.variant.taxRate * 100 : 0,
         returnedLine.variant.taxable ? roundMoney(refundTax / 2) : 0,
         returnedLine.variant.taxable ? roundMoney(refundTax - roundMoney(refundTax / 2)) : 0,
         0,
@@ -840,7 +843,7 @@ async function main(): Promise<void> {
     await insertRows(db, 'stores', ['id', 'tenant_id', 'name', 'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country', 'is_active', 'created_at', 'tax_rate_state', 'tax_rate_county', 'tax_rate_city', 'tax_rate_district', 'tax_rounding_basis', 'place_of_supply', 'invoice_prefix', 'invoice_start_number'], storeRows)
     await insertRows(db, 'categories', ['id', 'tenant_id', 'name', 'sort_order', 'created_at'], [...categoriesRows, ...isolationCategoryRows])
     await insertRows(db, 'products', ['id', 'tenant_id', 'name', 'created_at', 'category_id'], [...productRows, ...isolationProductRows])
-    await insertRows(db, 'variants', ['id', 'tenant_id', 'product_id', 'sku', 'size', 'color', 'material', 'price', 'reorder_threshold', 'identity_locked', 'created_at', 'is_taxable', 'moving_average_cost', 'source_metadata', 'unit_of_measure', 'barcode'], [...variantRows, ...isolationVariantRows])
+    await insertRows(db, 'variants', ['id', 'tenant_id', 'product_id', 'sku', 'size', 'color', 'material', 'price', 'reorder_threshold', 'identity_locked', 'created_at', 'is_taxable', 'tax_rate', 'moving_average_cost', 'source_metadata', 'unit_of_measure', 'barcode'], [...variantRows, ...isolationVariantRows])
     await insertRows(db, 'staff_members', ['id', 'tenant_id', 'store_id', 'user_id', 'name', 'role', 'email', 'pin_hash', 'pin_attempts', 'pin_locked_until', 'pin_must_change', 'is_active', 'created_at'], staffRows)
     await insertRows(db, 'terminals', ['id', 'tenant_id', 'store_id', 'name', 'is_active', 'created_at', 'cash_mode', 'device_token_hash', 'device_paired_at', 'device_last_seen_at'], terminalRows)
     await insertRows(db, 'customers', ['id', 'tenant_id', 'name', 'phone', 'email', 'billing_name', 'gstin', 'address_line1', 'address_line2', 'city', 'state_code', 'postal_code', 'country', 'notes', 'created_at', 'updated_at'], customerRows)
@@ -851,7 +854,7 @@ async function main(): Promise<void> {
     await insertRows(db, 'shifts', ['id', 'tenant_id', 'store_id', 'staff_id', 'starting_cash', 'opened_at', 'counted_cash', 'variance', 'closed_at', 'terminal_id'], shiftRows)
     await insertRows(db, 'stock_movements', ['id', 'tenant_id', 'store_id', 'variant_id', 'movement_type', 'quantity_delta', 'reason_code', 'reason_note', 'reference_id', 'created_by', 'created_at'], initialStockRows)
     await insertRows(db, 'sales', ['id', 'tenant_id', 'store_id', 'client_sale_id', 'shift_id', 'customer_id', 'subtotal', 'discount_amount', 'tax_amount', 'total_amount', 'status', 'created_by', 'created_at', 'source', 'source_metadata', 'import_batch_id'], saleRows)
-    await insertRows(db, 'sale_line_items', ['id', 'tenant_id', 'sale_id', 'variant_id', 'quantity', 'unit_price', 'discount_percent', 'discount_amount', 'is_taxable', 'line_total', 'created_at'], saleLineRows)
+    await insertRows(db, 'sale_line_items', ['id', 'tenant_id', 'sale_id', 'variant_id', 'quantity', 'unit_price', 'discount_percent', 'discount_amount', 'is_taxable', 'tax_rate', 'line_total', 'created_at'], saleLineRows)
     await insertRows(db, 'payments', ['id', 'tenant_id', 'sale_id', 'method', 'direction', 'amount', 'reference_code', 'created_by', 'created_at'], [...paymentRows, ...refundRows])
     await insertRows(db, 'stock_movements', ['id', 'tenant_id', 'store_id', 'variant_id', 'movement_type', 'quantity_delta', 'reason_code', 'reason_note', 'reference_id', 'created_by', 'created_at'], [...saleMovementRows, ...returnMovementRows])
     await insertRows(db, 'purchase_orders', ['id', 'tenant_id', 'store_id', 'supplier_id', 'po_number', 'status', 'expected_date', 'notes', 'created_by', 'created_at'], poRows)

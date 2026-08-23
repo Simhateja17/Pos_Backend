@@ -8,6 +8,7 @@ import { authMiddleware, decodeJwtPayload, getStaffRoleClaim } from '../middlewa
 import { forTenant } from '../db/tenantClient'
 import { clearAuthCookies, getAuthCookies } from '../lib/authCookies'
 import { clearRegisterLockedCookie } from '../lib/counterDevice'
+import { signOperatorToken } from '../middleware/pinSwitch'
 
 const router = Router()
 
@@ -380,6 +381,41 @@ router.post('/login', async (req, res) => {
   }
   console.log(`[auth:login] userId=${data.user.id} role=${role} tenantId=${tenantId} — 200`)
 
+  // A fresh owner OTP is explicit back-office authentication, even when the
+  // browser also happens to be paired to a checkout counter. Mint a durable,
+  // terminal-independent management session so the owner can enter the
+  // All Stores dashboard without weakening the locked-register rule for a
+  // browser that merely retains the organisation's Supabase session.
+  let operatorToken: string | undefined
+  if (role === 'owner') {
+    const client = forTenant(tenantId) as any
+    const owner = await client.staff_members.findFirst({
+      where: { user_id: data.user.id, role: 'owner', is_active: true },
+      select: { id: true, role: true, store_id: true },
+    })
+    if (!owner) {
+      console.log(`[auth:login] userId=${data.user.id} owner membership disappeared after OTP verification`)
+      return res.status(401).json({ error: 'Invalid or expired code' })
+    }
+    const now = new Date()
+    const managementSession = await client.staff_sessions.create({
+      data: {
+        tenant_id: tenantId,
+        staff_id: owner.id,
+        terminal_id: null,
+        shift_id: null,
+        logged_in_at: now,
+        last_seen_at: now,
+      },
+    })
+    operatorToken = signOperatorToken({
+      id: owner.id,
+      role: 'owner',
+      storeId: owner.store_id,
+      sessionId: managementSession.id,
+    }, tenantId)
+  }
+
   res.set('Cache-Control', 'no-store')
   // Supabase's browser client owns this refresh-token family. Remove any
   // cookie copies left by older releases so the backend cannot race it.
@@ -400,6 +436,7 @@ router.post('/login', async (req, res) => {
       accessToken: data.session.access_token,
       refreshToken: data.session.refresh_token,
     },
+    ...(operatorToken ? { operatorToken } : {}),
   })
 })
 

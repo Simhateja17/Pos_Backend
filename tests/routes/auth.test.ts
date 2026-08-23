@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js'
 process.env.SUPABASE_URL = 'http://localhost:54321'
 process.env.SUPABASE_ANON_KEY = 'anon-key'
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key'
+process.env.SUPABASE_JWT_SECRET = 'test-jwt-secret'
 
 // auth.ts instantiates separate admin and anon-key clients at module load.
 const createUserMock = vi.fn()
@@ -43,6 +44,7 @@ const tenantsCreateMock = vi.fn()
 const storesCreateMock = vi.fn(async () => ({ id: 'store-1' }))
 const staffMembersCreateMock = vi.fn()
 const staffSessionsUpdateManyMock = vi.fn()
+const staffSessionsCreateMock = vi.fn()
 const staffMembersUpdateManyMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 // 0033: set-pin reads the row first to detect first-time activation.
@@ -69,7 +71,7 @@ vi.mock('../../src/db/tenantClient', () => ({
     },
     categories: { create: categoriesCreateMock },
     notifications: { create: notificationsCreateMock },
-    staff_sessions: { updateMany: staffSessionsUpdateManyMock },
+    staff_sessions: { updateMany: staffSessionsUpdateManyMock, create: staffSessionsCreateMock },
   })),
   forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
     fn({
@@ -130,6 +132,7 @@ describe('POST /auth/signup and /auth/login', () => {
     storesCreateMock.mockReset().mockResolvedValue({ id: 'store-1' })
     staffMembersCreateMock.mockReset()
     staffMembersFindFirstMock.mockReset()
+    staffSessionsCreateMock.mockReset().mockResolvedValue({ id: 'management-session-1' })
     membershipFindFirstMock.mockReset().mockResolvedValue({
       role: 'manager', tenant_id: 'tenant-1', is_active: true,
     })
@@ -266,6 +269,13 @@ describe('POST /auth/signup and /auth/login', () => {
       },
       error: null,
     })
+    membershipFindFirstMock.mockResolvedValueOnce({
+      id: 'owner-staff-1',
+      user_id: 'user-1',
+      role: 'owner',
+      store_id: 'store-1',
+      is_active: true,
+    })
 
     const app = await buildApp()
     const res = await request(app)
@@ -282,6 +292,15 @@ describe('POST /auth/signup and /auth/login', () => {
     expect(res.body.session).toEqual({
       accessToken,
       refreshToken: 'refresh-token-2',
+    })
+    expect(res.body.operatorToken).toEqual(expect.any(String))
+    expect(staffSessionsCreateMock).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenant_id: 'tenant-1',
+        staff_id: 'owner-staff-1',
+        terminal_id: null,
+        shift_id: null,
+      }),
     })
     expect(res.headers['set-cookie']).toEqual(expect.arrayContaining([
       expect.stringContaining('couture_access_token=; Max-Age=0'),

@@ -5,6 +5,8 @@ export interface CheckoutLineInput {
   quantity: number
   isTaxable: boolean
   lineDiscount?: Prisma.Decimal
+  /** Optional item rate. The checkout-wide rate remains the legacy fallback. */
+  taxRate?: Prisma.Decimal
 }
 
 export interface CheckoutInput {
@@ -45,22 +47,14 @@ function assertTaxRateFraction(taxRate: Prisma.Decimal): void {
 }
 
 // Server-authoritative Decimal-based tax/discount computation. This is the
-// ONLY place checkout math happens — routes (03-03) call this rather than
-// re-deriving tax/discount logic inline. Partitions taxable vs. exempt line
-// subtotals BEFORE applying the tax rate (D-04/D-06, Pitfall 3), applies the
-// cart-level discount before tax, and rounds tax exactly once on the
-// discounted taxable subtotal using ROUND_HALF_UP (D-03).
+// ONLY place checkout math happens — routes call this rather than re-deriving
+// tax/discount logic inline. The cart discount is allocated across line bases,
+// then every taxable line is taxed at its own item rate. The checkout-wide
+// rate is retained only as the compatibility fallback for legacy variants.
 export function computeCheckout(input: CheckoutInput): CheckoutResult {
   const ZERO = new Prisma.Decimal(0)
-  assertTaxRateFraction(input.taxRate)
-  let subtotal = ZERO
-  let taxableSubtotal = ZERO
-
-  for (const l of input.lines) {
-    const lineTotal = l.price.times(l.quantity).minus(l.lineDiscount ?? ZERO)
-    subtotal = subtotal.plus(lineTotal)
-    if (l.isTaxable) taxableSubtotal = taxableSubtotal.plus(lineTotal)
-  }
+  const lineBases = input.lines.map((line) => line.price.times(line.quantity).minus(line.lineDiscount ?? ZERO))
+  const subtotal = lineBases.reduce((sum, value) => sum.plus(value), ZERO)
 
   let cartDiscount = ZERO
   if (input.cartDiscountPercent) {
@@ -69,13 +63,21 @@ export function computeCheckout(input: CheckoutInput): CheckoutResult {
     cartDiscount = input.cartDiscountAmount
   }
 
-  const taxableShare = subtotal.isZero() ? ZERO : taxableSubtotal.dividedBy(subtotal)
-  const discountedTaxableSubtotal = taxableSubtotal.minus(cartDiscount.times(taxableShare))
   const discountedSubtotal = subtotal.minus(cartDiscount)
+  const discountedLineBases = lineBases.map((lineBase) =>
+    subtotal.isZero() ? lineBase : lineBase.minus(cartDiscount.times(lineBase).dividedBy(subtotal)),
+  )
 
-  const tax = discountedTaxableSubtotal.isNegative()
+  const rawTax = input.lines.reduce((sum, line, index) => {
+    if (!line.isTaxable) return sum
+    const taxRate = line.taxRate ?? input.taxRate
+    assertTaxRateFraction(taxRate)
+    return sum.plus(discountedLineBases[index].times(taxRate))
+  }, ZERO)
+
+  const tax = rawTax.isNegative()
     ? ZERO
-    : discountedTaxableSubtotal.times(input.taxRate).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+    : rawTax.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
   const total = discountedSubtotal.plus(tax)
 
   return { subtotal, cartDiscount, discountedSubtotal, tax, total }

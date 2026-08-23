@@ -96,4 +96,40 @@ describe('computeCheckout', () => {
       }),
     ).toThrow(/decimal fraction between 0 and 1/i)
   })
+
+  it('uses each taxable item rate instead of one cart-wide rate', () => {
+    const result = computeCheckout({
+      lines: [
+        { price: D('100.00'), quantity: 1, isTaxable: true, taxRate: D('0.05') },
+        { price: D('100.00'), quantity: 1, isTaxable: true, taxRate: D('0.18') },
+      ],
+      taxRate: D('0.18'),
+    })
+
+    expect(result.tax.toString()).toBe('23')
+    expect(result.total.toString()).toBe('223')
+  })
+
+  it('allocates a cart discount before applying mixed item rates', () => {
+    const result = computeCheckout({
+      lines: [
+        { price: D('100.00'), quantity: 1, isTaxable: true, taxRate: D('0.05') },
+        { price: D('100.00'), quantity: 1, isTaxable: true, taxRate: D('0.18') },
+      ],
+      cartDiscountAmount: D('10.00'),
+      taxRate: D('0.18'),
+    })
+
+    expect(result.tax.toString()).toBe('21.85')
+    expect(result.total.toString()).toBe('211.85')
+  })
+
+  it('does not require the legacy store fallback when every taxable item has a rate', () => {
+    const result = computeCheckout({
+      lines: [{ price: D('100.00'), quantity: 1, isTaxable: true, taxRate: D('0.05') }],
+      taxRate: D('18'),
+    })
+
+    expect(result.tax.toString()).toBe('5')
+  })
 })

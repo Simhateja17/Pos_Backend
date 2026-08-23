@@ -94,6 +94,7 @@ export type TaxSourceLine = {
   unitPrice: Prisma.Decimal
   discountAmount: Prisma.Decimal
   isTaxable: boolean
+  taxRate: Prisma.Decimal
   lineTotal: Prisma.Decimal
   sku: string | null
   productName: string | null
@@ -337,7 +338,13 @@ export function buildTaxInvoiceSnapshot(input: {
   const netLineValues = lineBases.map((value, index) => value.minus(cartDiscountAllocations[index]))
   const taxableWeights = source.lines.map((line, index) => (line.isTaxable ? netLineValues[index] : ZERO))
   const taxableTotal = taxableWeights.reduce((sum, value) => sum.plus(value), ZERO)
-  const lineTaxes = proportionalAllocation(source.taxTotal, taxableWeights)
+  const taxWeights = source.lines.map((line, index) =>
+    line.isTaxable ? netLineValues[index].times(line.taxRate) : ZERO,
+  )
+  const lineTaxes = proportionalAllocation(
+    source.taxTotal,
+    taxWeights.some((weight) => !weight.isZero()) ? taxWeights : taxableWeights,
+  )
   const isInterState = !statesMatch(source.sellerState, source.placeOfSupply)
   const lineSnapshots: TaxDocumentLineSnapshot[] = []
 
@@ -360,7 +367,7 @@ export function buildTaxInvoiceSnapshot(input: {
       cess: ZERO,
       lineTotal,
     })
-    line.gstRate = sourceLine.isTaxable ? source.combinedTaxRate.times(100).toString() : ZERO.toString()
+    line.gstRate = sourceLine.isTaxable ? sourceLine.taxRate.times(100).toString() : ZERO.toString()
     lineSnapshots.push(line)
   }
 
@@ -601,6 +608,11 @@ async function loadSaleSource(tx: any, tenantId: string, saleId: string): Promis
       })
     : null
 
+  const combinedTaxRate = decimal(storeRecord.tax_rate_state)
+    .plus(decimal(storeRecord.tax_rate_county))
+    .plus(decimal(storeRecord.tax_rate_city))
+    .plus(decimal(storeRecord.tax_rate_district))
+
   return {
     tenantId,
     storeId: sale.store_id,
@@ -614,10 +626,7 @@ async function loadSaleSource(tx: any, tenantId: string, saleId: string): Promis
     buyer,
     sellerState: seller.state,
     placeOfSupply: nullableString(storeRecord.place_of_supply) ?? seller.state,
-    combinedTaxRate: decimal(storeRecord.tax_rate_state)
-      .plus(decimal(storeRecord.tax_rate_county))
-      .plus(decimal(storeRecord.tax_rate_city))
-      .plus(decimal(storeRecord.tax_rate_district)),
+    combinedTaxRate,
     subtotal: decimal(sale.subtotal),
     cartDiscount: decimal(sale.discount_amount),
     taxTotal: decimal(sale.tax_amount),
@@ -632,6 +641,7 @@ async function loadSaleSource(tx: any, tenantId: string, saleId: string): Promis
         unitPrice: decimal(line.unit_price),
         discountAmount: decimal(line.discount_amount),
         isTaxable: Boolean(line.is_taxable),
+        taxRate: line.tax_rate == null ? combinedTaxRate : decimal(line.tax_rate),
         lineTotal: decimal(line.line_total),
         sku: nullableString(variant.sku),
         productName: nullableString(product?.name),

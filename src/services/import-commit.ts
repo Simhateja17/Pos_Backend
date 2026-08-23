@@ -222,6 +222,8 @@ async function commitCatalog(
     const sku = value(row, 'sku')
     const productName = value(row, 'productName')
     const price = parseNumber(value(row, 'price'))
+    const rawTaxRatePercent = value(row, 'taxRatePercent')
+    const taxRatePercent = rawTaxRatePercent ? parseNumber(rawTaxRatePercent) : null
 
     if (!sku || !productName || price === null) {
       result.rowsSkipped += 1
@@ -234,6 +236,17 @@ async function commitCatalog(
               ? 'No product name.'
               : `Could not read a price from "${value(row, 'price')}".`,
         })
+      }
+      continue
+    }
+
+    if (
+      rawTaxRatePercent &&
+      (taxRatePercent === null || taxRatePercent < 0 || taxRatePercent > 100)
+    ) {
+      result.rowsSkipped += 1
+      if (result.issues.length < MAX_ISSUES) {
+        result.issues.push({ row: rowNumber, reason: `Could not read an item tax rate between 0 and 100% from "${rawTaxRatePercent}".` })
       }
       continue
     }
@@ -298,6 +311,9 @@ async function commitCatalog(
       color: value(row, 'color') || null,
       material: value(row, 'material') || null,
       price: price.toFixed(2),
+      // An omitted tax column must not erase a rate already configured on an
+      // existing SKU. Explicit 0 is preserved as a genuine zero-rate item.
+      tax_rate: taxRatePercent === null ? undefined : (taxRatePercent / 100).toFixed(4),
       moving_average_cost: cost === null ? null : cost.toFixed(2),
       // No longer rounded: a kg variant legitimately reorders at 5.5 (0031).
       reorder_threshold: reorderThreshold === null ? undefined : Math.max(0, reorderThreshold),
@@ -355,6 +371,7 @@ type PendingLine = {
   lineTotal: number
   discount: number
   isTaxable: boolean
+  taxRate: string | null
 }
 
 async function commitSales(
@@ -388,7 +405,7 @@ async function commitSales(
   }
 
   const sales = new Map<string, PendingSale>()
-  const variantCache = new Map<string, { id: string; price: string; is_taxable: boolean } | null>()
+  const variantCache = new Map<string, { id: string; price: string; is_taxable: boolean; tax_rate: unknown } | null>()
 
   for (const [index, row] of rows.entries()) {
     result.rowsRead += 1
@@ -422,7 +439,7 @@ async function commitSales(
         sku,
         await tx.variants.findFirst({
           where: { tenant_id: input.tenantId, sku },
-          select: { id: true, price: true, is_taxable: true },
+          select: { id: true, price: true, is_taxable: true, tax_rate: true },
         }),
       )
     }
@@ -457,6 +474,7 @@ async function commitSales(
       lineTotal,
       discount,
       isTaxable: variant.is_taxable,
+      taxRate: variant.tax_rate == null ? null : String(variant.tax_rate),
     }
 
     if (existing) {
@@ -516,6 +534,7 @@ async function commitSales(
           unit_price: line.unitPrice.toFixed(2),
           discount_amount: line.discount.toFixed(2),
           is_taxable: line.isTaxable,
+          tax_rate: line.taxRate,
           line_total: line.lineTotal.toFixed(2),
           created_at: sale.soldAt,
         },

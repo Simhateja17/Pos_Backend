@@ -45,6 +45,8 @@ export const VariantSchema = z
     /** Null until the variant has a received/imported cost basis. */
     movingAverageCost: z.string().nullable(),
     isTaxable: z.boolean(),
+    /** Percentage string for display; null means the legacy store fallback is still active. */
+    taxRatePercent: z.string().nullable(),
     // numeric(12,3) since 0031 — a kg variant reorders at 5.5, not 5.
     reorderThreshold: z.number(),
     identityLocked: z.boolean(),
@@ -78,6 +80,8 @@ export const CreateVariantInputSchema = z
     color: z.string().max(50).optional(),
     material: z.string().max(50).optional(),
     price: z.number().nonnegative(),
+    /** The GST/VAT rate for this sellable variant, expressed as a percentage. */
+    taxRatePercent: z.number().min(0).max(100),
     reorderThreshold: z.number().nonnegative().optional(),
   })
   .superRefine((value, ctx) => {
@@ -125,6 +129,8 @@ export const UpdateVariantSchema = z
     barcode: BarcodeSchema.nullable().optional(),
     unitOfMeasure: UnitOfMeasureSchema.optional(),
     price: z.number().nonnegative().optional(),
+    /** Percentage rate for this item. Omit to leave a legacy fallback unchanged. */
+    taxRatePercent: z.number().min(0).max(100).optional(),
     reorderThreshold: z.number().nonnegative().optional(),
   })
   .openapi('UpdateVariantRequest')

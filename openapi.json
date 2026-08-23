@@ -2489,6 +2489,9 @@
               "accessToken",
               "refreshToken"
             ]
+          },
+          "operatorToken": {
+            "type": "string"
           }
         },
         "required": [
@@ -2823,6 +2826,12 @@
           "isTaxable": {
             "type": "boolean"
           },
+          "taxRatePercent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "reorderThreshold": {
             "type": "number"
           },
@@ -2848,6 +2857,7 @@
           "price",
           "movingAverageCost",
           "isTaxable",
+          "taxRatePercent",
           "reorderThreshold",
           "identityLocked",
           "currentStock",
@@ -2917,13 +2927,19 @@
                   "type": "number",
                   "minimum": 0
                 },
+                "taxRatePercent": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
                 "reorderThreshold": {
                   "type": "number",
                   "minimum": 0
                 }
               },
               "required": [
-                "price"
+                "price",
+                "taxRatePercent"
               ]
             },
             "minItems": 1
@@ -2962,6 +2978,11 @@
           "price": {
             "type": "number",
             "minimum": 0
+          },
+          "taxRatePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
           },
           "reorderThreshold": {
             "type": "number",

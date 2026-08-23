@@ -32,6 +32,7 @@ function source(overrides: Partial<TaxSaleSource> = {}): TaxSaleSource {
     unitPrice: new Prisma.Decimal('100.00'),
     discountAmount: new Prisma.Decimal('0.00'),
     isTaxable: true,
+    taxRate: new Prisma.Decimal('0.18'),
     lineTotal: new Prisma.Decimal('200.00'),
     sku: 'KURTA-01',
     productName: 'Cotton Kurta',

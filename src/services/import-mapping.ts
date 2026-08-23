@@ -47,6 +47,7 @@ const SYNONYMS: Record<string, string[]> = {
   color: ['color', 'colour', 'shade'],
   material: ['material', 'fabric', 'composition'],
   price: ['price', 'sellingprice', 'selling price', 'mrp', 'rate', 'unitprice', 'unit price', 'retail'],
+  taxRatePercent: ['taxrate', 'tax rate', 'taxpercent', 'tax percent', 'tax percentage', 'gstrate', 'gst rate', 'gstpercent', 'gst percent', 'vatrate', 'vat rate'],
   cost: ['cost', 'costprice', 'cost price', 'purchaseprice', 'purchase price', 'landedcost', 'buyprice'],
   quantityOnHand: ['qty', 'quantity', 'stock', 'onhand', 'on hand', 'closingstock', 'closing stock', 'balance'],
   reorderThreshold: ['reorder', 'reorderlevel', 'reorder level', 'reorderpoint', 'minstock', 'min stock', 'minimum'],

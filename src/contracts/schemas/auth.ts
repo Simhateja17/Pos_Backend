@@ -70,6 +70,7 @@ export const AuthResponseSchema = z
       accessToken: z.string(),
       refreshToken: z.string(),
     }),
+    operatorToken: z.string().optional(),
   })
   .openapi('AuthResponse')
 

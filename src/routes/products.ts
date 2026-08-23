@@ -1,5 +1,6 @@
 import { Router, type Request } from 'express'
 import { z } from 'zod'
+import { Prisma } from '@prisma/client'
 import { CreateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
 import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
@@ -24,6 +25,7 @@ type VariantRow = {
   price: unknown // Prisma Decimal
   moving_average_cost: unknown | null // Prisma Decimal; null until cost basis exists
   is_taxable: boolean
+  tax_rate: unknown | null // Prisma Decimal fraction; null for legacy rows
   reorder_threshold: unknown // Prisma Decimal since 0031
   identity_locked: boolean
   created_at: Date
@@ -55,6 +57,7 @@ function toVariantJson(
     movingAverageCost:
       includeCostBasis && row.moving_average_cost != null ? row.moving_average_cost.toString() : null,
     isTaxable: row.is_taxable,
+    taxRatePercent: row.tax_rate == null ? null : new Prisma.Decimal(String(row.tax_rate)).times(100).toString(),
     reorderThreshold: Number(row.reorder_threshold),
     identityLocked: row.identity_locked,
     currentStock,
@@ -304,6 +307,7 @@ router.post('/', requireRole('manager'), async (req, res) => {
             color: input.color ?? null,
             material: input.material ?? null,
             price: input.price,
+            tax_rate: new Prisma.Decimal(input.taxRatePercent).dividedBy(100),
             reorder_threshold: input.reorderThreshold ?? 4,
           },
         })
@@ -374,6 +378,9 @@ router.patch('/:productId/variants/:variantId', requireRole('manager'), async (r
         ...(parsed.data.barcode !== undefined ? { barcode: parsed.data.barcode } : {}),
         ...(parsed.data.unitOfMeasure !== undefined ? { unit_of_measure: parsed.data.unitOfMeasure } : {}),
         ...(parsed.data.price !== undefined ? { price: parsed.data.price } : {}),
+        ...(parsed.data.taxRatePercent !== undefined
+          ? { tax_rate: new Prisma.Decimal(parsed.data.taxRatePercent).dividedBy(100) }
+          : {}),
         ...(parsed.data.reorderThreshold !== undefined ? { reorder_threshold: parsed.data.reorderThreshold } : {}),
       },
     })

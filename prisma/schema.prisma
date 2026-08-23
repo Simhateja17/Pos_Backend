@@ -1062,6 +1062,9 @@ model variants {
   identity_locked              Boolean                        @default(false)
   created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
   is_taxable                   Boolean                        @default(true)
+  // Decimal fraction: 0.18 means 18%. Null keeps older catalog rows on the
+  // store-level fallback until an operator assigns an item rate.
+  tax_rate                     Decimal?                       @db.Decimal(6, 4)
   moving_average_cost          Decimal?                       @db.Decimal(10, 2)
   source_metadata              Json?
   unit_of_measure              String                         @default("piece")
@@ -1225,6 +1228,9 @@ model sale_line_items {
   discount_percent Decimal? @db.Decimal(5, 2)
   discount_amount  Decimal  @default(0) @db.Decimal(10, 2)
   is_taxable       Boolean
+  // Snapshot of the variant rate used for this sale. Null only on legacy
+  // imported/manual rows created before per-item tax was introduced.
+  tax_rate         Decimal? @db.Decimal(6, 4)
   line_total       Decimal  @db.Decimal(12, 2)
   created_at       DateTime @default(now()) @db.Timestamptz(6)
   sales            sales    @relation(fields: [sale_id], references: [id], onDelete: Cascade, onUpdate: NoAction)

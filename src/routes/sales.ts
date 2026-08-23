@@ -457,6 +457,7 @@ router.post('/', async (req, res) => {
           price,
           quantity: line.quantity,
           isTaxable: variant.is_taxable,
+          taxRate: variant.tax_rate == null ? combinedTaxRate : new Prisma.Decimal(variant.tax_rate),
           lineDiscount,
         }
       })
@@ -544,6 +545,7 @@ router.post('/', async (req, res) => {
             discount_percent: line.discountPercent ?? null,
             discount_amount: checkoutLine.lineDiscount.toString(),
             is_taxable: variant.is_taxable,
+            tax_rate: checkoutLine.taxRate.toString(),
             line_total: lineTotal.toString(),
           },
         })

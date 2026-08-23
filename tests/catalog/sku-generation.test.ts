@@ -113,7 +113,7 @@ describe('products routes — SKU generation/override (CATALOG-02)', () => {
     const res = await request(app)
       .post('/products')
       .set('Authorization', `Bearer ${tokenFor('owner')}`)
-      .send({ name: 'Custom Product', variants: [{ sku: 'CUSTOM-01', price: 10 }] })
+      .send({ name: 'Custom Product', variants: [{ sku: 'CUSTOM-01', price: 10, taxRatePercent: 18 }] })
 
     expect(res.status).toBe(201)
     expect(res.body.variants[0].sku).toBe('CUSTOM-01')
@@ -130,8 +130,8 @@ describe('products routes — SKU generation/override (CATALOG-02)', () => {
       .send({
         name: 'Dup SKU Product',
         variants: [
-          { sku: 'X-01', price: 5 },
-          { sku: 'X-01', price: 6 },
+          { sku: 'X-01', price: 5, taxRatePercent: 18 },
+          { sku: 'X-01', price: 6, taxRatePercent: 18 },
         ],
       })
 
@@ -168,8 +168,8 @@ describe('products routes — SKU generation/override (CATALOG-02)', () => {
       .send({
         name: 'Collision Product',
         variants: [
-          { sku: 'Y-01', price: 5 },
-          { sku: 'Y-02', price: 6 },
+          { sku: 'Y-01', price: 5, taxRatePercent: 18 },
+          { sku: 'Y-02', price: 6, taxRatePercent: 18 },
         ],
       })
 

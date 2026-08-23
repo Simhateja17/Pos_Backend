@@ -6,14 +6,15 @@ describe('heuristicMapping', () => {
   it('matches the header names a real catalog export uses', () => {
     const mappings = heuristicMapping({
       kind: 'catalog',
-      columns: ['Item Code', 'Product Name', 'MRP', 'Closing Stock', 'Supplier Notes'],
-      rows: [{ 'Item Code': 'A-1', 'Product Name': 'Shirt', MRP: '1299', 'Closing Stock': '4', 'Supplier Notes': 'x' }],
+      columns: ['Item Code', 'Product Name', 'MRP', 'GST Rate', 'Closing Stock', 'Supplier Notes'],
+      rows: [{ 'Item Code': 'A-1', 'Product Name': 'Shirt', MRP: '1299', 'GST Rate': '5', 'Closing Stock': '4', 'Supplier Notes': 'x' }],
     })
 
     const byColumn = Object.fromEntries(mappings.map((m) => [m.column, m.target]))
     expect(byColumn['Item Code']).toBe('sku')
     expect(byColumn['Product Name']).toBe('productName')
     expect(byColumn['MRP']).toBe('price')
+    expect(byColumn['GST Rate']).toBe('taxRatePercent')
     expect(byColumn['Closing Stock']).toBe('quantityOnHand')
   })
 

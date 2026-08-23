@@ -21,6 +21,7 @@ export const CATALOG_TARGET_FIELDS = [
   { field: 'color', label: 'Colour', required: false, type: 'text', hint: '' },
   { field: 'material', label: 'Material', required: false, type: 'text', hint: '' },
   { field: 'price', label: 'Selling price', required: true, type: 'number', hint: 'What the customer pays.' },
+  { field: 'taxRatePercent', label: 'Item tax rate (%)', required: false, type: 'number', hint: 'The rate saved on this sellable SKU. Leave blank only for legacy store fallback.' },
   { field: 'cost', label: 'Unit cost', required: false, type: 'number', hint: 'Sets the opening cost basis for gross margin.' },
   { field: 'quantityOnHand', label: 'Quantity on hand', required: false, type: 'number', hint: 'Written as an opening stock receipt.' },
   { field: 'reorderThreshold', label: 'Reorder point', required: false, type: 'number', hint: 'Drives the low-stock alert.' },

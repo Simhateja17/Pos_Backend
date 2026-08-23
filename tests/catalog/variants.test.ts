@@ -124,6 +124,7 @@ describe('products routes — variants (CATALOG-01)', () => {
       color: 'Blue',
       material: null,
       price: '49.99',
+      tax_rate: '0.12',
       reorder_threshold: 4,
       identity_locked: false,
       created_at: new Date('2026-01-01T00:00:00Z'),
@@ -133,11 +134,13 @@ describe('products routes — variants (CATALOG-01)', () => {
     const res = await request(app)
       .post('/products')
       .set('Authorization', `Bearer ${tokenFor('owner')}`)
-      .send({ name: 'Blue Dress', variants: [{ size: 'M', color: 'Blue', price: 49.99 }] })
+      .send({ name: 'Blue Dress', variants: [{ size: 'M', color: 'Blue', price: 49.99, taxRatePercent: 12 }] })
 
     expect(res.status).toBe(201)
     expect(res.body.variants).toHaveLength(1)
     expect(res.body.variants[0].sku).toMatch(/^[A-Z0-9]{1,4}-\d{4}$/)
+    expect(variantsCreateMock.mock.calls[0][0].data.tax_rate.toString()).toBe('0.12')
+    expect(res.body.variants[0].taxRatePercent).toBe('12')
   })
 
   it('Test 2: POST /products with a one-size product (no size/color/material) returns exactly 1 default variant', async () => {
@@ -164,7 +167,7 @@ describe('products routes — variants (CATALOG-01)', () => {
     const res = await request(app)
       .post('/products')
       .set('Authorization', `Bearer ${tokenFor('manager')}`)
-      .send({ name: 'One Size Scarf', variants: [{ price: 19.99 }] })
+      .send({ name: 'One Size Scarf', variants: [{ price: 19.99, taxRatePercent: 5 }] })
 
     expect(res.status).toBe(201)
     expect(res.body.variants).toHaveLength(1)
