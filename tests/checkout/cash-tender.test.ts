@@ -2,10 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { calculateCashChange } from '../../src/lib/cashTender'
 
 describe('cash tender and change', () => {
-  it('requires the physical amount received for a cash sale', () => {
-    expect(calculateCashChange([{ method: 'cash', amount: '800.00' }])).toEqual({
+  it('assumes exact cash when the physical amount is omitted', () => {
+    const result = calculateCashChange([{ method: 'cash', amount: '800.00' }])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.cashReceived.toFixed(2)).toBe('800.00')
+    expect(result.changeDue.toFixed(2)).toBe('0.00')
+  })
+
+  it('rejects cash received when there is no cash payment', () => {
+    expect(calculateCashChange([{ method: 'upi', amount: '800.00' }], '800.00')).toEqual({
       ok: false,
-      error: 'Enter the cash received from the customer.',
+      error: 'Cash received is only valid when the sale includes a cash payment.',
     })
   })
 

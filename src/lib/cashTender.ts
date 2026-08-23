@@ -19,14 +19,13 @@ export function calculateCashChange(
     .filter((payment) => payment.method === 'cash')
     .reduce((sum, payment) => sum.plus(new Prisma.Decimal(payment.amount)), ZERO)
 
-  if (cashPayment.greaterThan(0) && !receivedValue) {
-    return { ok: false, error: 'Enter the cash received from the customer.' }
-  }
   if (cashPayment.isZero() && receivedValue) {
     return { ok: false, error: 'Cash received is only valid when the sale includes a cash payment.' }
   }
 
-  const cashReceived = receivedValue ? new Prisma.Decimal(receivedValue) : ZERO
+  // An omitted physical amount means the customer paid the exact cash
+  // allocation. Cashiers only need to enter a value when change is due.
+  const cashReceived = receivedValue ? new Prisma.Decimal(receivedValue) : cashPayment
   if (cashReceived.lessThan(cashPayment)) {
     return { ok: false, error: `Cash received must be at least ${cashPayment.toFixed(2)}.` }
   }
