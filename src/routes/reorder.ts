@@ -6,7 +6,8 @@ import { requireRole } from '../middleware/requireRole'
 
 const router = Router()
 
-function toSuggestionJson(row: any) {
+export function toSuggestionJson(row: any) {
+  const reason = row.reason ?? {}
   return {
     id: row.id,
     variantId: row.variant_id,
@@ -17,7 +18,12 @@ function toSuggestionJson(row: any) {
     suggestedQuantity: Number(row.suggested_quantity),
     method: row.method,
     confidence: row.confidence,
-    reason: row.reason,
+    // Rows generated before the structured ML-03 contract used `stock`.
+    // Normalize at the API boundary so every client receives `currentStock`.
+    reason: {
+      ...reason,
+      currentStock: Number(reason.currentStock ?? reason.stock ?? 0),
+    },
     generatedAt: row.generated_at.toISOString(),
   }
 }

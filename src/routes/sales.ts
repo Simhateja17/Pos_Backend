@@ -19,6 +19,7 @@ import { findPairedTerminal } from '../lib/counterDevice'
 import { consumeRateLimit } from '../lib/rateLimit'
 import { effectivePricesForVariants } from '../lib/storePricing'
 import { calculateCashChange } from '../lib/cashTender'
+import { ensureTaxInvoice } from '../services/taxDocuments'
 
 const router = Router()
 
@@ -44,7 +45,7 @@ const SALE_LINE_INCLUDE = {
 // exactly, reusing the same ROLE_RANK import and acting-identity precedence
 // (req.actingStaff first, req.user fallback) already established for
 // POST /stock-movements's adjustment gate.
-function isApprovedForDiscount(req: import('express').Request): boolean {
+export function isApprovedForDiscount(req: import('express').Request): boolean {
   const actingRole = req.actingStaff?.role ?? req.user?.role
   if (!actingRole) return false
   return ROLE_RANK[actingRole] >= ROLE_RANK.manager
@@ -54,7 +55,7 @@ function isApprovedForDiscount(req: import('express').Request): boolean {
 // is actually present — discountPercent and discountAmount are both
 // schema-legal and mutually exclusive, so the D-05 gate must not be
 // bypassable by choosing the field that isn't checked (Blocker 1 fix).
-function effectiveLinePercent(
+export function effectiveLinePercent(
   line: { discountPercent?: string; discountAmount?: string },
   price: Prisma.Decimal,
   quantity: number,
@@ -586,6 +587,17 @@ router.post('/', async (req, res) => {
         })
       }
 
+      // For a GST-registered India tenant, a completed retail sale and its
+      // statutory Tax Invoice are one business event. Keep International and
+      // unregistered India tenants out of this GST-specific document path.
+      const requiresTaxInvoice = tenant.country === 'IN' && tenant.gst_status === 'regular'
+      const taxInvoice = requiresTaxInvoice
+        ? await ensureTaxInvoice(tx, { tenantId, saleId: sale.id, createdBy })
+        : null
+      if (requiresTaxInvoice && !taxInvoice) {
+        throw new Error('Completed GST sale did not produce a tax invoice')
+      }
+
       // CHECK-06: resolve the fire-and-forget receipt-email target — the
       // caller-supplied receiptEmail, else customer.email from the request,
       // else the found/created customer row's own on-file email. This is
@@ -597,7 +609,7 @@ router.post('/', async (req, res) => {
 
       return {
         status: 201,
-        body: toSaleJson(sale, createdLines, createdPayments, tenant.business_name as string, undefined, partiesBySaleId.get(sale.id)),
+        body: toSaleJson(sale, createdLines, createdPayments, tenant.business_name as string, taxInvoice?.documentNumber, partiesBySaleId.get(sale.id)),
         receiptEmailTarget,
         businessName: tenant.business_name as string,
       }
@@ -670,6 +682,9 @@ router.post('/', async (req, res) => {
     // using a percentage-shaped value such as 18.
     if (err?.code === 'invalid_tax_rate') {
       return res.status(500).json({ error: 'Store tax configuration is invalid. Sale was not recorded.' })
+    }
+    if (err?.code === 'invalid_discount') {
+      return res.status(400).json({ error: err.message })
     }
     // OFFLINE-01 race path. Two concurrent submissions of the same
     // client_sale_id both miss the fast-path lookup, both compute, and both
@@ -834,6 +849,7 @@ router.get('/', async (req, res) => {
     `start mode=${receiptLookup ? 'receipt' : 'customer'} receipt=${lookupLogValue(receiptLookup)} customerSearchLength=${customerLookup?.length ?? 0}`,
   )
   const client = forTenant(req.user!.tenantId) as any
+  const storeScope = storeScopeWhere(req)
   let sales: any[] = []
   if (receiptLookup) {
     // The old implementation treated the UI's receipt field as a sale UUID,
@@ -847,7 +863,9 @@ router.get('/', async (req, res) => {
     // is presented to the operator instead of silently choosing one sale.
     if (z.string().uuid().safeParse(receiptLookup).success) {
       logLookup(req, `branch=receipt_uuid value=${lookupLogValue(receiptLookup)}`)
-      const sale = await withLookupLogging<any>(req, 'sale-by-uuid', () => client.sales.findFirst({ where: { id: receiptLookup } }))
+      const sale = await withLookupLogging<any>(req, 'sale-by-uuid', () =>
+        client.sales.findFirst({ where: { id: receiptLookup, ...storeScope } }),
+      )
       sales = sale ? [sale] : []
     } else {
       logLookup(req, `branch=tax_invoice_or_prefix value=${lookupLogValue(receiptLookup)}`)
@@ -856,12 +874,15 @@ router.get('/', async (req, res) => {
           where: {
             document_type: 'tax_invoice',
             document_number: { equals: receiptLookup, mode: 'insensitive' },
+            ...storeScope,
           },
           select: { sale_id: true },
         }),
       )
       if (document) {
-        const sale = await withLookupLogging<any>(req, 'sale-by-tax-invoice', () => client.sales.findFirst({ where: { id: document.sale_id } }))
+        const sale = await withLookupLogging<any>(req, 'sale-by-tax-invoice', () =>
+          client.sales.findFirst({ where: { id: document.sale_id, ...storeScope } }),
+        )
         sales = sale ? [sale] : []
         logLookup(req, `branch=tax_invoice sale=${lookupLogValue(document.sale_id)} matches=${sales.length}`)
       } else {
@@ -869,7 +890,7 @@ router.get('/', async (req, res) => {
         if (saleIdFilter) {
           sales = await withLookupLogging<any[]>(req, 'sale-by-prefix', () =>
             client.sales.findMany({
-              where: saleIdFilter,
+              where: { ...saleIdFilter, ...storeScope },
               orderBy: { created_at: 'desc' },
               take: 50,
             }),
@@ -889,7 +910,7 @@ router.get('/', async (req, res) => {
     const customers = await withLookupLogging<Array<{ id: string }>>(req, 'customer-search', () => searchCustomers(client, customerLookup))
     const customerIds = customers.map((c: { id: string }) => c.id)
     sales = customerIds.length > 0
-      ? await withLookupLogging<any[]>(req, 'sales-by-customer', () => client.sales.findMany({ where: { customer_id: { in: customerIds } }, orderBy: { created_at: 'desc' } }))
+      ? await withLookupLogging<any[]>(req, 'sales-by-customer', () => client.sales.findMany({ where: { customer_id: { in: customerIds }, ...storeScope }, orderBy: { created_at: 'desc' } }))
       : []
     logLookup(req, `branch=customer_search customers=${customerIds.length} matches=${sales.length}`)
   }

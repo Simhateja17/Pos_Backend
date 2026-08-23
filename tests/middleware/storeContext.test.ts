@@ -113,8 +113,8 @@ describe('storeContextMiddleware', () => {
   )
 
   it('Test 4: an owner may act in another store of their own business', async () => {
-    storesFindFirstMock.mockResolvedValue({ id: OTHER_STORE })
-    const req = mockReq({ user: user('owner'), headers: { 'x-store-id': OTHER_STORE } })
+    storesFindFirstMock.mockResolvedValue({ id: OTHER_STORE, is_active: true })
+    const req = mockReq({ method: 'GET', user: user('owner'), headers: { 'x-store-id': OTHER_STORE } })
     const res = mockRes()
     const next = vi.fn()
 
@@ -138,17 +138,31 @@ describe('storeContextMiddleware', () => {
     expect(next).not.toHaveBeenCalled()
   })
 
-  it('Test 6: an owner cannot act in a deactivated store', async () => {
-    // The route filters on is_active, so a deactivated store resolves to null.
-    storesFindFirstMock.mockResolvedValue(null)
-    const req = mockReq({ user: user('owner'), headers: { 'x-store-id': OTHER_STORE } })
+  it('Test 6: an owner may read a deactivated store history', async () => {
+    storesFindFirstMock.mockResolvedValue({ id: OTHER_STORE, is_active: false })
+    const req = mockReq({ method: 'GET', user: user('owner'), headers: { 'x-store-id': OTHER_STORE } })
     const res = mockRes()
+    const next = vi.fn()
 
-    await storeContextMiddleware(req, res, mockRes as any)
+    await storeContextMiddleware(req, res, next)
 
     expect(storesFindFirstMock).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: OTHER_STORE, is_active: true } }),
+      expect.objectContaining({ where: { id: OTHER_STORE } }),
     )
+    expect(next).toHaveBeenCalled()
+    expect(req.storeContext?.activeStoreId).toBe(OTHER_STORE)
+  })
+
+  it('blocks writes to a deactivated store until it is reactivated', async () => {
+    storesFindFirstMock.mockResolvedValue({ id: OTHER_STORE, is_active: false })
+    const req = mockReq({ method: 'POST', user: user('owner'), headers: { 'x-store-id': OTHER_STORE } })
+    const res = mockRes()
+    const next = vi.fn()
+
+    await storeContextMiddleware(req, res, next)
+
+    expect(res.status).toHaveBeenCalledWith(409)
+    expect(next).not.toHaveBeenCalled()
   })
 
   it('Test 7: a malformed store id is rejected before touching the database', async () => {

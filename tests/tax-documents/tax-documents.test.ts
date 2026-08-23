@@ -114,6 +114,30 @@ describe('pure GST invoice builder', () => {
     expect(invoice.lines[0].igstAmount).toBe('36')
   })
 
+  it('keeps odd-paisa CGST and SGST equal and reconciles through rounding', () => {
+    const invoice = buildTaxInvoiceSnapshot({
+      source: source({
+        subtotal: new Prisma.Decimal('872.50'),
+        taxTotal: new Prisma.Decimal('157.05'),
+        grandTotal: new Prisma.Decimal('1029.55'),
+        lines: [{
+          ...source().lines[0],
+          quantity: new Prisma.Decimal(1),
+          unitPrice: new Prisma.Decimal('872.50'),
+          lineTotal: new Prisma.Decimal('872.50'),
+        }],
+      }),
+      financialYear: '2026-27',
+      sequenceNumber: BigInt(7),
+      documentNumber: 'AMB/26-27/000007',
+    })
+
+    expect(invoice.cgstTotal.toString()).toBe('78.53')
+    expect(invoice.sgstTotal.toString()).toBe('78.53')
+    expect(invoice.roundingAmount.toString()).toBe('-0.01')
+    expect(invoice.grandTotal.toString()).toBe('1029.55')
+  })
+
   it('returns an independent snapshot rather than a live reference to sale settings', () => {
     const sale = source()
     const invoice = buildTaxInvoiceSnapshot({

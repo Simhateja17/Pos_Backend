@@ -4,10 +4,11 @@ import { z } from 'zod'
 import { CreateStockMovementSchema } from '../contracts/schemas/stockMovement'
 import { allowsFractionalQuantity } from '../contracts/schemas/product'
 import { ROLE_RANK } from '../middleware/requireRole'
-import { stockByVariant as stockLevelsFor } from '../lib/stockLevels'
+import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
 import { forTenant } from '../db/tenantClient'
 
 const router = Router()
+const MAX_STOCK_QUANTITY = 999_999_999.999
 
 type MovementRow = {
   id: string
@@ -58,7 +59,7 @@ async function resolveActingStaffId(client: any, req: import('express').Request)
 router.post('/', async (req, res) => {
   const parsed = CreateStockMovementSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request' })
   }
 
   if (parsed.data.movementType === 'adjustment' && !isAllowedToAdjust(req)) {
@@ -88,6 +89,14 @@ router.post('/', async (req, res) => {
   ) {
     return res.status(400).json({
       error: `Quantity must be a whole number for a variant measured in ${variant.unit_of_measure}`,
+    })
+  }
+
+  const currentStock = await stockForVariant(client, req, parsed.data.variantId)
+  const projectedStock = currentStock + parsed.data.quantityDelta
+  if (!Number.isFinite(projectedStock) || Math.abs(projectedStock) > MAX_STOCK_QUANTITY) {
+    return res.status(400).json({
+      error: `Quantity is outside the supported range. Current stock is ${currentStock}.`,
     })
   }
 

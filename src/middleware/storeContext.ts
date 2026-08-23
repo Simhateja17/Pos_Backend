@@ -123,8 +123,8 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
   // Tenant-scoped, so RLS refuses another business's store id outright — this
   // lookup cannot be tricked into confirming a store the owner does not own.
   const store = await forTenant(req.user.tenantId).stores.findFirst({
-    where: { id: requested, is_active: true },
-    select: { id: true },
+    where: { id: requested },
+    select: { id: true, is_active: true },
   })
 
   if (!store) {
@@ -132,6 +132,14 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
     // "deactivated" — that difference is only useful to someone probing for
     // other tenants' store ids.
     return res.status(403).json({ error: 'Store not found for this business' })
+  }
+
+  // Closed shops are immutable operating scopes, but their sales, shifts,
+  // inventory movements and statutory documents remain business records.
+  // Owners may therefore select them for safe reads; every mutating request
+  // remains blocked until the shop is explicitly reactivated.
+  if (!store.is_active && req.method !== 'GET' && req.method !== 'HEAD') {
+    return res.status(409).json({ error: 'This store is closed. Reactivate it before recording new activity.' })
   }
 
   req.storeContext = { scope: 'store', activeStoreId: store.id, actingRemotely: true }

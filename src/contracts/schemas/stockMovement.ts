@@ -40,6 +40,13 @@ export const CreateStockMovementSchema = z
     message: 'reasonNote is required when reasonCode is "other"',
     path: ['reasonNote'],
   })
+  .refine(
+    (data) => !['damage', 'shrinkage_theft'].includes(data.reasonCode ?? '') || data.quantityDelta < 0,
+    {
+      message: 'Damage and shrinkage/theft adjustments must decrease stock',
+      path: ['quantityDelta'],
+    },
+  )
   .openapi('CreateStockMovementRequest')
 
 export const LowStockVariantSchema = z

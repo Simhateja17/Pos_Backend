@@ -57,6 +57,7 @@ function buildApp(role: 'owner' | 'cashier' = 'owner') {
   const app = express()
   app.use((req, _res, next) => {
     req.user = { id: 'user-1', role, tenantId: 'tenant-1', storeId: 'store-1' }
+    req.storeContext = { scope: 'store', activeStoreId: 'store-1', actingRemotely: false }
     next()
   })
   return import('../../src/routes/sales').then(({ default: salesRouter }) => {
@@ -86,6 +87,7 @@ describe('returns sale lookup', () => {
       where: {
         document_type: 'tax_invoice',
         document_number: { equals: 'df', mode: 'insensitive' },
+        store_id: 'store-1',
       },
       select: { sale_id: true },
     })
@@ -123,7 +125,7 @@ describe('returns sale lookup', () => {
     expect(response.status).toBe(200)
     expect(response.body).toHaveLength(1)
     expect(response.body[0]).toMatchObject({ id: saleId, totalAmount: '118.00' })
-    expect(salesFindFirstMock).toHaveBeenCalledWith({ where: { id: saleId } })
+    expect(salesFindFirstMock).toHaveBeenCalledWith({ where: { id: saleId, store_id: 'store-1' } })
   })
 
   it('resolves the short sale-id reference shown by Sales/Bills', async () => {
@@ -141,6 +143,7 @@ describe('returns sale lookup', () => {
           gte: 'dcfb11a0-0000-0000-0000-000000000000',
           lte: 'dcfb11a0-ffff-ffff-ffff-ffffffffffff',
         },
+        store_id: 'store-1',
       },
       orderBy: { created_at: 'desc' },
       take: 50,
@@ -149,6 +152,7 @@ describe('returns sale lookup', () => {
       where: {
         document_type: 'tax_invoice',
         document_number: { equals: 'DCFB11A0', mode: 'insensitive' },
+        store_id: 'store-1',
       },
       select: { sale_id: true },
     })
@@ -174,6 +178,10 @@ describe('returns sale lookup', () => {
       where: { OR: expect.any(Array) },
     }))
     expect(response.body[0].id).toBe(saleId)
+    expect(salesFindManyMock).toHaveBeenCalledWith({
+      where: { customer_id: { in: [customerId] }, store_id: 'store-1' },
+      orderBy: { created_at: 'desc' },
+    })
   })
 
   it('keeps legacy sale UUID lookup working', async () => {
@@ -184,6 +192,7 @@ describe('returns sale lookup', () => {
 
     expect(response.status).toBe(200)
     expect(response.body[0].id).toBe(saleId)
+    expect(salesFindFirstMock).toHaveBeenCalledWith({ where: { id: saleId, store_id: 'store-1' } })
     expect(taxDocumentsFindFirstMock).not.toHaveBeenCalled()
   })
 })

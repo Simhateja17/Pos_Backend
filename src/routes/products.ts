@@ -135,6 +135,7 @@ async function matchingProductIds(client: any, search: string, tenantId: string)
       OR: [
         { name: { contains: search, mode: 'insensitive' } },
         { variants: { some: { sku: { contains: search, mode: 'insensitive' } } } },
+        { variants: { some: { color: { contains: search, mode: 'insensitive' } } } },
       ],
     },
     orderBy: { created_at: 'asc' },

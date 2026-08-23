@@ -26,7 +26,7 @@ router.get('/', async (req, res) => {
       ? await tx.staff_members.findFirst({ where: { id: actingStaffId, is_active: true } })
       : await tx.staff_members.findFirst({ where: { user_id: req.user!.id, is_active: true } })
     const store = req.storeContext?.activeStoreId
-      ? await tx.stores.findFirst({ where: { id: req.storeContext.activeStoreId, is_active: true } })
+      ? await tx.stores.findFirst({ where: { id: req.storeContext.activeStoreId } })
       : null
     return { tenant, staff, store }
   })

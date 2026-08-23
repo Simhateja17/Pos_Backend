@@ -64,7 +64,7 @@ router.post('/', async (req, res) => {
       }
 
       // CR-01 tenant-scoped lookup — never a bare/cross-tenant lookup.
-      const sale = await tx.sales.findFirst({ where: { id: parsed.data.saleId } })
+      const sale = await tx.sales.findFirst({ where: { id: parsed.data.saleId, store_id: storeId } })
       if (!sale) {
         return { status: 404, body: { error: 'Sale not found' } }
       }
@@ -204,10 +204,9 @@ router.post('/', async (req, res) => {
         const movement = await tx.stock_movements.create({
           data: {
             tenant_id: tenantId,
-            // Phase 8: attributed to the shop that ACCEPTED the return, which
-            // may not be the shop that made the sale — a customer can return at
-            // any outlet. The goods land on this shop's shelf and the refund
-            // leaves this shop's till, so this is where the movement belongs.
+            // Returns are store-scoped: the lookup and write both belong to
+            // the shop that made the sale, preventing a bill from another
+            // shop from crediting stock or cash to the wrong location.
             store_id: storeId,
             variant_id: refundLine.saleLineItem.variant_id,
             movement_type: 'return',

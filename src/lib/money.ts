@@ -40,6 +40,15 @@ export class InvalidTaxRateError extends Error {
   }
 }
 
+export class InvalidDiscountError extends Error {
+  readonly code = 'invalid_discount'
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'InvalidDiscountError'
+  }
+}
+
 function assertTaxRateFraction(taxRate: Prisma.Decimal): void {
   if (taxRate.isNegative() || taxRate.greaterThan(1)) {
     throw new InvalidTaxRateError()
@@ -53,7 +62,13 @@ function assertTaxRateFraction(taxRate: Prisma.Decimal): void {
 // rate is retained only as the compatibility fallback for legacy variants.
 export function computeCheckout(input: CheckoutInput): CheckoutResult {
   const ZERO = new Prisma.Decimal(0)
-  const lineBases = input.lines.map((line) => line.price.times(line.quantity).minus(line.lineDiscount ?? ZERO))
+  const lineBases = input.lines.map((line) => {
+    const lineValue = line.price.times(line.quantity)
+    const discount = line.lineDiscount ?? ZERO
+    if (discount.isNegative()) throw new InvalidDiscountError('Discount cannot be negative')
+    if (discount.greaterThan(lineValue)) throw new InvalidDiscountError('Discount cannot exceed the line value')
+    return lineValue.minus(discount)
+  })
   const subtotal = lineBases.reduce((sum, value) => sum.plus(value), ZERO)
 
   let cartDiscount = ZERO
@@ -61,6 +76,11 @@ export function computeCheckout(input: CheckoutInput): CheckoutResult {
     cartDiscount = subtotal.times(input.cartDiscountPercent.dividedBy(100))
   } else if (input.cartDiscountAmount) {
     cartDiscount = input.cartDiscountAmount
+  }
+
+  if (cartDiscount.isNegative()) throw new InvalidDiscountError('Discount cannot be negative')
+  if (cartDiscount.greaterThan(subtotal)) {
+    throw new InvalidDiscountError('Discount cannot exceed the cart subtotal')
   }
 
   const discountedSubtotal = subtotal.minus(cartDiscount)

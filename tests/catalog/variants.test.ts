@@ -223,4 +223,33 @@ describe('products routes — variants (CATALOG-01)', () => {
     expect(res.status).toBe(200)
     expect(res.body[0].variants[0]).toEqual(expect.objectContaining({ movingAverageCost: '400.00', currentStock: 3 }))
   })
+
+  it('GET /products search matches a variant colour', async () => {
+    productsFindManyMock
+      .mockResolvedValueOnce([{ id: 'product-teal' }])
+      .mockResolvedValueOnce([{
+        id: 'product-teal',
+        name: 'Cotton Kurta',
+        category_id: null,
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        variants: [{
+          id: 'variant-teal', product_id: 'product-teal', sku: 'QA-KURTA-04', barcode: '890QA100003',
+          unit_of_measure: 'piece', size: 'L', color: 'Teal', material: 'Cotton', price: '499.00',
+          moving_average_cost: null, is_taxable: true, tax_rate: '0.05', reorder_threshold: '3',
+          identity_locked: false, created_at: new Date('2026-01-01T00:00:00Z'),
+        }],
+      }])
+
+    const app = await buildApp()
+    const res = await request(app)
+      .get('/products')
+      .query({ search: 'Teal' })
+      .set('Authorization', `Bearer ${tokenFor('owner')}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body[0].variants[0]).toMatchObject({ sku: 'QA-KURTA-04', color: 'Teal' })
+    expect(productsFindManyMock.mock.calls[0][0].where.OR).toContainEqual({
+      variants: { some: { color: { contains: 'Teal', mode: 'insensitive' } } },
+    })
+  })
 })

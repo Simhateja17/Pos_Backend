@@ -3601,7 +3601,7 @@
                 },
                 "discountPercent": {
                   "type": "string",
-                  "pattern": "^\\d{1,2}(\\.\\d{1,2})?$"
+                  "pattern": "^(?:\\d{1,2}(?:\\.\\d{1,2})?|100(?:\\.0{1,2})?)$"
                 },
                 "discountAmount": {
                   "type": "string",
@@ -3617,7 +3617,7 @@
           },
           "cartDiscountPercent": {
             "type": "string",
-            "pattern": "^\\d{1,2}(\\.\\d{1,2})?$"
+            "pattern": "^(?:\\d{1,2}(?:\\.\\d{1,2})?|100(?:\\.0{1,2})?)$"
           },
           "cartDiscountAmount": {
             "type": "string",

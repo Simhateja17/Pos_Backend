@@ -132,4 +132,32 @@ describe('computeCheckout', () => {
 
     expect(result.tax.toString()).toBe('5')
   })
+
+  it('rejects a line discount greater than the line value', () => {
+    expect(() =>
+      computeCheckout({
+        lines: [{ price: D('499.00'), quantity: 1, isTaxable: true, lineDiscount: D('600.00') }],
+        taxRate: D('0.18'),
+      }),
+    ).toThrow(/discount cannot exceed the line value/i)
+  })
+
+  it('rejects a negative line discount instead of treating it as a surcharge', () => {
+    expect(() =>
+      computeCheckout({
+        lines: [{ price: D('499.00'), quantity: 1, isTaxable: true, lineDiscount: D('-50.00') }],
+        taxRate: D('0.18'),
+      }),
+    ).toThrow(/discount cannot be negative/i)
+  })
+
+  it('rejects a whole-cart discount greater than the discounted cart subtotal', () => {
+    expect(() =>
+      computeCheckout({
+        lines: [{ price: D('499.00'), quantity: 1, isTaxable: true }],
+        cartDiscountAmount: D('9999.00'),
+        taxRate: D('0.18'),
+      }),
+    ).toThrow(/discount cannot exceed the cart subtotal/i)
+  })
 })

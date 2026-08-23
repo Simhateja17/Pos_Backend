@@ -18,6 +18,7 @@ const stockMovementsFindManyMock = vi.fn()
 const staffMembersFindFirstMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 const variantsFindFirstMock = vi.fn()
+const stockLevelsFindManyMock = vi.fn()
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
@@ -31,6 +32,9 @@ vi.mock('../../src/db/tenantClient', () => ({
     },
     variants: {
       findFirst: variantsFindFirstMock,
+    },
+    variant_stock_levels: {
+      findMany: stockLevelsFindManyMock,
     },
   })),
   forTenantTransaction: vi.fn(async (_tenantId: string, fn: (tx: any) => Promise<any>) =>
@@ -65,6 +69,9 @@ describe('stock-movements routes (INV-01)', () => {
       store_id: 'store-1',
     }))
     variantsFindFirstMock.mockReset()
+    stockLevelsFindManyMock.mockReset().mockResolvedValue([
+      { variant_id: '11111111-1111-4111-8111-111111111111', quantity: 3 },
+    ])
     getUserMock.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null })
     staffMembersFindFirstMock.mockResolvedValue({ id: 'staff-1' })
     // CR-01: the caller's tenant-scoped variant lookup finds the variant by
@@ -142,6 +149,40 @@ describe('stock-movements routes (INV-01)', () => {
       .send({ variantId: '11111111-1111-4111-8111-111111111111', movementType: 'adjustment', quantityDelta: -1 })
 
     expect(res.status).toBe(400)
+    expect(stockMovementsCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('INV-08: rejects a positive damage adjustment', async () => {
+    stockMovementsCreateMock.mockResolvedValue({
+      id: 'move-positive-damage',
+      variant_id: '11111111-1111-4111-8111-111111111111',
+      movement_type: 'adjustment',
+      quantity_delta: 8,
+      reason_code: 'damage',
+      reason_note: null,
+      created_by: 'staff-1',
+      created_at: new Date('2026-01-02T00:00:00Z'),
+    })
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/stock-movements')
+      .set('Authorization', `Bearer ${tokenFor('manager')}`)
+      .send({ variantId: '11111111-1111-4111-8111-111111111111', movementType: 'adjustment', quantityDelta: 8, reasonCode: 'damage' })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/damage.*decrease/i)
+    expect(stockMovementsCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('INV-08: rejects a quantity outside the database numeric range with a precise message', async () => {
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/stock-movements')
+      .set('Authorization', `Bearer ${tokenFor('manager')}`)
+      .send({ variantId: '11111111-1111-4111-8111-111111111111', movementType: 'adjustment', quantityDelta: 999999999, reasonCode: 'count_correction' })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/supported range/i)
     expect(stockMovementsCreateMock).not.toHaveBeenCalled()
   })
 

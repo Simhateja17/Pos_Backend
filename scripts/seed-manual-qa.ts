@@ -618,16 +618,23 @@ async function main(): Promise<void> {
     shiftRows.push([activeShiftId, mainTenantId, mainStoreIds.get('S1'), stableUuid('staff:main:cashier-s1-a'), 5000, new Date(), null, null, null, stableUuid('terminal:main:S1:1')])
 
     const initialStockRows: unknown[][] = []
+    const boundaryVariants = variants.filter((variant) => variant.productKey === 'BOUNDARY')
+    const stockSeedVariants = [...activeVariants, ...boundaryVariants.filter((variant) => !activeVariants.includes(variant))]
     for (const store of MAIN_STORES) {
       if (store.counters === 0) continue
       const managerId = managerByStore.get(store.key)!
-      for (const variant of activeVariants) {
+      for (const variant of stockSeedVariants) {
+        if (variant.productKey === 'BOUNDARY' && store.key !== 'S10') continue
         const planned = plannedUnits.get(`${store.key}:${variant.id}`) ?? 0
         let quantity = Math.ceil(planned * 1.1 + variant.threshold)
         if (store.key === 'S9') quantity = variant.productKey === 'BOUNDARY' ? 8 : 3
         if (store.key === 'S4' && variant.productKey === 'ZERO') quantity = 0
         if (store.key === 'S3' && variant.productKey === 'ZERO') quantity = Math.max(0, Math.ceil(planned - 2))
         if (variant.productKey === 'BOUNDARY') quantity = Math.ceil(planned + variant.threshold)
+        if (store.key === 'S10' && variant.productKey === 'BOUNDARY') {
+          const boundaryOffset = variant.sku.endsWith('-01') ? 0 : variant.sku.endsWith('-02') ? -1 : 1
+          quantity = variant.threshold + boundaryOffset
+        }
         initialStockRows.push([
           stableUuid(`movement:opening:main:${store.key}:${variant.id}`),
           mainTenantId,

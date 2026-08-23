@@ -352,7 +352,10 @@ export function buildTaxInvoiceSnapshot(input: {
     const sourceLine = source.lines[index]
     const lineTax = sourceLine.isTaxable ? lineTaxes[index] : ZERO
     const cgst = isInterState ? ZERO : roundMoney(lineTax.dividedBy(TWO))
-    const sgst = isInterState ? ZERO : roundMoney(lineTax.minus(cgst))
+    // CGST and SGST are equal components of intra-state GST. If half of a
+    // line's tax lands on half a paisa, round both components the same way and
+    // reconcile the one-paisa difference through the invoice rounding field.
+    const sgst = isInterState ? ZERO : cgst
     const igst = isInterState ? lineTax : ZERO
     const lineTotal = roundMoney(netLineValues[index].plus(lineTax))
     const line = documentLineFromAmounts(sourceLine, {
@@ -377,11 +380,20 @@ export function buildTaxInvoiceSnapshot(input: {
     ZERO,
   ))
   const expectedGrandTotal = roundMoney(subtotal.minus(discountTotal).plus(source.taxTotal))
-  const roundingAmount = roundMoney(source.grandTotal.minus(expectedGrandTotal))
-  if (lineSnapshots.length > 0 && !roundingAmount.isZero()) {
+  const saleRoundingAmount = roundMoney(source.grandTotal.minus(expectedGrandTotal))
+  if (lineSnapshots.length > 0 && !saleRoundingAmount.isZero()) {
     const last = lineSnapshots[lineSnapshots.length - 1]
-    last.lineTotal = roundMoney(decimal(last.lineTotal).plus(roundingAmount)).toString()
+    last.lineTotal = roundMoney(decimal(last.lineTotal).plus(saleRoundingAmount)).toString()
   }
+  const cgstTotal = lineSnapshots.reduce((sum, line) => sum.plus(decimal(line.cgstAmount)), ZERO)
+  const sgstTotal = lineSnapshots.reduce((sum, line) => sum.plus(decimal(line.sgstAmount)), ZERO)
+  const igstTotal = lineSnapshots.reduce((sum, line) => sum.plus(decimal(line.igstAmount)), ZERO)
+  const componentGrandTotal = subtotal
+    .minus(discountTotal)
+    .plus(cgstTotal)
+    .plus(sgstTotal)
+    .plus(igstTotal)
+  const roundingAmount = roundMoney(source.grandTotal.minus(componentGrandTotal))
 
   return {
     documentType: 'tax_invoice',
@@ -407,9 +419,9 @@ export function buildTaxInvoiceSnapshot(input: {
     subtotal,
     discountTotal,
     taxableTotal: roundMoney(taxableTotal),
-    cgstTotal: lineSnapshots.reduce((sum, line) => sum.plus(decimal(line.cgstAmount)), ZERO),
-    sgstTotal: lineSnapshots.reduce((sum, line) => sum.plus(decimal(line.sgstAmount)), ZERO),
-    igstTotal: lineSnapshots.reduce((sum, line) => sum.plus(decimal(line.igstAmount)), ZERO),
+    cgstTotal,
+    sgstTotal,
+    igstTotal,
     cessTotal: ZERO,
     roundingAmount,
     grandTotal: roundMoney(source.grandTotal),

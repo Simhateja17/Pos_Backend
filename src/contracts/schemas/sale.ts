@@ -4,6 +4,10 @@ import { PaymentInputSchema, PaymentSchema } from './payment'
 
 extendZodWithOpenApi(z)
 
+const DiscountPercentSchema = z
+  .string()
+  .regex(/^(?:\d{1,2}(?:\.\d{1,2})?|100(?:\.0{1,2})?)$/)
+
 // Mutually exclusive discount forms — request accepts either, persisted row
 // always ends up with a concrete computed dollar amount (RESEARCH.md Open
 // Question #2's resolution).
@@ -12,7 +16,7 @@ export const SaleLineInputSchema = z
     variantId: z.string().uuid(),
     // numeric(12,3) since 0031 — the route rejects a fraction for a discrete unit.
     quantity: z.number().positive(),
-    discountPercent: z.string().regex(/^\d{1,2}(\.\d{1,2})?$/).optional(),
+    discountPercent: DiscountPercentSchema.optional(),
     discountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
   })
   .refine((l) => !(l.discountPercent && l.discountAmount), {
@@ -25,7 +29,7 @@ export const CreateSaleSchema = z
     clientSaleId: z.string().uuid(),
     shiftId: z.string().uuid(),
     lines: z.array(SaleLineInputSchema).min(1),
-    cartDiscountPercent: z.string().regex(/^\d{1,2}(\.\d{1,2})?$/).optional(),
+    cartDiscountPercent: DiscountPercentSchema.optional(),
     cartDiscountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
     payments: z.array(PaymentInputSchema).min(1),
     // Amount of physical cash handed over. Payment rows continue to record
