@@ -222,6 +222,14 @@ async function projectSubscription(tenantId: string, attempt: any, provider: Raz
     },
     update: {
       attempt_id: attempt.id,
+      // Previously omitted here: an existing row's status/entitlement could
+      // only ever be set at creation, never re-synced afterward. Any
+      // reconciliation call for an existing subscription (this function is
+      // the only writer besides verifySubscription's own explicit update)
+      // would silently keep re-confirming whatever status the row was
+      // created with, even once Razorpay reports something different.
+      status: provider.status === 'active' ? 'active' : 'created',
+      entitlement_status: provider.status === 'active' ? 'active' : 'blocked',
       provider_payload: provider,
       ...providerSnapshotDates(provider),
     },
@@ -324,12 +332,28 @@ export async function createSubscription(tenantId: string, input: CreateSubscrip
   }
 
   if (attempt.provider_subscription_id) {
-    await projectSubscription(tenantId, attempt, {
-      id: attempt.provider_subscription_id,
-      plan_id: attempt.provider_plan_id,
-      status: attempt.status === 'active' ? 'active' : 'created',
-    })
-    return subscriptionResponse(attempt, region)
+    // A retry must re-check Razorpay, not echo attempt.status back at
+    // itself. If Checkout's success callback never reached /verify (tab
+    // closed, chunk-load error, network drop right after a real charge),
+    // attempt.status is permanently stuck at 'created' — a synthetic
+    // provider object built from that field would keep re-confirming
+    // "unpaid" forever even after the customer has actually been charged.
+    let provider: RazorpaySubscription
+    try {
+      provider = await fetchRazorpaySubscription(attempt.provider_subscription_id)
+    } catch {
+      // Razorpay is unreachable right now for what's otherwise a known,
+      // already-created attempt — surface the last state we have instead of
+      // failing the request outright. The next retry re-checks Razorpay.
+      await projectSubscription(tenantId, attempt, {
+        id: attempt.provider_subscription_id,
+        plan_id: attempt.provider_plan_id,
+        status: attempt.status === 'active' ? 'active' : 'created',
+      })
+      return subscriptionResponse(attempt, region)
+    }
+    const updatedAttempt = await adoptProviderSubscription(tenantId, attempt, provider)
+    return subscriptionResponse(updatedAttempt, region)
   }
   if (attempt.status === 'failed' || attempt.status === 'expired') {
     throw new BillingHttpError(409, 'This payment attempt has ended. Start a new attempt to retry the subscription.')
