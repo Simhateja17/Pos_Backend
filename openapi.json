@@ -3326,6 +3326,15 @@
           "createdAt": {
             "type": "string"
           },
+          "customer": {
+            "$ref": "#/components/schemas/SaleCustomer"
+          },
+          "cashierName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "invoiceNumber": {
             "type": [
               "string",
@@ -3370,6 +3379,49 @@
           "payments"
         ]
       },
+      "SaleCustomer": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "billingName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "billingName",
+          "phone",
+          "email"
+        ]
+      },
       "SaleLineItem": {
         "type": "object",
         "properties": {
@@ -3380,6 +3432,36 @@
           "variantId": {
             "type": "string",
             "format": "uuid"
+          },
+          "productName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "material": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "quantity": {
             "type": "number"

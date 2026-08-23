@@ -306,9 +306,25 @@ export function customerSearchWhere(query: string): any[] {
 export async function findOrCreateCustomer(
   tx: any,
   tenantId: string,
-  input: { name?: string; phone?: string; email?: string } | undefined,
+  input: { id?: string; name?: string; phone?: string; email?: string } | undefined,
 ): Promise<{ id: string } | null> {
-  if (!input || (!input.phone && !input.email)) {
+  if (!input) {
+    // Anonymous walk-in sale — allowed per CUST-01's discretion resolution.
+    // No customer row is created.
+    return null
+  }
+
+  // Checkout sends only the id when a cashier selects an existing customer.
+  // Resolve that identity explicitly before falling back to the phone/email
+  // find-or-create path; otherwise every selected customer is misclassified
+  // as an anonymous walk-in sale.
+  if (input.id) {
+    const existing = await tx.customers.findFirst({ where: { id: input.id, tenant_id: tenantId } })
+    if (!existing) throw new CustomerValidationError('Selected customer could not be found', 'id')
+    return existing
+  }
+
+  if (!input.phone && !input.email) {
     // Anonymous walk-in sale — allowed per CUST-01's discretion resolution.
     // No customer row is created.
     return null

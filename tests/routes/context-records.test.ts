@@ -181,7 +181,23 @@ describe('context and tenant record read routes', () => {
     }
     salesFindManyMock.mockResolvedValue([sale])
     salesCountMock.mockResolvedValue(1)
-    linesFindManyMock.mockResolvedValue([])
+    linesFindManyMock.mockResolvedValue([{
+      id: '71111111-1111-4111-8111-111111111111',
+      variant_id: '81111111-1111-4111-8111-111111111111',
+      quantity: '1',
+      unit_price: '1532.82',
+      discount_percent: null,
+      discount_amount: '0.00',
+      is_taxable: true,
+      line_total: '1532.82',
+      variants: {
+        sku: 'QA-KURTA-06',
+        size: 'L',
+        color: 'Teal',
+        material: 'Cotton',
+        products: { name: 'QA - Cotton Kurta' },
+      },
+    }])
     paymentsFindManyMock.mockResolvedValue([])
 
     const response = await request(await buildApp())
@@ -194,9 +210,21 @@ describe('context and tenant record read routes', () => {
       items: [{ id: sale.id, invoiceNumber: null }],
       total: 1,
     })
+    expect(response.body.items[0].lines[0]).toMatchObject({
+      productName: 'QA - Cotton Kurta',
+      sku: 'QA-KURTA-06',
+      size: 'L',
+      color: 'Teal',
+      material: 'Cotton',
+    })
     expect(salesFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        OR: expect.arrayContaining([{ id: { startsWith: 'dcfb11a0' } }]),
+        OR: expect.arrayContaining([{
+          id: {
+            gte: 'dcfb11a0-0000-0000-0000-000000000000',
+            lte: 'dcfb11a0-ffff-ffff-ffff-ffffffffffff',
+          },
+        }]),
       }),
     }))
   })

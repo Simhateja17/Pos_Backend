@@ -8,7 +8,12 @@ import { allowsFractionalQuantity } from '../contracts/schemas/product'
 import { requireRole, ROLE_RANK } from '../middleware/requireRole'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { computeCheckout } from '../lib/money'
-import { findOrCreateCustomer, searchCustomers } from '../lib/customers'
+import {
+  CustomerIdentityConflictError,
+  CustomerValidationError,
+  findOrCreateCustomer,
+  searchCustomers,
+} from '../lib/customers'
 import { sendLoggedEmail } from '../services/email'
 import { findPairedTerminal } from '../lib/counterDevice'
 import { consumeRateLimit } from '../lib/rateLimit'
@@ -23,6 +28,17 @@ const RECEIPT_RESEND_TENANT_WINDOW_MS = 60 * 60 * 1000
 const RECEIPT_RESEND_TENANT_LIMIT = 100
 const SALE_ID_PREFIX_PATTERN = /^[0-9a-f]{8}$/i
 const LOOKUP_LOG_PREFIX = '[returns:lookup]'
+const SALE_LINE_INCLUDE = {
+  variants: {
+    select: {
+      sku: true,
+      size: true,
+      color: true,
+      material: true,
+      products: { select: { name: true } },
+    },
+  },
+} as const
 
 // D-05 body-dependent role gate — mirrors stockMovements.ts's isAllowedToAdjust
 // exactly, reusing the same ROLE_RANK import and acting-identity precedence
@@ -78,6 +94,11 @@ function toLineJson(row: any) {
   return {
     id: row.id,
     variantId: row.variant_id,
+    productName: row.variants?.products?.name ?? null,
+    sku: row.variants?.sku ?? null,
+    size: row.variants?.size ?? null,
+    color: row.variants?.color ?? null,
+    material: row.variants?.material ?? null,
     quantity: Number(row.quantity),
     unitPrice: row.unit_price.toString(),
     discountPercent: row.discount_percent ? row.discount_percent.toString() : null,
@@ -87,13 +108,66 @@ function toLineJson(row: any) {
   }
 }
 
+type SaleParties = {
+  customer: any | null
+  cashierName: string | null
+}
+
+function toSaleCustomerJson(row: any | null) {
+  if (!row) return null
+  const billingName = row.billing_name ?? row.name ?? null
+  return {
+    id: row.id,
+    name: row.name ?? billingName,
+    billingName,
+    phone: row.phone ?? null,
+    email: row.email ?? null,
+  }
+}
+
+/** Resolve human-readable parties without trusting client-side joins. */
+async function loadSaleParties(client: any, tenantId: string, sales: any[]): Promise<Map<string, SaleParties>> {
+  const customerIds = [...new Set(sales.map((sale) => sale.customer_id).filter(Boolean))]
+  const cashierIds = [...new Set(sales.map((sale) => sale.created_by).filter(Boolean))]
+  const [customers, cashiers] = await Promise.all([
+    customerIds.length
+      ? client.customers.findMany({
+          where: { tenant_id: tenantId, id: { in: customerIds } },
+          select: { id: true, name: true, billing_name: true, phone: true, email: true },
+        })
+      : [],
+    cashierIds.length
+      ? client.staff_members.findMany({
+          where: { tenant_id: tenantId, id: { in: cashierIds } },
+          select: { id: true, name: true },
+        })
+      : [],
+  ])
+  const customerById = new Map<string, any>(customers.map((customer: any) => [customer.id, customer] as [string, any]))
+  const cashierById = new Map<string, string>(cashiers.map((cashier: any) => [cashier.id, String(cashier.name)] as [string, string]))
+  return new Map(
+    sales.map((sale) => [
+      sale.id,
+      {
+        customer: sale.customer_id ? customerById.get(sale.customer_id) ?? null : null,
+        cashierName: sale.created_by ? cashierById.get(sale.created_by) ?? null : null,
+      },
+    ]),
+  )
+}
+
 function toSaleJson(
   sale: any,
   lines: any[],
   payments: any[],
   businessName?: string | null,
   invoiceNumber?: string | null,
+  parties?: SaleParties,
 ) {
+  const resolvedParties = parties ?? {
+    customer: sale.customers ?? sale.customer ?? null,
+    cashierName: sale.staff_members?.name ?? null,
+  }
   return {
     id: sale.id,
     clientSaleId: sale.client_sale_id,
@@ -108,6 +182,8 @@ function toSaleJson(
     status: sale.status,
     createdBy: sale.created_by,
     createdAt: sale.created_at.toISOString(),
+    customer: toSaleCustomerJson(resolvedParties.customer),
+    cashierName: resolvedParties.cashierName,
     ...(invoiceNumber !== undefined ? { invoiceNumber } : {}),
     lines: lines.map(toLineJson),
     payments: payments.map(toPaymentJson),
@@ -212,13 +288,14 @@ async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string, st
   })
   if (!sale) return null
 
-  const [lines, payments, tenant] = await Promise.all([
-    client.sale_line_items.findMany({ where: { sale_id: sale.id } }),
+  const [lines, payments, tenant, partiesBySaleId] = await Promise.all([
+    client.sale_line_items.findMany({ where: { sale_id: sale.id }, include: SALE_LINE_INCLUDE }),
     client.payments.findMany({ where: { sale_id: sale.id, direction: 'payment' } }),
     client.tenants.findFirst({ where: { id: tenantId } }),
+    loadSaleParties(client, tenantId, [sale]),
   ])
 
-  return toSaleJson(sale, lines, payments, tenant?.business_name ?? null)
+  return toSaleJson(sale, lines, payments, tenant?.business_name ?? null, undefined, partiesBySaleId.get(sale.id))
 }
 
 async function enqueueHardwareOutputs(input: {
@@ -323,7 +400,10 @@ router.post('/', async (req, res) => {
       const variants: any[] = []
       const missingVariantIds: string[] = []
       for (const line of parsed.data.lines) {
-        const variant = await tx.variants.findFirst({ where: { id: line.variantId } })
+        const variant = await tx.variants.findFirst({
+          where: { id: line.variantId },
+          include: { products: { select: { name: true } } },
+        })
         if (!variant) {
           missingVariantIds.push(line.variantId)
         } else {
@@ -467,7 +547,8 @@ router.post('/', async (req, res) => {
             line_total: lineTotal.toString(),
           },
         })
-        createdLines.push(createdLine)
+        // Keep the immediate checkout response consistent with persisted reads.
+        createdLines.push({ ...createdLine, variants: variant })
       }
 
       const createdPayments: any[] = []
@@ -510,10 +591,11 @@ router.post('/', async (req, res) => {
       // `customer` and `tenant` are only in scope here; the actual send
       // happens AFTER the transaction commits and the HTTP response is sent.
       const receiptEmailTarget = parsed.data.receiptEmail ?? parsed.data.customer?.email ?? (customer as any)?.email ?? null
+      const partiesBySaleId = await loadSaleParties(tx, tenantId, [sale])
 
       return {
         status: 201,
-        body: toSaleJson(sale, createdLines, createdPayments, tenant.business_name as string),
+        body: toSaleJson(sale, createdLines, createdPayments, tenant.business_name as string, undefined, partiesBySaleId.get(sale.id)),
         receiptEmailTarget,
         businessName: tenant.business_name as string,
       }
@@ -575,6 +657,12 @@ router.post('/', async (req, res) => {
       }
     }
   } catch (err: any) {
+    if (err instanceof CustomerValidationError) {
+      return res.status(400).json({ error: err.message, ...(err.field ? { field: err.field } : {}) })
+    }
+    if (err instanceof CustomerIdentityConflictError) {
+      return res.status(409).json({ error: err.message, code: err.code })
+    }
     // A store tax profile is persisted as a decimal fraction. Refuse the sale
     // if corrupted data ever bypasses the database guard; never record a sale
     // using a percentage-shaped value such as 18.
@@ -714,13 +802,14 @@ router.get('/records', async (req, res) => {
   const hasMore = rows.length > parsed.data.limit
   const page = rows.slice(0, parsed.data.limit)
   const invoiceNumberBySaleId = await invoiceNumbersForSales(client, req, page.map((sale: any) => sale.id))
+  const partiesBySaleId = await loadSaleParties(client, req.user!.tenantId, page)
   const items = []
   for (const sale of page) {
     const [lines, payments] = await Promise.all([
-      client.sale_line_items.findMany({ where: { sale_id: sale.id } }),
+      client.sale_line_items.findMany({ where: { sale_id: sale.id }, include: SALE_LINE_INCLUDE }),
       client.payments.findMany({ where: { sale_id: sale.id } }),
     ])
-    items.push(toSaleJson(sale, lines, payments, undefined, invoiceNumberBySaleId.get(sale.id) ?? null))
+    items.push(toSaleJson(sale, lines, payments, undefined, invoiceNumberBySaleId.get(sale.id) ?? null, partiesBySaleId.get(sale.id)))
   }
   return res.json({
     items,
@@ -803,12 +892,15 @@ router.get('/', async (req, res) => {
     logLookup(req, `branch=customer_search customers=${customerIds.length} matches=${sales.length}`)
   }
   if (sales.length === 0) logLookup(req, 'result=no_match')
+  const partiesBySaleId = await loadSaleParties(client, req.user!.tenantId, sales)
   const result = []
   for (const sale of sales) {
     const saleKey = lookupLogValue(sale.id)
-    const lines = await withLookupLogging<any[]>(req, `sale-lines:${saleKey}`, () => client.sale_line_items.findMany({ where: { sale_id: sale.id } }))
+    const lines = await withLookupLogging<any[]>(req, `sale-lines:${saleKey}`, () =>
+      client.sale_line_items.findMany({ where: { sale_id: sale.id }, include: SALE_LINE_INCLUDE }),
+    )
     const payments = await withLookupLogging<any[]>(req, `sale-payments:${saleKey}`, () => client.payments.findMany({ where: { sale_id: sale.id } }))
-    result.push(toSaleJson(sale, lines, payments))
+    result.push(toSaleJson(sale, lines, payments, undefined, undefined, partiesBySaleId.get(sale.id)))
   }
   logLookup(req, `result=ok matches=${sales.length} responseRows=${result.length}`)
   return res.json(result)
@@ -827,9 +919,10 @@ router.get('/:saleId', async (req, res) => {
   if (!sale) {
     return res.status(404).json({ error: 'Sale not found' })
   }
-  const lines = await client.sale_line_items.findMany({ where: { sale_id: sale.id } })
+  const lines = await client.sale_line_items.findMany({ where: { sale_id: sale.id }, include: SALE_LINE_INCLUDE })
   const payments = await client.payments.findMany({ where: { sale_id: sale.id } })
-  res.json(toSaleJson(sale, lines, payments))
+  const partiesBySaleId = await loadSaleParties(client, req.user!.tenantId, [sale])
+  res.json(toSaleJson(sale, lines, payments, undefined, undefined, partiesBySaleId.get(sale.id)))
 })
 
 /**

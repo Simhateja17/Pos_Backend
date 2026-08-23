@@ -57,6 +57,13 @@ export const SaleLineItemSchema = z
   .object({
     id: z.string().uuid(),
     variantId: z.string().uuid(),
+    // GET sale reads resolve the persisted variant to the catalog identity so
+    // operators can see what was sold without another client-side lookup.
+    productName: z.string().nullable().optional(),
+    sku: z.string().nullable().optional(),
+    size: z.string().nullable().optional(),
+    color: z.string().nullable().optional(),
+    material: z.string().nullable().optional(),
     quantity: z.number(),
     unitPrice: z.string(),
     discountPercent: z.string().nullable(),
@@ -65,6 +72,17 @@ export const SaleLineItemSchema = z
     lineTotal: z.string(),
   })
   .openapi('SaleLineItem')
+
+/** Human-readable party data used by Sales/Bills; full GST snapshots remain on tax documents. */
+export const SaleCustomerSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string().nullable(),
+    billingName: z.string().nullable(),
+    phone: z.string().nullable(),
+    email: z.string().nullable(),
+  })
+  .openapi('SaleCustomer')
 
 // SaleSchema.payments is REQUIRED, not optional — every sale has at least one
 // payment row (checkout enforces payments.min(1)) and every read path
@@ -86,6 +104,10 @@ export const SaleSchema = z
     status: z.string(),
     createdBy: z.string().uuid().nullable(),
     createdAt: z.string(),
+    // Optional while older deployed clients/backends roll forward; new sale
+    // responses populate both fields from tenant-scoped server lookups.
+    customer: SaleCustomerSchema.nullable().optional(),
+    cashierName: z.string().nullable().optional(),
     // A persisted GST invoice number when one exists. Older sales may not
     // have a tax-document snapshot yet, so the field remains nullable.
     invoiceNumber: z.string().max(16).nullable().optional(),
