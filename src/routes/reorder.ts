@@ -10,6 +10,24 @@ const router = Router()
 const MANUAL_FORECAST_POLL_MS = 5_000
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+type ForecastLogLevel = 'info' | 'warn' | 'error'
+
+function shortId(value: string | null | undefined): string | undefined {
+  return value ? value.slice(0, 8) : undefined
+}
+
+function forecastLog(level: ForecastLogLevel, event: string, details: Record<string, unknown> = {}) {
+  const payload = JSON.stringify({
+    event: `ml_forecast.${event}`,
+    at: new Date().toISOString(),
+    ...details,
+  })
+  const line = `[ml-forecast] ${payload}`
+  if (level === 'error') console.error(line)
+  else if (level === 'warn') console.warn(line)
+  else console.info(line)
+}
+
 type ForecastRunRow = {
   id: string
   store_id: string
@@ -141,6 +159,14 @@ router.get('/suggestions', async (req, res) => {
     skipped: lastSkipped.get(req.user!.tenantId) ?? [],
     manualForecastEnabled: manualForecastEnabled(),
   })
+  const forecastCount = rows.filter((row: any) => row.method === 'forecast').length
+  if (forecastCount > 0) {
+    forecastLog('info', 'suggestions_read', {
+      tenant: shortId(req.user!.tenantId),
+      store: shortId(req.storeContext?.activeStoreId),
+      forecastSuggestions: forecastCount,
+    })
+  }
 })
 
 /**
@@ -186,7 +212,9 @@ router.post('/generate', requireRole('manager'), async (req, res) => {
  * the read-before-insert gives duplicate clicks the existing run immediately.
  */
 router.post('/forecast-runs', requireRole('manager'), async (req, res) => {
+  const requestStartedAt = Date.now()
   if (!manualForecastEnabled()) {
+    forecastLog('warn', 'request_rejected', { reason: 'feature_flag_disabled' })
     return res.status(404).json({ error: 'Manual forecast testing is not enabled.' })
   }
 
@@ -204,6 +232,7 @@ router.post('/forecast-runs', requireRole('manager'), async (req, res) => {
   }
 
   try {
+    let queueOutcome: 'replayed' | 'active_reused' | 'queued' = 'queued'
     const run = await forTenantTransaction(tenantId, async (tx) => {
       const replay = await tx.$queryRaw<ForecastRunRow[]>`
         select id, store_id, source, status, requested_at, started_at, completed_at,
@@ -215,7 +244,10 @@ router.post('/forecast-runs', requireRole('manager'), async (req, res) => {
           and idempotency_key = ${idempotencyKey}
         limit 1
       `
-      if (replay[0]) return replay[0]
+      if (replay[0]) {
+        queueOutcome = 'replayed'
+        return replay[0]
+      }
 
       const active = await tx.$queryRaw<ForecastRunRow[]>`
         select id, store_id, source, status, requested_at, started_at, completed_at,
@@ -229,7 +261,10 @@ router.post('/forecast-runs', requireRole('manager'), async (req, res) => {
         limit 1
         for update
       `
-      if (active[0]) return active[0]
+      if (active[0]) {
+        queueOutcome = 'active_reused'
+        return active[0]
+      }
 
       const ownerStaff = req.actingStaff
         ? null
@@ -264,12 +299,27 @@ router.post('/forecast-runs', requireRole('manager'), async (req, res) => {
           order by requested_at asc limit 1
       `
       if (!winner[0]) throw new Error('Forecast queue conflict did not return an active run')
+      queueOutcome = 'active_reused'
       return winner[0]
+    })
+
+    forecastLog('info', 'request_accepted', {
+      tenant: shortId(tenantId),
+      store: shortId(storeId),
+      run: shortId(run.id),
+      status: run.status,
+      outcome: queueOutcome,
+      durationMs: Date.now() - requestStartedAt,
     })
 
     return res.status(202).json({ run: forecastRunJson(run), pollAfterMs: MANUAL_FORECAST_POLL_MS })
   } catch (error: any) {
-    console.error(`[reorder:forecast-run:create] ${error instanceof Error ? error.message : String(error)}`)
+    forecastLog('error', 'request_failed', {
+      tenant: shortId(tenantId),
+      store: shortId(storeId),
+      durationMs: Date.now() - requestStartedAt,
+      errorType: error instanceof Error ? error.name : 'unknown',
+    })
     return res.status(500).json({ error: 'Could not queue the manual forecast.' })
   }
 })
@@ -284,7 +334,23 @@ router.get('/forecast-runs/:runId', requireRole('manager'), async (req, res) => 
     return res.status(400).json({ error: 'Select one store before viewing a forecast.' })
   }
   const run = await findForecastRun(req.user!.tenantId, storeId, runId)
-  if (!run) return res.status(404).json({ error: 'Forecast run not found.' })
+  if (!run) {
+    forecastLog('warn', 'status_not_found', {
+      tenant: shortId(req.user!.tenantId),
+      store: shortId(storeId),
+      run: shortId(runId),
+    })
+    return res.status(404).json({ error: 'Forecast run not found.' })
+  }
+  forecastLog('info', 'status_read', {
+    tenant: shortId(req.user!.tenantId),
+    store: shortId(storeId),
+    run: shortId(runId),
+    status: run.status,
+    evaluated: Number(run.products_evaluated ?? 0),
+    eligible: Number(run.products_eligible ?? 0),
+    written: Number(run.forecasts_written ?? 0),
+  })
   return res.json(forecastRunJson(run))
 })
 
@@ -299,7 +365,14 @@ router.get('/forecast-runs/:runId/items', requireRole('manager'), async (req, re
     return res.status(400).json({ error: 'Select one store before viewing a forecast.' })
   }
   const run = await findForecastRun(tenantId, storeId, runId)
-  if (!run) return res.status(404).json({ error: 'Forecast run not found.' })
+  if (!run) {
+    forecastLog('warn', 'items_not_found', {
+      tenant: shortId(tenantId),
+      store: shortId(storeId),
+      run: shortId(runId),
+    })
+    return res.status(404).json({ error: 'Forecast run not found.' })
+  }
 
   const rawLimit = Number.parseInt(String(req.query.limit ?? '100'), 10)
   const limit = Math.min(200, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 100))
@@ -317,6 +390,14 @@ router.get('/forecast-runs/:runId/items', requireRole('manager'), async (req, re
     order by fri.created_at asc
     limit ${limit}
   `)
+
+  forecastLog('info', 'comparison_read', {
+    tenant: shortId(tenantId),
+    store: shortId(storeId),
+    run: shortId(runId),
+    itemCount: rows.length,
+    limit,
+  })
 
   return res.json({
     items: rows.map((row: any) => ({
