@@ -6678,12 +6678,16 @@
             "items": {
               "$ref": "#/components/schemas/ReorderSkipped"
             }
+          },
+          "manualForecastEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
           "generatedAt",
           "items",
-          "skipped"
+          "skipped",
+          "manualForecastEnabled"
         ]
       },
       "ReorderSuggestion": {
@@ -6872,6 +6876,269 @@
           "productName",
           "kind",
           "historyDays"
+        ]
+      },
+      "ForecastRunCreateResponse": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/ForecastRun"
+          },
+          "pollAfterMs": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run",
+          "pollAfterMs"
+        ]
+      },
+      "ForecastRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ForecastRunSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ForecastRunStatus"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "heartbeatAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "productsEvaluated": {
+            "type": "integer"
+          },
+          "productsEligible": {
+            "type": "integer"
+          },
+          "forecastsWon": {
+            "type": "integer"
+          },
+          "forecastsWritten": {
+            "type": "integer"
+          },
+          "productsSkipped": {
+            "type": "integer"
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "errorMessage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workerVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "manualForecastEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "storeId",
+          "source",
+          "status",
+          "requestedAt",
+          "startedAt",
+          "completedAt",
+          "heartbeatAt",
+          "productsEvaluated",
+          "productsEligible",
+          "forecastsWon",
+          "forecastsWritten",
+          "productsSkipped",
+          "errorCode",
+          "errorMessage",
+          "workerVersion",
+          "modelVersion",
+          "manualForecastEnabled"
+        ]
+      },
+      "ForecastRunSource": {
+        "type": "string",
+        "enum": [
+          "manual_test",
+          "nightly"
+        ]
+      },
+      "ForecastRunStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "failed"
+        ]
+      },
+      "ForecastRunItemList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForecastRunItem"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ]
+      },
+      "ForecastRunItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "historyDays": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "trailingUnits": {
+            "type": "number"
+          },
+          "totalUnits": {
+            "type": "number"
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "supplierId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "supplierLeadDays": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reviewDays": {
+            "type": "integer"
+          },
+          "forecastHorizonDays": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "ruleBased": {
+            "$ref": "#/components/schemas/ForecastEvidence"
+          },
+          "mlResult": {
+            "$ref": "#/components/schemas/ForecastEvidence"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/ForecastRunItemDisposition"
+          },
+          "reasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "runId",
+          "variantId",
+          "sku",
+          "productName",
+          "historyDays",
+          "trailingUnits",
+          "totalUnits",
+          "eligible",
+          "supplierId",
+          "supplierLeadDays",
+          "reviewDays",
+          "forecastHorizonDays",
+          "ruleBased",
+          "mlResult",
+          "disposition",
+          "reasonCode"
+        ]
+      },
+      "ForecastEvidence": {
+        "type": "object",
+        "additionalProperties": {}
+      },
+      "ForecastRunItemDisposition": {
+        "type": "string",
+        "enum": [
+          "forecast_written",
+          "heuristic_won",
+          "ineligible",
+          "no_supplier",
+          "sufficient_stock",
+          "failed"
         ]
       },
       "ImportBatch": {
@@ -11290,6 +11557,118 @@
           },
           "403": {
             "description": "Insufficient permissions"
+          }
+        }
+      }
+    },
+    "/reorder/forecast-runs": {
+      "post": {
+        "description": "Queue one temporary, store-scoped ML forecast test. Manager or owner only; idempotent while a manual run is queued or running. The response is asynchronous and the worker runs separately on the production VM.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Forecast test queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForecastRunCreateResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Manual forecast testing is disabled"
+          }
+        }
+      }
+    },
+    "/reorder/forecast-runs/{runId}": {
+      "get": {
+        "description": "Read the status and evidence summary of a store-scoped manual forecast test.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Forecast run status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForecastRun"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Forecast run not found"
+          }
+        }
+      }
+    },
+    "/reorder/forecast-runs/{runId}/items": {
+      "get": {
+        "description": "Read side-by-side rule-based and ML evidence for a forecast test run.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Forecast comparison items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForecastRunItemList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions"
+          },
+          "404": {
+            "description": "Forecast run not found"
           }
         }
       }

@@ -98,7 +98,12 @@ import {
   CreateSupplierProductInputSchema,
   UpdateSupplierProductInputSchema,
 } from './schemas/supplierProduct'
-import { ReorderSuggestionListSchema } from './schemas/reorder'
+import {
+  ReorderSuggestionListSchema,
+  ForecastRunSchema,
+  ForecastRunItemListSchema,
+  ForecastRunCreateResponseSchema,
+} from './schemas/reorder'
 import {
   PurchaseOrderSchema,
   PurchaseOrderListSchema,
@@ -1380,6 +1385,50 @@ registry.registerPath({
     'Recompute rule-based reorder suggestions for this tenant, replacing the previous run. Manager or owner only. This is velocity x lead time arithmetic, not a forecast.',
   responses: {
     200: { description: 'Suggestions regenerated', content: { 'application/json': { schema: ReorderSuggestionListSchema } } },
+    403: { description: 'Insufficient permissions' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/reorder/forecast-runs',
+  description:
+    'Queue one temporary, store-scoped ML forecast test. Manager or owner only; idempotent while a manual run is queued or running. The response is asynchronous and the worker runs separately on the production VM.',
+  request: {
+    headers: z.object({
+      'Idempotency-Key': z.string().max(128).optional(),
+    }),
+  },
+  responses: {
+    202: { description: 'Forecast test queued', content: { 'application/json': { schema: ForecastRunCreateResponseSchema } } },
+    404: { description: 'Manual forecast testing is disabled' },
+    403: { description: 'Insufficient permissions' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/reorder/forecast-runs/{runId}',
+  description: 'Read the status and evidence summary of a store-scoped manual forecast test.',
+  request: { params: z.object({ runId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Forecast run status', content: { 'application/json': { schema: ForecastRunSchema } } },
+    404: { description: 'Forecast run not found' },
+    403: { description: 'Insufficient permissions' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/reorder/forecast-runs/{runId}/items',
+  description: 'Read side-by-side rule-based and ML evidence for a forecast test run.',
+  request: {
+    params: z.object({ runId: z.string().uuid() }),
+    query: z.object({ limit: z.coerce.number().int().min(1).max(200).optional() }),
+  },
+  responses: {
+    200: { description: 'Forecast comparison items', content: { 'application/json': { schema: ForecastRunItemListSchema } } },
+    404: { description: 'Forecast run not found' },
     403: { description: 'Insufficient permissions' },
   },
 })

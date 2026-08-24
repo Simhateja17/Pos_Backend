@@ -68,7 +68,78 @@ export const ReorderSuggestionListSchema = z
     generatedAt: z.string().nullable(),
     items: z.array(ReorderSuggestionSchema),
     skipped: z.array(ReorderSkippedSchema),
+    manualForecastEnabled: z.boolean(),
   })
   .openapi('ReorderSuggestionList')
 
 export type ReorderSuggestion = z.infer<typeof ReorderSuggestionSchema>
+
+export const ForecastRunStatusSchema = z.enum(['queued', 'running', 'completed', 'failed']).openapi('ForecastRunStatus')
+export const ForecastRunSourceSchema = z.enum(['manual_test', 'nightly']).openapi('ForecastRunSource')
+export const ForecastRunItemDispositionSchema = z
+  .enum(['forecast_written', 'heuristic_won', 'ineligible', 'no_supplier', 'sufficient_stock', 'failed'])
+  .openapi('ForecastRunItemDisposition')
+
+const ForecastEvidenceSchema = z.record(z.string(), z.unknown()).openapi('ForecastEvidence')
+
+export const ForecastRunSchema = z
+  .object({
+    id: z.string().uuid(),
+    storeId: z.string().uuid(),
+    source: ForecastRunSourceSchema,
+    status: ForecastRunStatusSchema,
+    requestedAt: z.string(),
+    startedAt: z.string().nullable(),
+    completedAt: z.string().nullable(),
+    heartbeatAt: z.string().nullable(),
+    productsEvaluated: z.number().int(),
+    productsEligible: z.number().int(),
+    forecastsWon: z.number().int(),
+    forecastsWritten: z.number().int(),
+    productsSkipped: z.number().int(),
+    errorCode: z.string().nullable(),
+    errorMessage: z.string().nullable(),
+    workerVersion: z.string().nullable(),
+    modelVersion: z.string().nullable(),
+    manualForecastEnabled: z.boolean(),
+  })
+  .openapi('ForecastRun')
+
+export const ForecastRunItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    runId: z.string().uuid(),
+    variantId: z.string().uuid(),
+    sku: z.string(),
+    productName: z.string(),
+    historyDays: z.number().int().nullable(),
+    trailingUnits: z.number(),
+    totalUnits: z.number(),
+    eligible: z.boolean(),
+    supplierId: z.string().uuid().nullable(),
+    supplierLeadDays: z.number().int().nullable(),
+    reviewDays: z.number().int(),
+    forecastHorizonDays: z.number().int().nullable(),
+    ruleBased: ForecastEvidenceSchema,
+    mlResult: ForecastEvidenceSchema,
+    disposition: ForecastRunItemDispositionSchema,
+    reasonCode: z.string().nullable(),
+  })
+  .openapi('ForecastRunItem')
+
+export const ForecastRunItemListSchema = z
+  .object({
+    items: z.array(ForecastRunItemSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .openapi('ForecastRunItemList')
+
+export const ForecastRunCreateResponseSchema = z
+  .object({
+    run: ForecastRunSchema,
+    pollAfterMs: z.number().int(),
+  })
+  .openapi('ForecastRunCreateResponse')
+
+export type ForecastRun = z.infer<typeof ForecastRunSchema>
+export type ForecastRunItem = z.infer<typeof ForecastRunItemSchema>
