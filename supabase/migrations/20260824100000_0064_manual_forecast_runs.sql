@@ -154,11 +154,11 @@ begin
   -- A VM reboot or killed process must not leave the testing control stuck in
   -- "running" forever. The normal worker timeout is 30 minutes; the extra
   -- grace period avoids racing a legitimately slow run.
-  update public.forecast_runs
+  update public.forecast_runs fr
      set status = 'failed', completed_at = now(), error_code = 'worker_timeout',
          error_message = 'The forecast worker stopped reporting progress.'
-   where tenant_id = p_tenant_id and status = 'running'
-     and coalesce(heartbeat_at, started_at, requested_at) < now() - interval '45 minutes';
+   where fr.tenant_id = p_tenant_id and fr.status = 'running'
+     and coalesce(fr.heartbeat_at, fr.started_at, fr.requested_at) < now() - interval '45 minutes';
 
   return query
   with candidate as (
