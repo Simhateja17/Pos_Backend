@@ -94,6 +94,23 @@ async function findForecastRun(tenantId: string, storeId: string, runId: string)
   })
 }
 
+async function findLatestManualForecastRun(tenantId: string, storeId: string): Promise<ForecastRunRow | null> {
+  return forTenantTransaction(tenantId, async (tx) => {
+    const rows = await tx.$queryRaw<ForecastRunRow[]>`
+      select id, store_id, source, status, requested_at, started_at, completed_at,
+             heartbeat_at, products_evaluated, products_eligible, forecasts_won,
+             forecasts_written, products_skipped, error_code, error_message,
+             worker_version, model_version
+      from public.forecast_runs
+      where tenant_id = ${tenantId}::uuid and store_id = ${storeId}::uuid
+        and source = 'manual_test'
+      order by requested_at desc, id desc
+      limit 1
+    `
+    return rows[0] ?? null
+  })
+}
+
 export function toSuggestionJson(row: any) {
   const reason = row.reason ?? {}
   return {
@@ -176,17 +193,39 @@ router.get('/suggestions', async (req, res) => {
  * the whole team sees on the Inventory screen.
  */
 router.post('/generate', requireRole('manager'), async (req, res) => {
+  const requestStartedAt = Date.now()
   const tenantId = req.user!.tenantId
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Select one store before generating suggestions.' })
+  }
+
+  forecastLog('info', 'suggestions_generate_requested', {
+    tenant: shortId(tenantId),
+    store: shortId(storeId),
+  })
 
   try {
-    const result = await forTenantTransaction(tenantId, async (tx) => generateReorderSuggestions(tx, tenantId, activeStoreId(req)))
+    const result = await forTenantTransaction(tenantId, async (tx) => generateReorderSuggestions(tx, tenantId, storeId))
     lastSkipped.set(tenantId, result.skipped)
 
     const client = forTenant(tenantId) as any
     const rows = await client.reorder_suggestions.findMany({
-      where: { generated_at: result.generatedAt, store_id: activeStoreId(req) },
+      where: { generated_at: result.generatedAt, store_id: storeId },
       include: { variants: { include: { products: true } }, suppliers: true },
       orderBy: { suggested_quantity: 'desc' },
+    })
+
+    forecastLog('info', 'suggestions_generate_completed', {
+      tenant: shortId(tenantId),
+      store: shortId(storeId),
+      generatedAt: result.generatedAt.toISOString(),
+      suggested: result.suggested,
+      skipped: result.skipped.length,
+      replaced: result.replaced,
+      durationMs: Date.now() - requestStartedAt,
     })
 
     return res.json({
@@ -197,6 +236,12 @@ router.post('/generate', requireRole('manager'), async (req, res) => {
     })
   } catch (err: any) {
     const status = Number.isInteger(err?.status) ? err.status : 500
+    forecastLog('error', 'suggestions_generate_failed', {
+      tenant: shortId(tenantId),
+      store: shortId(storeId),
+      durationMs: Date.now() - requestStartedAt,
+      errorType: err instanceof Error ? err.name : 'unknown',
+    })
     return res.status(status).json({
       error: status >= 500 ? 'Could not generate reorder suggestions' : err.message ?? 'Could not generate reorder suggestions',
     })
@@ -322,6 +367,30 @@ router.post('/forecast-runs', requireRole('manager'), async (req, res) => {
     })
     return res.status(500).json({ error: 'Could not queue the manual forecast.' })
   }
+})
+
+/**
+ * GET /forecast-runs/latest — restore the most recent temporary forecast
+ * after a register lock, browser refresh, or navigation away from Inventory.
+ * The run ledger is the durable source of truth; the comparison rows are
+ * fetched separately only when the client needs them.
+ */
+router.get('/forecast-runs/latest', requireRole('manager'), async (req, res) => {
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Select one store before viewing a forecast.' })
+  }
+
+  const run = await findLatestManualForecastRun(req.user!.tenantId, storeId)
+  forecastLog('info', 'latest_status_read', {
+    tenant: shortId(req.user!.tenantId),
+    store: shortId(storeId),
+    run: shortId(run?.id),
+    status: run?.status ?? 'none',
+  })
+  return res.json({ run: run ? forecastRunJson(run) : null })
 })
 
 router.get('/forecast-runs/:runId', requireRole('manager'), async (req, res) => {

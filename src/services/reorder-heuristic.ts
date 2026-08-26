@@ -197,6 +197,7 @@ export async function generateReorderSuggestions(tx: any, tenantId: string, stor
   generatedAt: Date
   suggested: number
   skipped: SkippedVariant[]
+  replaced: number
 }> {
   const generatedAt = new Date()
   const windowStart = new Date(generatedAt)
@@ -319,7 +320,7 @@ export async function generateReorderSuggestions(tx: any, tenantId: string, stor
   // Scoped to THIS shop. An unscoped deleteMany would wipe every other shop's
   // suggestions each time one shop regenerated — the owner would open Bandra
   // and find it empty because Andheri ran last.
-  await tx.reorder_suggestions.deleteMany({ where: { store_id: storeId } })
+  const deleted = await tx.reorder_suggestions.deleteMany({ where: { store_id: storeId } })
 
   const skipped: SkippedVariant[] = []
   let suggested = 0
@@ -416,5 +417,5 @@ export async function generateReorderSuggestions(tx: any, tenantId: string, stor
     suggested++
   }
 
-  return { generatedAt, suggested, skipped }
+  return { generatedAt, suggested, skipped, replaced: deleted.count }
 }

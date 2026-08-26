@@ -141,5 +141,11 @@ export const ForecastRunCreateResponseSchema = z
   })
   .openapi('ForecastRunCreateResponse')
 
+export const ForecastRunLatestResponseSchema = z
+  .object({
+    run: ForecastRunSchema.nullable(),
+  })
+  .openapi('ForecastRunLatestResponse')
+
 export type ForecastRun = z.infer<typeof ForecastRunSchema>
 export type ForecastRunItem = z.infer<typeof ForecastRunItemSchema>

@@ -7011,6 +7011,27 @@
           "failed"
         ]
       },
+      "ForecastRunLatestResponse": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ForecastRun"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "run"
+        ]
+      },
       "ForecastRunItemList": {
         "type": "object",
         "properties": {
@@ -11591,6 +11612,26 @@
           },
           "404": {
             "description": "Manual forecast testing is disabled"
+          }
+        }
+      }
+    },
+    "/reorder/forecast-runs/latest": {
+      "get": {
+        "description": "Read the most recent temporary, store-scoped ML forecast test so Inventory can restore it after navigation or register unlock.",
+        "responses": {
+          "200": {
+            "description": "Latest forecast run, or null when none has been queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForecastRunLatestResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions"
           }
         }
       }

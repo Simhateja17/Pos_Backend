@@ -103,6 +103,7 @@ import {
   ForecastRunSchema,
   ForecastRunItemListSchema,
   ForecastRunCreateResponseSchema,
+  ForecastRunLatestResponseSchema,
 } from './schemas/reorder'
 import {
   PurchaseOrderSchema,
@@ -1402,6 +1403,16 @@ registry.registerPath({
   responses: {
     202: { description: 'Forecast test queued', content: { 'application/json': { schema: ForecastRunCreateResponseSchema } } },
     404: { description: 'Manual forecast testing is disabled' },
+    403: { description: 'Insufficient permissions' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/reorder/forecast-runs/latest',
+  description: 'Read the most recent temporary, store-scoped ML forecast test so Inventory can restore it after navigation or register unlock.',
+  responses: {
+    200: { description: 'Latest forecast run, or null when none has been queued', content: { 'application/json': { schema: ForecastRunLatestResponseSchema } } },
     403: { description: 'Insufficient permissions' },
   },
 })
