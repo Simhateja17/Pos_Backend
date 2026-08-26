@@ -55,6 +55,14 @@ jobs:
           # predecessor. A shallow one-commit checkout cannot make that safe.
           fetch-depth: 2
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install backend dependencies for production gate
+        run: npm ci --include=dev --ignore-scripts
+
       - id: auth
         uses: google-github-actions/auth@v2
         with:
@@ -78,6 +86,9 @@ jobs:
       - name: Apply checked-in Supabase migrations (${{ matrix.region }})
         if: steps.migration_changes.outputs.changed == 'true'
         run: npm exec --yes supabase@latest -- db push --db-url "$DATABASE_URL" --include-all
+
+      - name: Verify production schema and runtime credential (${{ matrix.region }})
+        run: npm run db:verify-production
 
       - name: Deploy and verify backend (${{ matrix.region }})
         run: |
