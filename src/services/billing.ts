@@ -225,6 +225,13 @@ function providerSnapshotDates(provider: RazorpaySubscription) {
   }
 }
 
+function projectedProviderStatus(provider: RazorpaySubscription): string {
+  return ['created', 'authenticated', 'active', 'pending', 'halted', 'cancelled', 'completed', 'expired']
+    .includes(provider.status)
+    ? provider.status
+    : 'created'
+}
+
 function statusPayload(row: any) {
   const access = subscriptionAccessForRow(row)
   return {
@@ -299,6 +306,7 @@ function subscriptionResponse(attempt: any, region: BillingRegion) {
 
 async function projectSubscription(tenantId: string, attempt: any, provider: RazorpaySubscription): Promise<any> {
   const client = forTenant(tenantId) as any
+  const providerStatus = projectedProviderStatus(provider)
   return client.billing_subscriptions.upsert({
     where: { provider_subscription_id: provider.id },
     create: {
@@ -322,8 +330,8 @@ async function projectSubscription(tenantId: string, attempt: any, provider: Raz
       additional_store_count: 0,
       additional_register_count: 0,
       additional_user_count: 0,
-      status: provider.status === 'active' ? 'active' : 'created',
-      entitlement_status: provider.status === 'active' ? 'active' : 'blocked',
+      status: providerStatus,
+      entitlement_status: providerStatus === 'active' ? 'active' : 'blocked',
       ...providerSnapshotDates(provider),
       provider_payload: provider,
     },
@@ -335,8 +343,8 @@ async function projectSubscription(tenantId: string, attempt: any, provider: Raz
       // the only writer besides verifySubscription's own explicit update)
       // would silently keep re-confirming whatever status the row was
       // created with, even once Razorpay reports something different.
-      status: provider.status === 'active' ? 'active' : 'created',
-      entitlement_status: provider.status === 'active' ? 'active' : 'blocked',
+      status: providerStatus,
+      entitlement_status: providerStatus === 'active' ? 'active' : 'blocked',
       provider_payload: provider,
       ...providerSnapshotDates(provider),
     },
@@ -464,6 +472,14 @@ export async function createSubscription(tenantId: string, input: CreateSubscrip
         status: attempt.status === 'active' ? 'active' : 'created',
       })
       return subscriptionResponse(attempt, region)
+    }
+    if (provider.status === 'cancelled' || provider.status === 'completed' || provider.status === 'expired') {
+      const endedAttempt = await client.billing_subscription_attempts.update({
+        where: { id: attempt.id },
+        data: { status: 'expired', provider_payload: provider },
+      })
+      await projectSubscription(tenantId, endedAttempt, provider)
+      throw new BillingHttpError(409, 'This payment attempt has ended. Start a new attempt to retry the subscription.')
     }
     const updatedAttempt = await adoptProviderSubscription(tenantId, attempt, provider)
     return subscriptionResponse(updatedAttempt, region)

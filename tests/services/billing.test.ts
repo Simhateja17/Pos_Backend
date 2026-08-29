@@ -199,4 +199,29 @@ describe('subscription checkout recovery', () => {
       data: expect.objectContaining({ status: 'active', entitlement_status: 'active' }),
     }))
   })
+
+  it('does not reopen a cancelled provider subscription when a stale idempotency key is retried', async () => {
+    mocks.attemptsFindFirst.mockResolvedValue(attempt)
+    mocks.fetchSubscription.mockResolvedValue({
+      id: attempt.provider_subscription_id,
+      plan_id: attempt.provider_plan_id,
+      status: 'cancelled',
+    })
+    mocks.subscriptionsUpsert.mockResolvedValue({ ...unpaidSubscription, status: 'cancelled' })
+
+    const { createSubscription } = await import('../../src/services/billing')
+    await expect(createSubscription('tenant-1', {
+      planKey: 'starter',
+      billingCycle: 'annual',
+      idempotencyKey: attempt.idempotency_key,
+    })).rejects.toMatchObject({
+      status: 409,
+      message: 'This payment attempt has ended. Start a new attempt to retry the subscription.',
+    })
+
+    expect(mocks.subscriptionsUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ status: 'cancelled', entitlement_status: 'blocked' }),
+    }))
+    expect(mocks.createSubscription).not.toHaveBeenCalled()
+  })
 })
