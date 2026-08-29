@@ -103,6 +103,113 @@ async function resumeUnpaidCreatedSubscription(
   return subscriptionResponse(attempt, region)
 }
 
+async function supersedeUnpaidCreatedSubscription(
+  tenantId: string,
+  subscription: any,
+  input: CreateSubscriptionInput,
+  region: BillingRegion,
+): Promise<any | null> {
+  const isUnpaidCheckout = subscription.status === 'created'
+    && subscription.entitlement_status === 'blocked'
+    && !subscription.last_payment_id
+    && subscription.region === region
+    && typeof subscription.attempt_id === 'string'
+    && typeof subscription.provider_subscription_id === 'string'
+
+  if (!isUnpaidCheckout) return null
+  if (subscription.plan_key === input.planKey && subscription.billing_cycle === input.billingCycle) return null
+
+  const attempt = await findAttempt(tenantId, subscription.attempt_id)
+  if (!attempt || attempt.provider_subscription_id !== subscription.provider_subscription_id) return null
+
+  let provider: RazorpaySubscription
+  try {
+    provider = await fetchRazorpaySubscription(subscription.provider_subscription_id)
+  } catch {
+    throw new BillingHttpError(503, 'We could not check your unfinished payment. Please retry in a moment.')
+  }
+
+  if (provider.plan_id !== attempt.provider_plan_id) {
+    throw new BillingHttpError(409, 'The unfinished payment does not match its recorded Razorpay plan. Contact support before retrying.')
+  }
+
+  const client = forTenant(tenantId) as any
+  if (provider.status === 'cancelled' || provider.status === 'expired' || provider.status === 'completed') {
+    await client.billing_subscription_attempts.update({
+      where: { id: attempt.id },
+      data: { status: 'expired', provider_payload: provider },
+    })
+    await client.billing_subscriptions.update({
+      where: { id: subscription.id },
+      data: {
+        status: provider.status,
+        entitlement_status: 'blocked',
+        provider_payload: provider,
+        ...providerSnapshotDates(provider),
+      },
+    })
+    return provider
+  }
+
+  if (provider.status === 'active' || provider.status === 'authenticated'
+    || provider.status === 'pending' || provider.status === 'halted') {
+    await client.billing_subscription_attempts.update({
+      where: { id: attempt.id },
+      data: {
+        status: provider.status === 'active' ? 'active' : 'verification_pending',
+        provider_payload: provider,
+      },
+    })
+    await client.billing_subscriptions.update({
+      where: { id: subscription.id },
+      data: {
+        status: provider.status,
+        entitlement_status: provider.status === 'active' ? 'active' : 'blocked',
+        provider_payload: provider,
+        ...providerSnapshotDates(provider),
+      },
+    })
+    throw new BillingHttpError(
+      409,
+      provider.status === 'active'
+        ? 'Your previous payment is active. Refresh the page to continue with that subscription.'
+        : 'Your previous payment is being confirmed by Razorpay. Refresh shortly before choosing another plan.',
+    )
+  }
+
+  if (provider.status !== 'created') {
+    throw new BillingHttpError(409, 'Razorpay returned an unknown status for the unfinished payment. Contact support before retrying.')
+  }
+
+  let cancelled: RazorpaySubscription
+  try {
+    cancelled = await cancelRazorpaySubscription(subscription.provider_subscription_id, false)
+  } catch {
+    throw new BillingHttpError(502, 'Razorpay could not cancel the unfinished payment. Please retry before choosing another plan.')
+  }
+
+  await client.billing_subscription_attempts.update({
+    where: { id: attempt.id },
+    data: {
+      status: 'expired',
+      failure_code: 'superseded',
+      failure_message: `Superseded by ${input.planKey} ${input.billingCycle} checkout`,
+      provider_payload: cancelled,
+    },
+  })
+  await client.billing_subscriptions.update({
+    where: { id: subscription.id },
+    data: {
+      status: 'cancelled',
+      entitlement_status: 'blocked',
+      cancel_at_cycle_end: false,
+      provider_payload: cancelled,
+      ...providerSnapshotDates(cancelled),
+    },
+  })
+  return cancelled
+}
+
 function amount(value: unknown): number {
   return Number(value ?? 0)
 }
@@ -293,7 +400,11 @@ export async function createSubscription(tenantId: string, input: CreateSubscrip
     if (existingOpen) {
       const resumed = await resumeUnpaidCreatedSubscription(tenantId, existingOpen, input, region)
       if (resumed) return resumed
-      if (existingOpen.status === 'created'
+      const superseded = await supersedeUnpaidCreatedSubscription(tenantId, existingOpen, input, region)
+      // Once superseded, the old Razorpay Checkout URL is invalid and the
+      // partial unique index no longer considers its projection open. Continue
+      // with the newly selected plan using this request's idempotency key.
+      if (!superseded && existingOpen.status === 'created'
         && existingOpen.entitlement_status === 'blocked'
         && !existingOpen.last_payment_id) {
         throw new BillingHttpError(
@@ -301,7 +412,9 @@ export async function createSubscription(tenantId: string, input: CreateSubscrip
           `An unfinished ${existingOpen.plan_key} ${existingOpen.billing_cycle} payment exists. Select that plan to resume checkout.`,
         )
       }
-      throw new BillingHttpError(409, 'This account already has a subscription. Plan changes will be available from a future billing cycle.')
+      if (!superseded) {
+        throw new BillingHttpError(409, 'This account already has a subscription. Plan changes will be available from a future billing cycle.')
+      }
     }
   }
   try {

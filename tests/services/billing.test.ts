@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
   fetchPlan: vi.fn(),
   fetchSubscription: vi.fn(),
   createSubscription: vi.fn(),
+  cancelSubscription: vi.fn(),
+  attemptsCreate: vi.fn(),
+  attemptsUpdate: vi.fn(),
+  subscriptionsUpdate: vi.fn(),
 }))
 
 vi.mock('../../src/db/tenantClient', () => ({
@@ -14,10 +18,13 @@ vi.mock('../../src/db/tenantClient', () => ({
     tenants: { findFirst: vi.fn(async () => ({ country: 'IN' })) },
     billing_subscription_attempts: {
       findFirst: mocks.attemptsFindFirst,
+      create: mocks.attemptsCreate,
+      update: mocks.attemptsUpdate,
     },
     billing_subscriptions: {
       findFirst: mocks.subscriptionsFindFirst,
       upsert: mocks.subscriptionsUpsert,
+      update: mocks.subscriptionsUpdate,
     },
   })),
   forTenantTransaction: vi.fn(),
@@ -30,7 +37,7 @@ vi.mock('../../src/services/razorpay', () => ({
   fetchRazorpaySubscription: mocks.fetchSubscription,
   createRazorpaySubscription: mocks.createSubscription,
   findRazorpaySubscriptionByAttemptId: vi.fn(),
-  cancelRazorpaySubscription: vi.fn(),
+  cancelRazorpaySubscription: mocks.cancelSubscription,
   verifyRazorpayCheckoutSignature: vi.fn(),
   unixSecondsToDate: vi.fn(() => null),
 }))
@@ -95,6 +102,8 @@ describe('subscription checkout recovery', () => {
       return null
     })
     mocks.subscriptionsFindFirst.mockResolvedValue(unpaidSubscription)
+    mocks.attemptsUpdate.mockImplementation(async ({ data }: any) => ({ ...attempt, ...data }))
+    mocks.subscriptionsUpdate.mockImplementation(async ({ data }: any) => ({ ...unpaidSubscription, ...data }))
   })
 
   it('resumes an unpaid created subscription when the browser returns with a new idempotency key', async () => {
@@ -116,5 +125,78 @@ describe('subscription checkout recovery', () => {
     expect(mocks.fetchSubscription).toHaveBeenCalledWith(attempt.provider_subscription_id)
     expect(mocks.createSubscription).not.toHaveBeenCalled()
     expect(mocks.subscriptionsUpsert).not.toHaveBeenCalled()
+  })
+
+  it('cancels and supersedes an unpaid checkout before creating a different plan checkout', async () => {
+    const replacementAttempt = {
+      ...attempt,
+      id: '55555555-5555-4555-8555-555555555555',
+      idempotency_key: '66666666-6666-4666-8666-666666666666',
+      plan_key: 'starter',
+      billing_cycle: 'monthly',
+      provider_plan_id: 'plan_starter_monthly',
+      provider_subscription_id: null,
+      status: 'creating',
+    }
+    const replacementProvider = {
+      id: 'sub_replacement',
+      plan_id: 'plan_starter_monthly',
+      status: 'created',
+    }
+    mocks.fetchPlan.mockResolvedValue({ id: 'plan_starter_monthly', item: { amount: 79_900, currency: 'INR' } })
+    mocks.cancelSubscription.mockResolvedValue({
+      id: attempt.provider_subscription_id,
+      plan_id: attempt.provider_plan_id,
+      status: 'cancelled',
+    })
+    mocks.attemptsCreate.mockResolvedValue(replacementAttempt)
+    mocks.createSubscription.mockResolvedValue(replacementProvider)
+    mocks.attemptsUpdate
+      .mockResolvedValueOnce({ ...attempt, status: 'expired' })
+      .mockResolvedValueOnce({ ...replacementAttempt, provider_subscription_id: replacementProvider.id, status: 'created' })
+    mocks.subscriptionsUpsert.mockResolvedValue({ ...unpaidSubscription, provider_subscription_id: replacementProvider.id })
+
+    const { createSubscription } = await import('../../src/services/billing')
+    const result = await createSubscription('tenant-1', {
+      planKey: 'starter',
+      billingCycle: 'monthly',
+      idempotencyKey: replacementAttempt.idempotency_key,
+    })
+
+    expect(mocks.cancelSubscription).toHaveBeenCalledWith(attempt.provider_subscription_id, false)
+    expect(mocks.subscriptionsUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: unpaidSubscription.id },
+      data: expect.objectContaining({ status: 'cancelled', entitlement_status: 'blocked' }),
+    }))
+    expect(mocks.createSubscription).toHaveBeenCalledWith(expect.objectContaining({
+      planId: 'plan_starter_monthly',
+      billingCycle: 'monthly',
+    }))
+    expect(result).toMatchObject({ razorpaySubscriptionId: replacementProvider.id, planKey: 'starter', billingCycle: 'monthly' })
+  })
+
+  it('preserves a previous checkout when Razorpay reports that it became active', async () => {
+    mocks.fetchPlan.mockResolvedValue({ id: 'plan_starter_monthly', item: { amount: 79_900, currency: 'INR' } })
+    mocks.fetchSubscription.mockResolvedValue({
+      id: attempt.provider_subscription_id,
+      plan_id: attempt.provider_plan_id,
+      status: 'active',
+    })
+
+    const { createSubscription } = await import('../../src/services/billing')
+    await expect(createSubscription('tenant-1', {
+      planKey: 'starter',
+      billingCycle: 'monthly',
+      idempotencyKey: '77777777-7777-4777-8777-777777777777',
+    })).rejects.toMatchObject({
+      status: 409,
+      message: 'Your previous payment is active. Refresh the page to continue with that subscription.',
+    })
+
+    expect(mocks.cancelSubscription).not.toHaveBeenCalled()
+    expect(mocks.createSubscription).not.toHaveBeenCalled()
+    expect(mocks.subscriptionsUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'active', entitlement_status: 'active' }),
+    }))
   })
 })

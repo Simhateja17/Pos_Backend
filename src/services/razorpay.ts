@@ -131,10 +131,13 @@ export async function fetchRazorpayPlan(planId: string): Promise<RazorpayPlan> {
   return razorpayRequest<RazorpayPlan>(`/plans/${encodeURIComponent(planId)}`)
 }
 
-export async function cancelRazorpaySubscription(subscriptionId: string): Promise<RazorpaySubscription> {
+export async function cancelRazorpaySubscription(
+  subscriptionId: string,
+  cancelAtCycleEnd = true,
+): Promise<RazorpaySubscription> {
   return razorpayRequest<RazorpaySubscription>(`/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
     method: 'POST',
-    body: JSON.stringify({ cancel_at_cycle_end: true }),
+    body: JSON.stringify({ cancel_at_cycle_end: cancelAtCycleEnd }),
   })
 }
 
