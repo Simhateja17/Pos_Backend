@@ -224,7 +224,7 @@ describe('products routes — variants (CATALOG-01)', () => {
     expect(res.body[0].variants[0]).toEqual(expect.objectContaining({ movingAverageCost: '400.00', currentStock: 3 }))
   })
 
-  it('GET /products search matches a variant colour', async () => {
+  it('GET /products search matches every searchable variant identity field', async () => {
     productsFindManyMock
       .mockResolvedValueOnce([{ id: 'product-teal' }])
       .mockResolvedValueOnce([{
@@ -249,7 +249,16 @@ describe('products routes — variants (CATALOG-01)', () => {
     expect(res.status).toBe(200)
     expect(res.body[0].variants[0]).toMatchObject({ sku: 'QA-KURTA-04', color: 'Teal' })
     expect(productsFindManyMock.mock.calls[0][0].where.OR).toContainEqual({
+      variants: { some: { barcode: { contains: 'Teal' } } },
+    })
+    expect(productsFindManyMock.mock.calls[0][0].where.OR).toContainEqual({
+      variants: { some: { size: { contains: 'Teal', mode: 'insensitive' } } },
+    })
+    expect(productsFindManyMock.mock.calls[0][0].where.OR).toContainEqual({
       variants: { some: { color: { contains: 'Teal', mode: 'insensitive' } } },
+    })
+    expect(productsFindManyMock.mock.calls[0][0].where.OR).toContainEqual({
+      variants: { some: { material: { contains: 'Teal', mode: 'insensitive' } } },
     })
   })
 })

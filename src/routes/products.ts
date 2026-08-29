@@ -128,14 +128,19 @@ async function matchingProductIds(client: any, search: string, tenantId: string)
     return exact.product_id ? [exact.product_id] : []
   }
 
-  // Step 2 — substring fallback (CHECK-02: search by name when there is no
-  // barcode). ILIKE '%...%', served by 0050's pg_trgm GIN indexes.
+  // Step 2 — substring fallback. ILIKE '%...%' covers every searchable
+  // catalog identity field; 0069 adds trigram indexes for the variant fields
+  // so size/material/colour and partial barcode searches do not regress as a
+  // tenant's catalog grows.
   const matches = await client.products.findMany({
     where: {
       OR: [
         { name: { contains: search, mode: 'insensitive' } },
         { variants: { some: { sku: { contains: search, mode: 'insensitive' } } } },
+        { variants: { some: { barcode: { contains: search } } } },
+        { variants: { some: { size: { contains: search, mode: 'insensitive' } } } },
         { variants: { some: { color: { contains: search, mode: 'insensitive' } } } },
+        { variants: { some: { material: { contains: search, mode: 'insensitive' } } } },
       ],
     },
     orderBy: { created_at: 'asc' },
