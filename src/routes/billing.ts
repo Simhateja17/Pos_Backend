@@ -80,7 +80,8 @@ router.get('/private-offers', requireRole('owner'), async (req, res) => {
       included_register_count, included_user_count, trial_days, trial_duration_minutes, latest_activation_at,
       price_validity, fixed_billing_cycles, status, created_at
     FROM public.private_billing_offers
-    WHERE tenant_id = ${req.user!.tenantId}::uuid AND status IN ('offered', 'accepted')
+    WHERE tenant_id = ${req.user!.tenantId}::uuid
+      AND (status = 'accepted' OR (status = 'offered' AND latest_activation_at > now()))
     ORDER BY created_at DESC
   `
   return res.json({ offers: offers.map((offer: any) => ({

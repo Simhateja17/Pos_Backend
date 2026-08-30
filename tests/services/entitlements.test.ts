@@ -175,6 +175,14 @@ describe('entitlement projection and enforcement', () => {
     expect(access).toEqual({ entitlement: 'blocked', accessAllowed: false, graceUntil: null })
   })
 
+  it('treats an expired trial returned as an ISO string as blocked', () => {
+    const access = trialAccessForRow(
+      { status: 'active', ends_at: '2026-08-01T00:00:00.000Z' },
+      new Date('2026-08-02T00:00:00.000Z'),
+    )
+    expect(access).toEqual({ entitlement: 'blocked', accessAllowed: false, graceUntil: null })
+  })
+
   it('counts one committed POS sale, makes retries idempotent, and blocks the 51st without a write', async () => {
     const fixture = fakeTransaction(49)
     const first = await reservePosTransaction(fixture.tx, {

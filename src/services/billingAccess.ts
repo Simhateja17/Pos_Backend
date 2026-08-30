@@ -13,6 +13,20 @@ export type TrialAccess = {
 }
 
 /**
+ * Prisma model reads normally expose timestamps as `Date`, while raw SQL
+ * reads can expose the same PostgreSQL timestamptz as an ISO string depending
+ * on the driver/adapter in use. Authorization must apply the expiry boundary
+ * consistently in both cases; treating a string as "no expiry" would leave an
+ * expired trial open until some unrelated request happened to clean it up.
+ */
+function timestamp(value: unknown): Date | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+/**
  * Pure entitlement projection shared by the billing API and the consolidated
  * request-authorization transaction. Keeping this rule in one place prevents
  * a protected route and GET /billing/status from disagreeing about access.
@@ -23,7 +37,7 @@ export function subscriptionAccessForRow(row: any, now = new Date()): Subscripti
     return { entitlement: 'active', accessAllowed: true, graceUntil: null }
   }
 
-  const graceUntil = row.grace_until_at instanceof Date ? row.grace_until_at : null
+  const graceUntil = timestamp(row.grace_until_at)
   if (row.entitlement_status === 'grace' && graceUntil && graceUntil > now) {
     return { entitlement: 'grace', accessAllowed: true, graceUntil }
   }
@@ -41,7 +55,12 @@ export function trialAccessForRow(row: any, now = new Date()): TrialAccess {
     return { entitlement: 'blocked', accessAllowed: false, graceUntil: null }
   }
 
-  const endsAt = row.ends_at instanceof Date ? row.ends_at : null
+  const endsAt = timestamp(row.ends_at)
+  // A non-null malformed timestamp is not an unbounded trial. Fail closed so
+  // a driver/type regression cannot grant access beyond the intended end.
+  if (row.ends_at !== null && row.ends_at !== undefined && !endsAt) {
+    return { entitlement: 'blocked', accessAllowed: false, graceUntil: null }
+  }
   if (endsAt && endsAt <= now) {
     return { entitlement: 'blocked', accessAllowed: false, graceUntil: null }
   }
