@@ -115,6 +115,13 @@ async function getRegionalTenant(tenantId: string): Promise<Record<string, unkno
   return regionalTenant(tenant) ? tenant : null
 }
 
+function adminTaxRateBps(): number {
+  const region = backendAdminRegion()
+  if (region === 'IN') return 1_800
+  const configured = Number.parseInt(process.env.INTERNATIONAL_SUBSCRIPTION_TAX_RATE_BPS ?? process.env.US_SUBSCRIPTION_TAX_RATE_BPS ?? '0', 10)
+  return Number.isFinite(configured) && configured >= 0 ? configured : 0
+}
+
 async function regionalTenantIds(): Promise<string[]> {
   const tenants = await queryAdminRows<Record<string, unknown>>('tenants', (query) => query)
   return tenants
@@ -259,6 +266,7 @@ router.get('/auth/context', allowAdminAal1, async (req, res) => {
     factors,
     hasTotp,
     requiresMfaSetup: !hasTotp,
+    taxRateBps: adminTaxRateBps(),
   })
 })
 
@@ -556,9 +564,7 @@ protectedRouter.post('/private-billing-offers', requireAdminRole('platform_owner
 
   const region = backendAdminRegion()
   const currency = region === 'IN' ? 'INR' : 'USD'
-  const taxRateBps = region === 'IN'
-    ? 1_800
-    : Math.max(0, Number.parseInt(process.env.INTERNATIONAL_SUBSCRIPTION_TAX_RATE_BPS ?? '0', 10) || 0)
+  const taxRateBps = adminTaxRateBps()
   const taxAmountMinor = Math.round(input.negotiatedBaseAmountMinor * taxRateBps / 10_000)
   const totalAmountMinor = input.negotiatedBaseAmountMinor + taxAmountMinor
   const client = privilegedSupabase()
