@@ -91,12 +91,11 @@ type PrivateOfferRow = {
 
 async function privateOfferForCheckout(tenantId: string, offerId?: string): Promise<PrivateOfferRow | null> {
   if (!offerId) return null
-  const client = forTenant(tenantId) as any
-  const rows = await client.$queryRaw<PrivateOfferRow[]>`
-    SELECT * FROM public.private_billing_offers
-    WHERE id = ${offerId}::uuid AND tenant_id = ${tenantId}::uuid
-    LIMIT 1
-  `
+  const rows = await forTenantTransaction<PrivateOfferRow[]>(tenantId, (tx) => tx.$queryRaw<PrivateOfferRow[]>`
+      SELECT * FROM public.private_billing_offers
+      WHERE id = ${offerId}::uuid AND tenant_id = ${tenantId}::uuid
+      LIMIT 1
+    `)
   const offer = rows[0] ?? null
   if (!offer || offer.status !== 'offered' || new Date(offer.latest_activation_at).getTime() <= Date.now()) {
     throw new BillingHttpError(409, 'This private offer is no longer available')
@@ -630,8 +629,10 @@ export async function verifySubscription(tenantId: string, input: {
     },
   })
   if (provider.status === 'active' && attempt.private_offer_id) {
-    await client.$executeRaw`UPDATE public.private_billing_offers SET status = 'accepted', accepted_at = now(), updated_at = now() WHERE id = ${attempt.private_offer_id}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'offered'`
-    await client.$executeRaw`UPDATE public.billing_trials SET status = 'cancelled', updated_at = now() WHERE tenant_id = ${tenantId}::uuid AND status IN ('pending', 'active')`
+    await forTenantTransaction(tenantId, async (tx) => {
+      await tx.$executeRaw`UPDATE public.private_billing_offers SET status = 'accepted', accepted_at = now(), updated_at = now() WHERE id = ${attempt.private_offer_id}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'offered'`
+      await tx.$executeRaw`UPDATE public.billing_trials SET status = 'cancelled', updated_at = now() WHERE tenant_id = ${tenantId}::uuid AND status IN ('pending', 'active')`
+    })
   }
 
   if (input.razorpayPaymentId) {

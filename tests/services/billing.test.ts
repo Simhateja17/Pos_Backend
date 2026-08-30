@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   attemptsCreate: vi.fn(),
   attemptsUpdate: vi.fn(),
   subscriptionsUpdate: vi.fn(),
+  rawQuery: vi.fn(),
+  tenantRawQuery: vi.fn(),
 }))
 
 vi.mock('../../src/db/tenantClient', () => ({
@@ -26,8 +28,11 @@ vi.mock('../../src/db/tenantClient', () => ({
       upsert: mocks.subscriptionsUpsert,
       update: mocks.subscriptionsUpdate,
     },
+    $queryRaw: mocks.rawQuery,
   })),
-  forTenantTransaction: vi.fn(),
+  forTenantTransaction: vi.fn((_tenantId: string, fn: (tx: any) => Promise<any>) => fn({
+    $queryRaw: mocks.tenantRawQuery,
+  })),
 }))
 
 vi.mock('../../src/services/razorpay', () => ({
@@ -102,6 +107,8 @@ describe('subscription checkout recovery', () => {
       return null
     })
     mocks.subscriptionsFindFirst.mockResolvedValue(unpaidSubscription)
+    mocks.rawQuery.mockResolvedValue([])
+    mocks.tenantRawQuery.mockResolvedValue([])
     mocks.attemptsUpdate.mockImplementation(async ({ data }: any) => ({ ...attempt, ...data }))
     mocks.subscriptionsUpdate.mockImplementation(async ({ data }: any) => ({ ...unpaidSubscription, ...data }))
   })
@@ -223,5 +230,70 @@ describe('subscription checkout recovery', () => {
       update: expect.objectContaining({ status: 'cancelled', entitlement_status: 'blocked' }),
     }))
     expect(mocks.createSubscription).not.toHaveBeenCalled()
+  })
+
+  it('creates checkout for a valid private offer visible through tenant RLS', async () => {
+    const privateOffer = {
+      id: '15c6361c-7fec-4e83-b8fb-35c4b739403c',
+      tenant_id: 'tenant-1',
+      region: 'IN',
+      base_plan_key: 'starter',
+      billing_cycle: 'monthly',
+      currency: 'INR',
+      negotiated_base_amount_minor: 16_864,
+      tax_amount_minor: 3_036,
+      total_amount_minor: 19_900,
+      tax_rate_bps: 1_800,
+      included_location_count: 2,
+      included_register_count: 3,
+      included_user_count: 5,
+      provider_plan_id: 'plan_private_199',
+      provider_mode: process.env.RAZORPAY_MODE === 'live' ? 'live' : 'test',
+      latest_activation_at: new Date(Date.now() + 60_000),
+      status: 'offered',
+    }
+    const privateAttempt = {
+      ...attempt,
+      id: '88888888-8888-4888-8888-888888888888',
+      idempotency_key: '99999999-9999-4999-8999-999999999999',
+      provider_subscription_id: null,
+      provider_plan_id: privateOffer.provider_plan_id,
+      plan_key: 'starter',
+      billing_cycle: 'monthly',
+      base_amount_minor: 16_864n,
+      tax_amount_minor: 3_036n,
+      total_amount_minor: 19_900n,
+      private_offer_id: privateOffer.id,
+      status: 'creating',
+    }
+    const provider = { id: 'sub_private_199', plan_id: privateOffer.provider_plan_id, status: 'created' }
+
+    mocks.tenantRawQuery.mockResolvedValue([privateOffer])
+    mocks.fetchPlan.mockResolvedValue({ id: privateOffer.provider_plan_id, item: { amount: 19_900, currency: 'INR' } })
+    mocks.attemptsFindFirst.mockResolvedValue(null)
+    mocks.subscriptionsFindFirst.mockResolvedValue(null)
+    mocks.attemptsCreate.mockResolvedValue(privateAttempt)
+    mocks.createSubscription.mockResolvedValue(provider)
+    mocks.attemptsUpdate.mockResolvedValue({ ...privateAttempt, provider_subscription_id: provider.id, status: 'created' })
+    mocks.subscriptionsUpsert.mockResolvedValue({ ...unpaidSubscription, provider_subscription_id: provider.id })
+
+    const { createSubscription } = await import('../../src/services/billing')
+    const result = await createSubscription('tenant-1', {
+      planKey: 'starter',
+      billingCycle: 'monthly',
+      idempotencyKey: privateAttempt.idempotency_key,
+      privateOfferId: privateOffer.id,
+    })
+
+    expect(result).toMatchObject({
+      razorpaySubscriptionId: provider.id,
+      planKey: 'starter',
+      billingCycle: 'monthly',
+      quote: { totalAmountMinor: 19_900 },
+    })
+    expect(mocks.createSubscription).toHaveBeenCalledWith(expect.objectContaining({
+      planId: privateOffer.provider_plan_id,
+      billingCycle: 'monthly',
+    }))
   })
 })
