@@ -26,11 +26,27 @@ import {
   UpdateMemberRoleSchema,
 } from './schemas/member'
 import { ChangeOperatorPinSchema, PinSwitchSchema, PinSwitchResponseSchema, StaffSessionSchema } from './schemas/pin'
-import { ProductSchema, CreateProductSchema, VariantSchema, UpdateVariantSchema } from './schemas/product'
+import { ProductSchema, CreateProductSchema, VariantSchema, UpdateProductSchema, UpdateVariantSchema } from './schemas/product'
+import { MasterItemListSchema, MasterItemSearchSchema } from './schemas/masterItem'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
 import { CreateSaleSchema, SaleSchema, SaleListQuerySchema, SaleListSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema } from './schemas/sale'
 import { CreateReturnSchema, ReturnResponseSchema } from './schemas/return'
-import { CustomerListQuerySchema, CustomerListSchema, CustomerSchema } from './schemas/customer'
+import {
+  CreateCustomerInputSchema,
+  CustomerListQuerySchema,
+  CustomerListSchema,
+  CustomerPurchaseListQuerySchema,
+  CustomerPurchaseListSchema,
+  CustomerSchema,
+  UpdateCustomerInputSchema,
+} from './schemas/customer'
+import {
+  CreateRepaymentSchema,
+  CustomerCreditSchema,
+  ReceivablesListSchema,
+  ReceivablesQuerySchema,
+  RepaymentResponseSchema,
+} from './schemas/customerCredit'
 import { PaymentReadQuerySchema, PaymentReadSchema } from './schemas/payment'
 import {
   CreateTaxInvoiceSchema,
@@ -511,6 +527,17 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: 'get',
+  path: '/master-items',
+  description: 'Search Ambel-curated regional item identities for inventory autocomplete. Manager+.',
+  request: { query: MasterItemSearchSchema },
+  responses: {
+    200: { description: 'Ranked regional master-item suggestions', content: { 'application/json': { schema: MasterItemListSchema } } },
+    400: { description: 'Search query is too short or invalid' },
+  },
+})
+
+registry.registerPath({
   method: 'post',
   path: '/products',
   description: 'Create a product with one or more variants (D-01/D-02). SKU auto-generated per variant unless supplied.',
@@ -529,6 +556,20 @@ registry.registerPath({
   request: { params: z.object({ productId: z.string().uuid() }) },
   responses: {
     200: { description: 'Product', content: { 'application/json': { schema: ProductSchema } } },
+    404: { description: 'Product not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/products/{productId}',
+  description: 'Update shop-owned product details or activate/deactivate the product without deleting history.',
+  request: {
+    params: z.object({ productId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdateProductSchema } } },
+  },
+  responses: {
+    200: { description: 'Updated product', content: { 'application/json': { schema: ProductSchema } } },
     404: { description: 'Product not found' },
   },
 })
@@ -650,12 +691,12 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/sales',
-  description: "Complete a checkout sale — server recomputes totals, enforces payment-sum, gates above-threshold discounts behind manager+ approval (D-05), writes sale+lines+payments+stock movements atomically. Response includes the sale's payments array.",
+  description: "Complete a checkout sale — server recomputes totals, enforces payment-sum, gates above-threshold discounts and customer-credit-limit overrides behind manager+ approval, and writes sale+lines+payments+stock movements plus any credit ledger row atomically. Response includes the sale's payments array.",
   request: { body: { content: { 'application/json': { schema: CreateSaleSchema } } } },
   responses: {
     201: { description: 'Sale completed', content: { 'application/json': { schema: SaleSchema } } },
     400: { description: 'Invalid request, variant not found, or payment sum mismatch' },
-    403: { description: "Discount exceeds the tenant's manager-approval threshold and the acting role is not manager+" },
+    403: { description: 'Discount or customer credit limit requires manager or owner approval' },
     409: { description: 'Target shift is already closed' },
   },
 })
@@ -794,6 +835,97 @@ registry.registerPath({
   request: { query: z.object({ search: z.string().max(100).optional() }) },
   responses: {
     200: { description: 'Matching customers', content: { 'application/json': { schema: z.array(CustomerSchema) } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/customers',
+  description: 'Create a tenant-wide customer profile for checkout or billing.',
+  request: { body: { content: { 'application/json': { schema: CreateCustomerInputSchema } } } },
+  responses: {
+    201: { description: 'Customer created', content: { 'application/json': { schema: CustomerSchema } } },
+    400: { description: 'Invalid customer profile' },
+    409: { description: 'Phone or email already belongs to a customer' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/customers/{customerId}',
+  description: 'Read one tenant-wide customer profile, including the optional credit limit.',
+  request: { params: z.object({ customerId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Customer profile', content: { 'application/json': { schema: CustomerSchema } } },
+    404: { description: 'Customer not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'patch',
+  path: '/customers/{customerId}',
+  description: 'Update customer identity/billing fields. Changing creditLimit requires a manager or owner.',
+  request: {
+    params: z.object({ customerId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: UpdateCustomerInputSchema } } },
+  },
+  responses: {
+    200: { description: 'Customer updated', content: { 'application/json': { schema: CustomerSchema } } },
+    400: { description: 'Invalid customer update' },
+    403: { description: 'Changing a credit limit requires a manager or owner' },
+    404: { description: 'Customer not found' },
+    409: { description: 'Phone or email already belongs to another customer' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/customers/{customerId}/purchases',
+  description: 'Read a customer’s store-scoped persisted purchase summaries.',
+  request: {
+    params: z.object({ customerId: z.string().uuid() }),
+    query: CustomerPurchaseListQuerySchema,
+  },
+  responses: {
+    200: { description: 'Customer purchases', content: { 'application/json': { schema: CustomerPurchaseListSchema } } },
+    404: { description: 'Customer not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/customers/{customerId}/credit',
+  description: 'Read a customer’s tenant-wide derived khata balance, optional limit, and recent store-tagged ledger entries.',
+  request: { params: z.object({ customerId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Customer credit summary', content: { 'application/json': { schema: CustomerCreditSchema } } },
+    404: { description: 'Customer not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/customers/{customerId}/credit/repayments',
+  description: 'Append a standalone partial or full repayment to a customer’s khata at the active store.',
+  request: {
+    params: z.object({ customerId: z.string().uuid() }),
+    body: { content: { 'application/json': { schema: CreateRepaymentSchema } } },
+  },
+  responses: {
+    201: { description: 'Repayment recorded', content: { 'application/json': { schema: RepaymentResponseSchema } } },
+    400: { description: 'Invalid repayment, no store selected, or repayment exceeds balance' },
+    404: { description: 'Customer not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/receivables',
+  description: 'List tenant-wide customers with a positive derived khata balance. Store scope is intentionally not applied to the balance.',
+  request: { query: ReceivablesQuerySchema },
+  responses: {
+    200: { description: 'Outstanding customer balances', content: { 'application/json': { schema: ReceivablesListSchema } } },
+    400: { description: 'Invalid receivables filters' },
   },
 })
 

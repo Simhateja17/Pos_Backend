@@ -19,6 +19,12 @@ import { findPairedTerminal } from '../lib/counterDevice'
 import { consumeRateLimit } from '../lib/rateLimit'
 import { effectivePricesForVariants } from '../lib/storePricing'
 import { calculateCashChange } from '../lib/cashTender'
+import {
+  creditLimitString,
+  getCustomerCreditTotalsForCustomer,
+  lockCustomerForCredit,
+  moneyString,
+} from '../lib/customerCredit'
 import { ensureTaxInvoice } from '../services/taxDocuments'
 import { formatCompanionReceipt, type CompanionReceiptSale } from '../lib/hardwareReceipt'
 
@@ -47,6 +53,12 @@ const SALE_LINE_INCLUDE = {
 // (req.actingStaff first, req.user fallback) already established for
 // POST /stock-movements's adjustment gate.
 export function isApprovedForDiscount(req: import('express').Request): boolean {
+  const actingRole = req.actingStaff?.role ?? req.user?.role
+  if (!actingRole) return false
+  return ROLE_RANK[actingRole] >= ROLE_RANK.manager
+}
+
+export function isApprovedForCreditLimit(req: import('express').Request): boolean {
   const actingRole = req.actingStaff?.role ?? req.user?.role
   if (!actingRole) return false
   return ROLE_RANK[actingRole] >= ROLE_RANK.manager
@@ -418,6 +430,11 @@ router.post('/', async (req, res) => {
         return { status: 404, body: { error: 'Variant not found', variantIds: missingVariantIds } }
       }
 
+      const inactive = variants.filter((variant) => variant.products?.is_active === false)
+      if (inactive.length > 0) {
+        return { status: 409, body: { error: 'One or more products are inactive and cannot be sold.' } }
+      }
+
       // A fractional quantity is only meaningful for a variant sold by weight
       // or volume. Selling 2.5 of a `piece` variant is a typo, and the sale is
       // the one place it would silently become money.
@@ -441,6 +458,27 @@ router.post('/', async (req, res) => {
       const store = await tx.stores.findFirst({ where: { id: storeId, is_active: true } })
       if (!tenant || !store) {
         return { status: 404, body: { error: !tenant ? 'Tenant not found' : 'Store not found' } }
+      }
+
+
+      const requestedByVariant = new Map<string, number>()
+      for (const line of parsed.data.lines) {
+        requestedByVariant.set(line.variantId, (requestedByVariant.get(line.variantId) ?? 0) + line.quantity)
+      }
+      for (const variant of variants) {
+        if (!variant.track_inventory || variant.allow_negative_stock) continue
+        const level = await tx.variant_stock_levels.findFirst({
+          where: { variant_id: variant.id, store_id: storeId },
+          select: { quantity: true },
+        })
+        const available = Number(level?.quantity ?? 0)
+        const requested = requestedByVariant.get(variant.id) ?? 0
+        if (requested > available) {
+          return {
+            status: 409,
+            body: { error: `${variant.products.name} has only ${available} available. Negative stock is turned off.` },
+          }
+        }
       }
       const effectivePrices = await effectivePricesForVariants(tx, storeId, variants)
       const combinedTaxRate = new Prisma.Decimal(store.tax_rate_state)
@@ -508,12 +546,53 @@ router.post('/', async (req, res) => {
         }
       }
 
+      const creditAmount = parsed.data.payments
+        .filter((payment) => payment.method === 'credit')
+        .reduce((sum, payment) => sum.plus(new Prisma.Decimal(payment.amount)), ZERO)
+      if (creditAmount.greaterThan(0) && tenant.country.toUpperCase() !== 'IN') {
+        return { status: 400, body: { error: 'Credit payments are available only for India stores.' } }
+      }
+      if (creditAmount.greaterThan(0) && !parsed.data.customer) {
+        return { status: 400, body: { error: 'A credit sale needs a saved customer profile.' } }
+      }
+
       const cashTender = calculateCashChange(parsed.data.payments, parsed.data.cashReceived)
       if (!cashTender.ok) return { status: 400, body: { error: cashTender.error } }
       const { cashPayment, cashReceived, changeDue } = cashTender
 
       const customer = await findOrCreateCustomer(tx, tenantId, parsed.data.customer)
       const createdBy = await resolveActingStaffId(tx, req)
+
+      if (creditAmount.greaterThan(0)) {
+        if (!customer) {
+          return { status: 400, body: { error: 'A credit sale needs a saved customer profile.' } }
+        }
+        if (!createdBy) {
+          return { status: 409, body: { error: 'The active operator is not available for this credit sale.' } }
+        }
+
+        const lockedCustomer = await lockCustomerForCredit(tx, customer.id)
+        if (!lockedCustomer) return { status: 404, body: { error: 'Customer not found' } }
+        const currentCredit = await getCustomerCreditTotalsForCustomer(tx, tenantId, customer.id)
+        const creditLimit = lockedCustomer.credit_limit
+        if (
+          creditLimit !== null &&
+          creditLimit !== undefined &&
+          currentCredit.balance.plus(creditAmount).greaterThan(new Prisma.Decimal(creditLimit)) &&
+          !isApprovedForCreditLimit(req)
+        ) {
+          return {
+            status: 403,
+            body: {
+              error: 'This sale would exceed the customer credit limit. Ask a manager or owner to approve it.',
+              code: 'credit_limit_override_required',
+              balance: moneyString(currentCredit.balance),
+              creditLimit: creditLimitString(creditLimit),
+              requestedCredit: moneyString(creditAmount),
+            },
+          }
+        }
+      }
 
       const sale = await tx.sales.create({
         data: {
@@ -573,10 +652,23 @@ router.post('/', async (req, res) => {
         createdPayments.push(createdPayment)
       }
 
-      // D-17: sale movements are allowed to push stock negative — this loop
-      // never pre-checks availability. The floor guard (migration 0010)
-      // scopes its rejection to non-sale movement types only.
-      for (const line of parsed.data.lines) {
+      if (creditAmount.greaterThan(0)) {
+        await tx.customer_credit_transactions.create({
+          data: {
+            tenant_id: tenantId,
+            customer_id: customer!.id,
+            store_id: storeId,
+            type: 'credit_sale',
+            amount: creditAmount.toFixed(2),
+            sale_id: sale.id,
+            recorded_by: createdBy!,
+            note: null,
+          },
+        })
+      }
+
+      for (let i = 0; i < parsed.data.lines.length; i++) {
+        const line = parsed.data.lines[i]
         await tx.stock_movements.create({
           data: {
             tenant_id: tenantId,

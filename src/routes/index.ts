@@ -5,6 +5,7 @@ import authRouter from './auth'
 import pinRouter from './pin'
 import membersRouter from './members'
 import productsRouter from './products'
+import masterItemsRouter from './masterItems'
 import categoriesRouter from './categories'
 import terminalsRouter from './terminals'
 import settingsRouter from './settings'
@@ -14,6 +15,7 @@ import salesRouter from './sales'
 import returnsRouter from './returns'
 import taxDocumentsRouter from './taxDocuments'
 import customersRouter from './customers'
+import receivablesRouter from './receivables'
 import shiftsRouter from './shifts'
 import onboardingRouter from './onboarding'
 import contextRouter from './context'
@@ -111,6 +113,7 @@ router.use('/stores', ...appAccess, storesRouter)
 // products' own '/:productId' handler would otherwise swallow '/variants'.
 router.use('/variants/:variantId/availability', ...appAccess, availabilityRouter)
 router.use('/products', ...appAccess, productsRouter)
+router.use('/master-items', ...appAccess, requireRole('manager'), masterItemsRouter)
 router.use('/categories', ...appAccess, categoriesRouter)
 router.use('/sales', ...appAccess, salesRouter)
 router.use('/returns', ...appAccess, returnsRouter)
@@ -119,6 +122,7 @@ router.use('/returns', ...appAccess, returnsRouter)
 // idempotent and lazy, so an older sale can receive its invoice on first read.
 router.use('/tax-documents', ...appAccess, taxDocumentsRouter)
 router.use('/customers', ...appAccess, customersRouter)
+router.use('/receivables', ...appAccess, receivablesRouter)
 router.use('/shifts', ...appAccess, shiftsRouter)
 
 // Back-office modules are also server-gated. Filtering the sidebar is only a

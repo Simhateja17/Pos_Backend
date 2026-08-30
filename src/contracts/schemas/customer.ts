@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
+import { CreditLimitInputSchema } from './customerCredit'
 
 extendZodWithOpenApi(z)
 
@@ -18,6 +19,7 @@ export const CustomerSchema = z
     postalCode: z.string().nullable(),
     country: z.string(),
     notes: z.string().nullable(),
+    creditLimit: z.string().nullable(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -110,8 +112,14 @@ export const UpdateCustomerInputSchema = z
     postalCode: z.string().trim().max(20).nullable().optional(),
     country: z.string().trim().max(2).nullable().optional(),
     notes: z.string().trim().max(1000).nullable().optional(),
+    creditLimit: CreditLimitInputSchema,
+    credit_limit: CreditLimitInputSchema,
   })
   .strict()
+  .refine((value) => !(value.creditLimit !== undefined && value.credit_limit !== undefined), {
+    message: 'Use creditLimit or credit_limit, not both',
+    path: ['creditLimit'],
+  })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'At least one customer field is required',
   })

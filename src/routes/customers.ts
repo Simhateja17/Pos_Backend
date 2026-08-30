@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import { Prisma } from '@prisma/client'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { findPairedTerminal } from '../lib/counterDevice'
 import {
@@ -10,8 +11,18 @@ import {
   searchCustomers,
   updateCustomer,
 } from '../lib/customers'
-import { storeScopeWhere } from '../middleware/storeContext'
-import { requireRole } from '../middleware/requireRole'
+import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
+import { effectiveRole, requireRole, ROLE_RANK } from '../middleware/requireRole'
+import {
+  CreateRepaymentSchema,
+} from '../contracts/schemas/customerCredit'
+import {
+  creditLimitString,
+  getCustomerCreditTotalsForCustomer,
+  lockCustomerForCredit,
+  moneyString,
+  resolveCreditRecorder,
+} from '../lib/customerCredit'
 import {
   CreateCustomerInputSchema,
   CustomerListQuerySchema,
@@ -45,8 +56,24 @@ function toCustomerJson(row: any) {
     postalCode: row.postal_code ?? null,
     country: row.country ?? 'IN',
     notes: row.notes ?? null,
+    creditLimit: creditLimitString(row.credit_limit),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at ?? row.created_at),
+  }
+}
+
+function toCreditTransactionJson(row: any, storeById: Map<string, { id: string; name: string }>) {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    storeId: row.store_id,
+    storeName: storeById.get(row.store_id)?.name ?? null,
+    type: row.type,
+    amount: moneyString(row.amount),
+    saleId: row.sale_id ?? null,
+    recordedBy: row.recorded_by,
+    note: row.note ?? null,
+    createdAt: iso(row.created_at),
   }
 }
 
@@ -135,6 +162,107 @@ router.post('/', requireRole('cashier'), async (req, res) => {
     if (response) return response
     throw error
   }
+})
+
+/** GET /:customerId/credit — tenant-wide derived balance and recent ledger. */
+router.get('/:customerId/credit', async (req, res) => {
+  if (!customerIdSchema.safeParse(req.params.customerId).success) return invalidCustomerId(res)
+  const customerId = req.params.customerId as string
+
+  const result = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+    const customer = await tx.customers.findFirst({
+      where: { id: customerId },
+      select: { id: true, credit_limit: true },
+    })
+    if (!customer) return null
+
+    const totals = await getCustomerCreditTotalsForCustomer(tx, req.user!.tenantId, customer.id)
+    const transactions = await tx.customer_credit_transactions.findMany({
+      where: { customer_id: customer.id },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+    })
+    const storeIds = [...new Set(transactions.map((row: any) => row.store_id))]
+    const stores = storeIds.length
+      ? await tx.stores.findMany({ where: { id: { in: storeIds } }, select: { id: true, name: true } })
+      : []
+    const storeById = new Map<string, { id: string; name: string }>(stores.map((store: any) => [store.id, { id: store.id, name: store.name }]))
+
+    return {
+      customerId: customer.id,
+      balance: moneyString(totals.balance),
+      creditLimit: creditLimitString(customer.credit_limit),
+      transactions: transactions.map((row: any) => toCreditTransactionJson(row, storeById)),
+    }
+  })
+
+  if (!result) return res.status(404).json({ error: 'Customer not found' })
+  return res.json(result)
+})
+
+/** POST /:customerId/credit/repayments — append a standalone repayment row. */
+router.post('/:customerId/credit/repayments', requireRole('cashier'), async (req, res) => {
+  if (!customerIdSchema.safeParse(req.params.customerId).success) return invalidCustomerId(res)
+  const customerId = req.params.customerId as string
+
+  const parsed = CreateRepaymentSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid repayment', details: parsed.error.flatten() })
+
+  let storeId: string
+  try {
+    storeId = activeStoreId(req)
+  } catch {
+    return res.status(400).json({ error: 'Choose a store before recording a repayment.', code: 'choose_store' })
+  }
+
+  const result = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+    const customer = await lockCustomerForCredit(tx, customerId)
+    if (!customer) return { status: 404 as const, body: { error: 'Customer not found' } }
+
+    const totals = await getCustomerCreditTotalsForCustomer(tx, req.user!.tenantId, customerId)
+    const amount = new Prisma.Decimal(parsed.data.amount)
+    if (amount.greaterThan(totals.balance)) {
+      return {
+        status: 400 as const,
+        body: {
+          error: 'Repayment cannot be greater than the customer’s outstanding balance.',
+          code: 'repayment_exceeds_balance',
+          balance: moneyString(totals.balance),
+        },
+      }
+    }
+
+    const recordedBy = await resolveCreditRecorder(tx, req)
+    if (!recordedBy) {
+      return { status: 409 as const, body: { error: 'The active operator is not available for this repayment.' } }
+    }
+
+    const row = await tx.customer_credit_transactions.create({
+      data: {
+        tenant_id: req.user!.tenantId,
+        customer_id: customerId,
+        store_id: storeId,
+        type: 'repayment',
+        amount: parsed.data.amount,
+        sale_id: null,
+        recorded_by: recordedBy,
+        note: parsed.data.note?.trim() || null,
+      },
+    })
+
+    const stores = await tx.stores.findMany({ where: { id: storeId }, select: { id: true, name: true } })
+    const storeById = new Map<string, { id: string; name: string }>(stores.map((store: any) => [store.id, { id: store.id, name: store.name }]))
+    return {
+      status: 201 as const,
+      body: {
+        transaction: toCreditTransactionJson(row, storeById),
+        balance: moneyString(totals.balance.minus(amount)),
+        creditLimit: creditLimitString(customer.credit_limit),
+      },
+    }
+  })
+
+  return res.status(result.status).json(result.body)
 })
 
 /**
@@ -269,9 +397,19 @@ router.patch('/:customerId', requireRole('cashier'), async (req, res) => {
   }
 
   try {
+    const requestedCreditLimit = parsed.data.creditLimit !== undefined ? parsed.data.creditLimit : parsed.data.credit_limit
+    if (requestedCreditLimit !== undefined) {
+      const role = effectiveRole(req)
+      if (!role || ROLE_RANK[role] < ROLE_RANK.manager) {
+        return res.status(403).json({ error: 'Only a manager or owner can change a customer credit limit.' })
+      }
+    }
+
+    const { creditLimit: _creditLimit, credit_limit: _snakeCreditLimit, ...profileFields } = parsed.data
     const customer = await forTenantTransaction(req.user!.tenantId, (tx) =>
       updateCustomer(tx, req.user!.tenantId, customerId, {
-        ...parsed.data,
+        ...profileFields,
+        ...(requestedCreditLimit !== undefined ? { creditLimit: requestedCreditLimit } : {}),
         // Legacy clients may still send `name`; treat it as the same billing
         // identity instead of allowing two names to drift apart.
         billingName: parsed.data.billingName !== undefined ? parsed.data.billingName : parsed.data.name,

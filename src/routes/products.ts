@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
-import { CreateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
+import { CreateProductSchema, UpdateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
 import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
@@ -23,7 +23,15 @@ type VariantRow = {
   color: string | null
   material: string | null
   price: unknown // Prisma Decimal
+  mrp: unknown | null
+  list_price: unknown | null
   moving_average_cost: unknown | null // Prisma Decimal; null until cost basis exists
+  hsn_sac: string | null
+  purchase_unit: string | null
+  purchase_pack_size: unknown | null
+  track_inventory: boolean
+  allow_negative_stock: boolean
+  expiry_date: Date | null
   is_taxable: boolean
   tax_rate: unknown | null // Prisma Decimal fraction; null for legacy rows
   reorder_threshold: unknown // Prisma Decimal since 0031
@@ -52,10 +60,18 @@ function toVariantJson(
     color: row.color,
     material: row.material,
     price: effectivePrice!.toString(),
+    mrp: row.mrp == null ? null : row.mrp.toString(),
+    listPrice: row.list_price == null ? null : row.list_price.toString(),
     // Unit costs are a management fact. Cashiers still receive the catalog
     // needed for checkout, but not supplier cost data through that endpoint.
     movingAverageCost:
       includeCostBasis && row.moving_average_cost != null ? row.moving_average_cost.toString() : null,
+    hsnSac: row.hsn_sac ?? null,
+    purchaseUnit: row.purchase_unit ?? null,
+    purchasePackSize: row.purchase_pack_size == null ? null : row.purchase_pack_size.toString(),
+    trackInventory: row.track_inventory !== false,
+    allowNegativeStock: row.allow_negative_stock === true,
+    expiryDate: row.expiry_date == null ? null : row.expiry_date.toISOString().slice(0, 10),
     isTaxable: row.is_taxable,
     taxRatePercent: row.tax_rate == null ? null : new Prisma.Decimal(String(row.tax_rate)).times(100).toString(),
     reorderThreshold: Number(row.reorder_threshold),
@@ -71,13 +87,18 @@ async function categoryNames(client: any): Promise<Map<string, string>> {
 }
 
 function toProductJson(
-  product: { id: string; name: string; category_id: string | null; created_at: Date },
+  product: { id: string; name: string; category_id: string | null; master_item_id: string | null; brand: string | null; description: string | null; internal_notes: string | null; is_active: boolean; created_at: Date },
   variants: ReturnType<typeof toVariantJson>[],
   categoryNameById: Map<string, string>,
 ) {
   return {
     id: product.id,
     name: product.name,
+    masterItemId: product.master_item_id ?? null,
+    brand: product.brand ?? null,
+    description: product.description ?? null,
+    internalNotes: product.internal_notes ?? null,
+    isActive: product.is_active !== false,
     categoryId: product.category_id,
     category: product.category_id ? (categoryNameById.get(product.category_id) ?? null) : null,
     createdAt: product.created_at.toISOString(),
@@ -277,6 +298,20 @@ router.post('/', requireRole('manager'), async (req, res) => {
     // product and every variant created so far, instead of leaving a
     // partial product permanently committed.
     const { product, createdVariants } = await forTenantTransaction(tenantId, async (tx) => {
+      const tenant = await tx.tenants.findFirst({ where: { id: tenantId }, select: { country: true } })
+      if (!tenant) throw Object.assign(new Error('Tenant not found'), { status: 404 })
+      const region = tenant.country === 'IN' ? 'IN' : 'INTL'
+      if (region === 'IN' && parsed.data.variants.some((variant) => variant.mrp === undefined)) {
+        throw Object.assign(new Error('MRP is required for India products'), { status: 400 })
+      }
+
+      const masterItem = parsed.data.masterItemId
+        ? await tx.master_items.findFirst({ where: { id: parsed.data.masterItemId, region, is_active: true } })
+        : null
+      if (parsed.data.masterItemId && !masterItem) {
+        throw Object.assign(new Error('Master item is not available in this region'), { status: 400 })
+      }
+
       // Resolve the category to a real row. A typed name matches an existing
       // category case-insensitively before creating anything, so "dairy" joins
       // "Dairy" rather than forking it.
@@ -295,7 +330,15 @@ router.post('/', requireRole('manager'), async (req, res) => {
       }
 
       const product = await tx.products.create({
-        data: { tenant_id: tenantId, name: parsed.data.name, category_id: categoryId },
+        data: {
+          tenant_id: tenantId,
+          name: parsed.data.name,
+          category_id: categoryId,
+          master_item_id: masterItem?.id ?? null,
+          brand: parsed.data.brand ?? masterItem?.brand ?? null,
+          description: parsed.data.description ?? null,
+          internal_notes: parsed.data.internalNotes ?? null,
+        },
       })
 
       const createdVariants: VariantRow[] = []
@@ -313,6 +356,15 @@ router.post('/', requireRole('manager'), async (req, res) => {
             color: input.color ?? null,
             material: input.material ?? null,
             price: input.price,
+            mrp: input.mrp ?? null,
+            list_price: input.listPrice ?? null,
+            moving_average_cost: input.initialCostPrice ?? null,
+            hsn_sac: input.hsnSac ?? null,
+            purchase_unit: input.purchaseUnit ?? null,
+            purchase_pack_size: input.purchasePackSize ?? null,
+            track_inventory: input.trackInventory,
+            allow_negative_stock: input.trackInventory ? input.allowNegativeStock : false,
+            expiry_date: input.expiryDate ? new Date(`${input.expiryDate}T00:00:00.000Z`) : null,
             tax_rate: new Prisma.Decimal(input.taxRatePercent).dividedBy(100),
             reorder_threshold: input.reorderThreshold ?? 4,
           },
@@ -341,6 +393,35 @@ router.post('/', requireRole('manager'), async (req, res) => {
       error: status >= 500 ? 'Could not create product' : err.message ?? 'Could not create product',
     })
   }
+})
+
+router.patch('/:productId', requireRole('manager'), async (req, res) => {
+  if (!uuidSchema.safeParse(req.params.productId).success) {
+    return res.status(400).json({ error: 'Invalid productId' })
+  }
+  const parsed = UpdateProductSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid request' })
+
+  const client = forTenant(req.user!.tenantId) as any
+  const existing = await client.products.findFirst({ where: { id: req.params.productId } })
+  if (!existing) return res.status(404).json({ error: 'Product not found' })
+
+  const product = await client.products.update({
+    where: { id: existing.id },
+    data: {
+      ...(parsed.data.brand !== undefined ? { brand: parsed.data.brand } : {}),
+      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
+      ...(parsed.data.internalNotes !== undefined ? { internal_notes: parsed.data.internalNotes } : {}),
+      ...(parsed.data.isActive !== undefined ? { is_active: parsed.data.isActive } : {}),
+    },
+  })
+  const variants = await client.variants.findMany({ where: { product_id: product.id }, orderBy: { created_at: 'asc' } })
+  const stockByVariant = await stockLevelsFor(client, req, variants.map((variant: any) => variant.id))
+  return res.json(toProductJson(
+    product,
+    variants.map((variant: VariantRow) => toVariantJson(variant, Number(stockByVariant.get(variant.id) ?? 0), variant.price, canReadCostBasis(req))),
+    await categoryNames(client),
+  ))
 })
 
 /**
@@ -374,6 +455,13 @@ router.patch('/:productId/variants/:variantId', requireRole('manager'), async (r
     return res.status(409).json({ error: 'Variant identity is locked once stock has moved' })
   }
 
+  if (parsed.data.mrp === null) {
+    const tenant = await client.tenants.findFirst({ where: { id: req.user!.tenantId }, select: { country: true } })
+    if (tenant?.country === 'IN') {
+      return res.status(400).json({ error: 'MRP is required for India products' })
+    }
+  }
+
   try {
     const updated = await client.variants.update({
       where: { id: target.id },
@@ -384,6 +472,17 @@ router.patch('/:productId/variants/:variantId', requireRole('manager'), async (r
         ...(parsed.data.barcode !== undefined ? { barcode: parsed.data.barcode } : {}),
         ...(parsed.data.unitOfMeasure !== undefined ? { unit_of_measure: parsed.data.unitOfMeasure } : {}),
         ...(parsed.data.price !== undefined ? { price: parsed.data.price } : {}),
+        ...(parsed.data.costPrice !== undefined ? { moving_average_cost: parsed.data.costPrice } : {}),
+        ...(parsed.data.mrp !== undefined ? { mrp: parsed.data.mrp } : {}),
+        ...(parsed.data.listPrice !== undefined ? { list_price: parsed.data.listPrice } : {}),
+        ...(parsed.data.hsnSac !== undefined ? { hsn_sac: parsed.data.hsnSac } : {}),
+        ...(parsed.data.purchaseUnit !== undefined ? { purchase_unit: parsed.data.purchaseUnit } : {}),
+        ...(parsed.data.purchasePackSize !== undefined ? { purchase_pack_size: parsed.data.purchasePackSize } : {}),
+        ...(parsed.data.trackInventory !== undefined ? { track_inventory: parsed.data.trackInventory } : {}),
+        ...(parsed.data.allowNegativeStock !== undefined ? { allow_negative_stock: parsed.data.allowNegativeStock } : {}),
+        ...(parsed.data.expiryDate !== undefined
+          ? { expiry_date: parsed.data.expiryDate ? new Date(`${parsed.data.expiryDate}T00:00:00.000Z`) : null }
+          : {}),
         ...(parsed.data.taxRatePercent !== undefined
           ? { tax_rate: new Prisma.Decimal(parsed.data.taxRatePercent).dividedBy(100) }
           : {}),

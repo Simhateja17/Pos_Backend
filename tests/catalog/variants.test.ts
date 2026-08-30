@@ -24,6 +24,7 @@ const categoriesFindManyMock = vi.fn(async () => [])
 const categoriesFindFirstMock = vi.fn(async () => null)
 const categoriesCreateMock = vi.fn(async () => ({ id: 'category-1' }))
 const membershipFindFirstMock = vi.fn()
+const tenantsFindFirstMock = vi.fn(async () => ({ country: 'US' }))
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
@@ -57,6 +58,8 @@ vi.mock('../../src/db/tenantClient', () => ({
       staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       products: { create: productsCreateMock },
       variants: { create: variantsCreateMock, findFirst: variantsFindFirstMock },
+      tenants: { findFirst: tenantsFindFirstMock },
+      master_items: { findFirst: vi.fn(async () => null) },
       categories: {
         findFirst: categoriesFindFirstMock,
         create: categoriesCreateMock,
@@ -92,6 +95,7 @@ describe('products routes — variants (CATALOG-01)', () => {
     }))
     variantsFindFirstMock.mockResolvedValue(null) // no SKU collisions by default
     variantStockLevelsFindManyMock.mockResolvedValue([])
+    tenantsFindFirstMock.mockReset().mockResolvedValue({ country: 'US' })
   })
 
   async function buildApp() {
@@ -182,6 +186,19 @@ describe('products routes — variants (CATALOG-01)', () => {
       .send({ name: 'X', variants: [] })
 
     expect(res.status).toBe(400)
+    expect(productsCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('requires MRP for India products at the server boundary', async () => {
+    tenantsFindFirstMock.mockResolvedValue({ country: 'IN' })
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/products')
+      .set('Authorization', `Bearer ${tokenFor('manager')}`)
+      .send({ name: 'Milk', variants: [{ price: 30, taxRatePercent: 5 }] })
+
+    expect(res.status).toBe(400)
+    expect(res.body).toEqual({ error: 'MRP is required for India products' })
     expect(productsCreateMock).not.toHaveBeenCalled()
   })
 

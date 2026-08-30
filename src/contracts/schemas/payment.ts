@@ -5,7 +5,7 @@ extendZodWithOpenApi(z)
 
 export const PaymentInputSchema = z
   .object({
-    method: z.enum(['cash', 'card', 'check', 'upi']),
+    method: z.enum(['cash', 'card', 'check', 'upi', 'credit']),
     amount: z.string().regex(/^\d+\.\d{2}$/),
     referenceCode: z.string().trim().min(1).max(50).optional(),
   })
@@ -19,7 +19,7 @@ export const PaymentSchema = z
   .object({
     id: z.string().uuid(),
     saleId: z.string().uuid(),
-    method: z.enum(['cash', 'card', 'check', 'upi']),
+    method: z.enum(['cash', 'card', 'check', 'upi', 'credit']),
     direction: z.enum(['payment', 'refund']),
     amount: z.string(),
     referenceCode: z.string().nullable(),
@@ -30,7 +30,7 @@ export const PaymentSchema = z
 
 export const PaymentReadQuerySchema = z
   .object({
-    method: z.enum(['cash', 'card', 'check', 'upi']).optional(),
+    method: z.enum(['cash', 'card', 'check', 'upi', 'credit']).optional(),
     status: z.enum(['completed', 'refunded']).optional(),
     from: z.string().datetime({ offset: true }).optional(),
     to: z.string().datetime({ offset: true }).optional(),

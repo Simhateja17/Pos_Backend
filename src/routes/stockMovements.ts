@@ -80,6 +80,10 @@ router.post('/', async (req, res) => {
     return res.status(404).json({ error: 'Variant not found' })
   }
 
+  if (variant.track_inventory === false) {
+    return res.status(409).json({ error: 'Inventory tracking is turned off for this item.' })
+  }
+
   // Whether a fraction is meaningful depends on the variant's unit, which the
   // request schema cannot see. Rice sold loose (kg) moves 2.5; a shirt (piece)
   // never does, and a fractional piece is a typo the ledger should refuse.
@@ -150,7 +154,7 @@ router.get('/', async (req, res) => {
  */
 router.get('/low-stock', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
-  const variants = await client.variants.findMany({})
+  const variants = await client.variants.findMany({ where: { track_inventory: true, products: { is_active: true } } })
   // Low stock is a PER-SHOP fact: Andheri being out matters even when Bandra
   // is full, so this must not aggregate unless the owner explicitly asked for
   // business scope.

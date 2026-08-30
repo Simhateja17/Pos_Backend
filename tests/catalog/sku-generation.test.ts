@@ -48,6 +48,8 @@ vi.mock('../../src/db/tenantClient', () => ({
       staff_sessions: { findFirst: vi.fn(async () => null), updateMany: vi.fn() },
       products: { create: productsCreateMock },
       variants: { create: variantsCreateMock, findFirst: variantsFindFirstMock },
+      tenants: { findFirst: vi.fn(async () => ({ country: 'US' })) },
+      master_items: { findFirst: vi.fn(async () => null) },
       categories: {
         findFirst: categoriesFindFirstMock,
         create: categoriesCreateMock,

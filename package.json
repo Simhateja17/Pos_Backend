@@ -14,7 +14,8 @@
     "db:generate": "prisma generate",
     "db:verify-production": "node -r dotenv/config scripts/verify-production-schema.mjs",
     "generate:openapi": "tsx src/contracts/openapi.ts",
-    "razorpay:plans": "tsx scripts/create-razorpay-plans.ts"
+    "razorpay:plans": "tsx scripts/create-razorpay-plans.ts",
+    "master-items:seed": "tsx scripts/seed-master-items.ts"
   },
   "repository": {
     "type": "git",

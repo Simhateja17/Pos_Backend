@@ -42,8 +42,16 @@ export const VariantSchema = z
     color: z.string().nullable(),
     material: z.string().nullable(),
     price: z.string(), // numeric(10,2) — serialized as a string to avoid float rounding, same convention to use in stockMovement.ts
+    mrp: z.string().nullable(),
+    listPrice: z.string().nullable(),
     /** Null until the variant has a received/imported cost basis. */
     movingAverageCost: z.string().nullable(),
+    hsnSac: z.string().nullable(),
+    purchaseUnit: z.string().nullable(),
+    purchasePackSize: z.string().nullable(),
+    trackInventory: z.boolean(),
+    allowNegativeStock: z.boolean(),
+    expiryDate: z.string().date().nullable(),
     isTaxable: z.boolean(),
     /** Percentage string for display; null means the legacy store fallback is still active. */
     taxRatePercent: z.string().nullable(),
@@ -59,6 +67,11 @@ export const ProductSchema = z
   .object({
     id: z.string().uuid(),
     name: z.string(),
+    masterItemId: z.string().uuid().nullable(),
+    brand: z.string().nullable(),
+    description: z.string().nullable(),
+    internalNotes: z.string().nullable(),
+    isActive: z.boolean(),
     categoryId: z.string().uuid().nullable(),
     /** Resolved name, so the catalog list needs no second lookup. */
     category: z.string().nullable(),
@@ -80,6 +93,17 @@ export const CreateVariantInputSchema = z
     color: z.string().max(50).optional(),
     material: z.string().max(50).optional(),
     price: z.number().nonnegative(),
+    /** Mandatory for India tenants; the route enforces the regional rule. */
+    mrp: z.number().nonnegative().optional(),
+    /** International list/compare-at price. */
+    listPrice: z.number().nonnegative().optional(),
+    initialCostPrice: z.number().nonnegative().optional(),
+    hsnSac: z.string().trim().regex(/^[0-9]{4,8}$/).optional(),
+    purchaseUnit: z.string().trim().max(40).optional(),
+    purchasePackSize: z.number().positive().optional(),
+    trackInventory: z.boolean().default(true),
+    allowNegativeStock: z.boolean().default(false),
+    expiryDate: z.string().date().optional(),
     /** The GST/VAT rate for this sellable variant, expressed as a percentage. */
     taxRatePercent: z.number().min(0).max(100),
     reorderThreshold: z.number().nonnegative().optional(),
@@ -104,6 +128,10 @@ export const CreateVariantInputSchema = z
 export const CreateProductSchema = z
   .object({
     name: z.string().min(1),
+    masterItemId: z.string().uuid().optional(),
+    brand: z.string().trim().max(120).optional(),
+    description: z.string().trim().max(1_000).optional(),
+    internalNotes: z.string().trim().max(1_000).optional(),
     /** An existing category. Send categoryName instead to create one inline. */
     categoryId: z.string().uuid().optional(),
     /**
@@ -129,13 +157,30 @@ export const UpdateVariantSchema = z
     barcode: BarcodeSchema.nullable().optional(),
     unitOfMeasure: UnitOfMeasureSchema.optional(),
     price: z.number().nonnegative().optional(),
+    costPrice: z.number().nonnegative().nullable().optional(),
+    mrp: z.number().nonnegative().nullable().optional(),
+    listPrice: z.number().nonnegative().nullable().optional(),
+    hsnSac: z.string().trim().regex(/^[0-9]{4,8}$/).nullable().optional(),
+    purchaseUnit: z.string().trim().max(40).nullable().optional(),
+    purchasePackSize: z.number().positive().nullable().optional(),
+    trackInventory: z.boolean().optional(),
+    allowNegativeStock: z.boolean().optional(),
+    expiryDate: z.string().date().nullable().optional(),
     /** Percentage rate for this item. Omit to leave a legacy fallback unchanged. */
     taxRatePercent: z.number().min(0).max(100).optional(),
     reorderThreshold: z.number().nonnegative().optional(),
   })
   .openapi('UpdateVariantRequest')
 
+export const UpdateProductSchema = z.object({
+  brand: z.string().trim().max(120).nullable().optional(),
+  description: z.string().trim().max(1_000).nullable().optional(),
+  internalNotes: z.string().trim().max(1_000).nullable().optional(),
+  isActive: z.boolean().optional(),
+}).openapi('UpdateProductRequest')
+
 export type Product = z.infer<typeof ProductSchema>
 export type Variant = z.infer<typeof VariantSchema>
 export type CreateProductInput = z.infer<typeof CreateProductSchema>
 export type UpdateVariantInput = z.infer<typeof UpdateVariantSchema>
+export type UpdateProductInput = z.infer<typeof UpdateProductSchema>

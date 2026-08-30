@@ -103,6 +103,7 @@ export type CustomerWriteInput = {
   postalCode?: string | null
   country?: string | null
   notes?: string | null
+  creditLimit?: string | null
 }
 
 export type NormalizedCustomerInput = {
@@ -271,6 +272,7 @@ export async function updateCustomer(
       postal_code: normalized.postalCode,
       country: normalized.country,
       notes: normalized.notes,
+      ...(input.creditLimit !== undefined ? { credit_limit: input.creditLimit } : {}),
     },
   })
 }
