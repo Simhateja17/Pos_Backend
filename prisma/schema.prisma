@@ -769,6 +769,7 @@ model billing_subscription_attempts {
   total_amount_minor       BigInt
   tax_rate_bps             Int                     @default(0)
   provider_plan_id         String
+  private_offer_id         String?                 @db.Uuid
   provider_subscription_id String?                 @unique
   status                   String                  @default("creating")
   failure_code             String?
@@ -792,6 +793,8 @@ model billing_subscriptions {
   provider                      String                         @default("razorpay")
   provider_subscription_id      String                         @unique
   provider_plan_id              String
+  private_offer_id              String?                          @db.Uuid
+  entitlement_snapshot          Json?
   region                        String
   plan_key                      String
   billing_cycle                 String

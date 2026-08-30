@@ -93,6 +93,7 @@ export const BillingPlanCatalogSchema = z
 export const CreateSubscriptionSchema = z
   .object({
     planKey: z.string().trim().min(1).max(50),
+    privateOfferId: z.string().uuid().optional(),
     billingCycle: BillingCycleSchema,
     idempotencyKey: z.string().uuid(),
   })

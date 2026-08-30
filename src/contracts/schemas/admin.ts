@@ -42,6 +42,29 @@ export const AdminEntitlementOverrideSchema = z.object({
 
 export const AdminRevokeOverrideSchema = z.object({ reason: requiredText(1_000) })
 
+export const AdminPrivateOfferSchema = z.object({
+  tenantId: z.string().uuid(),
+  basePlanKey: z.enum(['starter', 'growth', 'pro']),
+  billingCycle: z.enum(['monthly', 'annual']),
+  negotiatedBaseAmountMinor: z.number().int().positive().max(100_000_000),
+  includedLocations: z.number().int().positive().max(10_000),
+  includedRegisters: z.number().int().positive().max(100_000),
+  includedUsers: z.number().int().positive().max(100_000),
+  additionalLocationUnitAmountMinor: z.number().int().nonnegative().max(100_000_000),
+  additionalRegisterUnitAmountMinor: z.number().int().nonnegative().max(100_000_000),
+  additionalUserUnitAmountMinor: z.number().int().nonnegative().max(100_000_000),
+  trialDays: z.number().int().min(0).max(365),
+  latestActivationAt: z.coerce.date(),
+  priceValidity: z.enum(['until_changed', 'fixed_cycles']),
+  fixedBillingCycles: z.number().int().positive().max(1_200).nullable(),
+  internalReason: requiredText(1_000),
+  salesReference: z.string().trim().max(120).nullable().optional(),
+}).superRefine((value, context) => {
+  if ((value.priceValidity === 'fixed_cycles') !== (value.fixedBillingCycles !== null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['fixedBillingCycles'], message: 'Billing cycles must match price validity' })
+  }
+})
+
 export const AdminRetrySchema = z.object({
   operationKind: z.enum(['webhook', 'email', 'import', 'forecast']),
   operationId: requiredText(200),
@@ -64,4 +87,3 @@ export const AdminAuditQuerySchema = z.object({
   action: z.string().trim().min(1).max(120).optional(),
   tenantId: z.string().uuid().optional(),
 })
-

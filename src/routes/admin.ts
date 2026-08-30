@@ -9,12 +9,16 @@ import {
   AdminMfaResetSchema,
   AdminOtpRequestSchema,
   AdminOtpVerifySchema,
+  AdminPrivateOfferSchema,
   AdminRetrySchema,
   AdminSearchSchema,
   AdminSupportRequestSchema,
   AdminTenantIdSchema,
   AdminRevokeOverrideSchema,
 } from '../contracts/schemas/admin'
+import { createRazorpayPlan, RazorpayRequestError } from '../services/razorpay'
+import { getBillingMode } from '../services/billingCatalog'
+import { snapshotForPlan } from '../services/entitlements'
 import {
   adminPanelEnabled,
   backendAdminRegion,
@@ -392,12 +396,13 @@ protectedRouter.get('/tenants/:tenantId', async (req, res) => {
   const tenant = await getRegionalTenant(parsed.data.tenantId)
   if (!tenant) return res.status(404).json({ error: 'Tenant not found' })
 
-  const [stores, staff, subscriptions, transactions, overrides, emailFailures, importFailures, forecastFailures] = await Promise.all([
+  const [stores, staff, subscriptions, transactions, overrides, privateOffers, emailFailures, importFailures, forecastFailures] = await Promise.all([
     queryAdminRows<Record<string, unknown>>('stores', (query) => query.eq('tenant_id', tenant.id).order('created_at', { ascending: true })),
     queryAdminRows<Record<string, unknown>>('staff_members', (query) => query.eq('tenant_id', tenant.id).order('created_at', { ascending: true })),
     queryAdminRows<Record<string, unknown>>('billing_subscriptions', (query) => query.eq('tenant_id', tenant.id).order('updated_at', { ascending: false }).limit(50)),
     queryAdminRows<Record<string, unknown>>('billing_transactions', (query) => query.eq('tenant_id', tenant.id).order('created_at', { ascending: false }).limit(50)),
     queryAdminRows<Record<string, unknown>>('admin_entitlement_overrides', (query) => query.eq('tenant_id', tenant.id).order('created_at', { ascending: false }).limit(50)),
+    queryAdminRows<Record<string, unknown>>('private_billing_offers', (query) => query.eq('tenant_id', tenant.id).order('created_at', { ascending: false }).limit(50)),
     queryAdminRows<Record<string, unknown>>('email_log', (query) => query.eq('tenant_id', tenant.id).eq('status', 'failed').order('created_at', { ascending: false }).limit(20)),
     queryAdminRows<Record<string, unknown>>('import_batches', (query) => query.eq('tenant_id', tenant.id).eq('status', 'failed').order('created_at', { ascending: false }).limit(20)),
     queryAdminRows<Record<string, unknown>>('forecast_runs', (query) => query.eq('tenant_id', tenant.id).eq('status', 'failed').order('created_at', { ascending: false }).limit(20)),
@@ -430,6 +435,7 @@ protectedRouter.get('/tenants/:tenantId', async (req, res) => {
     })),
     billingTimeline: transactions.map((transaction) => ({ id: transaction.id, kind: transaction.kind, status: transaction.status, amountMinor: transaction.amount_minor, currency: transaction.currency, createdAt: transaction.created_at })),
     entitlements: overrides.map((override) => ({ id: override.id, entitlementKey: override.entitlement_key, overrideValue: override.override_value, justification: override.justification, ticketId: override.ticket_id, expiresAt: override.expires_at, revokedAt: override.revoked_at })),
+    privateOffers: privateOffers.map((offer) => ({ id: offer.id, basePlanKey: offer.base_plan_key, billingCycle: offer.billing_cycle, currency: offer.currency, baseAmountMinor: offer.negotiated_base_amount_minor, taxAmountMinor: offer.tax_amount_minor, totalAmountMinor: offer.total_amount_minor, trialDays: offer.trial_days, status: offer.status, latestActivationAt: offer.latest_activation_at, providerMode: offer.provider_mode, providerPlanId: offer.provider_plan_id, createdAt: offer.created_at })),
     operationalFailures: { emails: emailFailures, imports: importFailures, forecasts: forecastFailures },
   })
 })
@@ -538,6 +544,111 @@ protectedRouter.post('/entitlement-overrides', requireAdminRole('platform_owner'
   })
   await audit(req, 'admin.entitlement_override.created', { tenantId: parsed.data.tenantId, targetType: 'entitlement_override', targetId: String((override as { id: string }).id), ticketId: parsed.data.ticketId, reason: parsed.data.justification, afterSummary: { entitlementKey: parsed.data.entitlementKey, overrideValue: parsed.data.overrideValue, expiresAt: parsed.data.expiresAt.toISOString() } })
   return res.status(201).json({ override })
+})
+
+protectedRouter.post('/private-billing-offers', requireAdminRole('platform_owner'), requireFreshAdminStepUp, async (req, res) => {
+  const parsed = AdminPrivateOfferSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid private billing offer', details: parsed.error.flatten() })
+  const input = parsed.data
+  const tenant = await getRegionalTenant(input.tenantId)
+  if (!tenant) return res.status(404).json({ error: 'Tenant not found' })
+  if (input.latestActivationAt.getTime() <= Date.now()) return res.status(400).json({ error: 'Latest activation must be in the future' })
+
+  const region = backendAdminRegion()
+  const currency = region === 'IN' ? 'INR' : 'USD'
+  const taxRateBps = region === 'IN'
+    ? 1_800
+    : Math.max(0, Number.parseInt(process.env.INTERNATIONAL_SUBSCRIPTION_TAX_RATE_BPS ?? '0', 10) || 0)
+  const taxAmountMinor = Math.round(input.negotiatedBaseAmountMinor * taxRateBps / 10_000)
+  const totalAmountMinor = input.negotiatedBaseAmountMinor + taxAmountMinor
+  const client = privilegedSupabase()
+  const inserted = await client.from('private_billing_offers').insert({
+    tenant_id: input.tenantId,
+    region,
+    base_plan_key: input.basePlanKey,
+    billing_cycle: input.billingCycle,
+    currency,
+    negotiated_base_amount_minor: input.negotiatedBaseAmountMinor,
+    tax_rate_bps: taxRateBps,
+    tax_amount_minor: taxAmountMinor,
+    total_amount_minor: totalAmountMinor,
+    included_location_count: input.includedLocations,
+    included_register_count: input.includedRegisters,
+    included_user_count: input.includedUsers,
+    additional_location_unit_amount_minor: input.additionalLocationUnitAmountMinor,
+    additional_register_unit_amount_minor: input.additionalRegisterUnitAmountMinor,
+    additional_user_unit_amount_minor: input.additionalUserUnitAmountMinor,
+    trial_days: input.trialDays,
+    latest_activation_at: input.latestActivationAt.toISOString(),
+    price_validity: input.priceValidity,
+    fixed_billing_cycles: input.fixedBillingCycles,
+    provider_mode: getBillingMode(),
+    status: 'provisioning',
+    internal_reason: input.internalReason,
+    sales_reference: input.salesReference ?? null,
+    created_by: req.admin!.id,
+  }).select('*').single()
+  if (inserted.error || !inserted.data) return res.status(500).json({ error: 'Could not record the private offer' })
+
+  const offer = inserted.data as Record<string, unknown>
+  let providerPlan
+  try {
+    providerPlan = await createRazorpayPlan({
+      amountMinor: totalAmountMinor,
+      currency,
+      billingCycle: input.billingCycle,
+      name: `Ambel ${input.basePlanKey} private offer`,
+      description: `Private ${input.billingCycle} offer ${String(offer.id)}`,
+    })
+  } catch (error) {
+    await client.from('private_billing_offers').update({ status: 'provisioning_failed', updated_at: new Date().toISOString() }).eq('id', offer.id)
+    await audit(req, 'admin.private_billing_offer.provisioning_failed', {
+      tenantId: input.tenantId, targetType: 'private_billing_offer', targetId: String(offer.id), reason: input.internalReason,
+      afterSummary: { providerStatus: error instanceof RazorpayRequestError ? error.providerStatus : null },
+    })
+    return res.status(502).json({ error: 'Razorpay could not create the private Plan. No offer was shown to the owner.' })
+  }
+
+  const completed = await client.from('private_billing_offers').update({
+    provider_plan_id: providerPlan.id,
+    status: 'offered',
+    updated_at: new Date().toISOString(),
+  }).eq('id', offer.id).eq('status', 'provisioning').select('*').single()
+  if (completed.error || !completed.data) return res.status(500).json({ error: 'The Razorpay Plan was created but the offer could not be activated. Contact engineering with the audit ID.' })
+
+  if (input.trialDays > 0) {
+    const baseSnapshot = snapshotForPlan(region, input.basePlanKey)
+    const entitlementSnapshot = {
+      ...baseSnapshot,
+      planKey: input.basePlanKey,
+      limits: {
+        ...baseSnapshot.limits,
+        maxLocations: input.includedLocations,
+        maxActiveRegisters: input.includedRegisters,
+        maxActiveUsers: input.includedUsers,
+      },
+    }
+    const trial = await client.from('billing_trials').insert({
+      tenant_id: input.tenantId,
+      private_offer_id: offer.id,
+      region,
+      plan_key: input.basePlanKey,
+      entitlement_snapshot: entitlementSnapshot,
+      status: 'pending',
+      started_at: input.latestActivationAt.toISOString(),
+      latest_activation_at: input.latestActivationAt.toISOString(),
+    })
+    if (trial.error) return res.status(409).json({ error: 'Offer created, but this business already has an open trial. Close it before assigning another trial.' })
+  }
+
+  await audit(req, 'admin.private_billing_offer.created', {
+    tenantId: input.tenantId,
+    targetType: 'private_billing_offer',
+    targetId: String(offer.id),
+    reason: input.internalReason,
+    afterSummary: { basePlanKey: input.basePlanKey, billingCycle: input.billingCycle, currency, negotiatedBaseAmountMinor: input.negotiatedBaseAmountMinor, taxAmountMinor, totalAmountMinor, trialDays: input.trialDays },
+  })
+  return res.status(201).json({ offer: completed.data })
 })
 
 protectedRouter.post('/entitlement-overrides/:overrideId/revoke', requireAdminRole('platform_owner'), async (req, res) => {

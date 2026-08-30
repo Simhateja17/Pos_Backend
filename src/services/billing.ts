@@ -8,7 +8,9 @@ import {
   providerPlanId,
   includedStoresForPlan,
   type BillingPlanDefinition,
+  type BillingQuote,
 } from './billingCatalog'
+import { snapshotForPlan } from './entitlements'
 import {
   cancelRazorpaySubscription,
   createRazorpaySubscription,
@@ -67,6 +69,42 @@ async function findOpenSubscription(tenantId: string): Promise<any | null> {
   })
 }
 
+type PrivateOfferRow = {
+  id: string
+  tenant_id: string
+  region: string
+  base_plan_key: string
+  billing_cycle: 'monthly' | 'annual'
+  currency: 'INR' | 'USD'
+  negotiated_base_amount_minor: bigint | number
+  tax_amount_minor: bigint | number
+  total_amount_minor: bigint | number
+  tax_rate_bps: number
+  included_location_count: number
+  included_register_count: number
+  included_user_count: number
+  provider_plan_id: string
+  provider_mode: string
+  latest_activation_at: Date
+  status: string
+}
+
+async function privateOfferForCheckout(tenantId: string, offerId?: string): Promise<PrivateOfferRow | null> {
+  if (!offerId) return null
+  const client = forTenant(tenantId) as any
+  const rows = await client.$queryRaw<PrivateOfferRow[]>`
+    SELECT * FROM public.private_billing_offers
+    WHERE id = ${offerId}::uuid AND tenant_id = ${tenantId}::uuid
+    LIMIT 1
+  `
+  const offer = rows[0] ?? null
+  if (!offer || offer.status !== 'offered' || new Date(offer.latest_activation_at).getTime() <= Date.now()) {
+    throw new BillingHttpError(409, 'This private offer is no longer available')
+  }
+  if (offer.provider_mode !== getBillingMode()) throw new BillingHttpError(409, 'This offer belongs to a different Razorpay mode')
+  return offer
+}
+
 async function resumeUnpaidCreatedSubscription(
   tenantId: string,
   subscription: any,
@@ -78,6 +116,7 @@ async function resumeUnpaidCreatedSubscription(
     && !subscription.last_payment_id
     && subscription.plan_key === input.planKey
     && subscription.billing_cycle === input.billingCycle
+    && (subscription.private_offer_id ?? null) === (input.privateOfferId ?? null)
     && subscription.region === region
     && typeof subscription.attempt_id === 'string'
     && typeof subscription.provider_subscription_id === 'string'
@@ -117,7 +156,8 @@ async function supersedeUnpaidCreatedSubscription(
     && typeof subscription.provider_subscription_id === 'string'
 
   if (!isUnpaidCheckout) return null
-  if (subscription.plan_key === input.planKey && subscription.billing_cycle === input.billingCycle) return null
+  if (subscription.plan_key === input.planKey && subscription.billing_cycle === input.billingCycle
+    && (subscription.private_offer_id ?? null) === (input.privateOfferId ?? null)) return null
 
   const attempt = await findAttempt(tenantId, subscription.attempt_id)
   if (!attempt || attempt.provider_subscription_id !== subscription.provider_subscription_id) return null
@@ -307,6 +347,8 @@ function subscriptionResponse(attempt: any, region: BillingRegion) {
 async function projectSubscription(tenantId: string, attempt: any, provider: RazorpaySubscription): Promise<any> {
   const client = forTenant(tenantId) as any
   const providerStatus = projectedProviderStatus(provider)
+  const privateOffer = attempt.private_offer ?? await privateOfferForCheckout(tenantId, attempt.private_offer_id ?? undefined).catch(() => null)
+  const baseSnapshot = privateOffer ? snapshotForPlan(attempt.region, attempt.plan_key) : null
   return client.billing_subscriptions.upsert({
     where: { provider_subscription_id: provider.id },
     create: {
@@ -314,6 +356,7 @@ async function projectSubscription(tenantId: string, attempt: any, provider: Raz
       attempt_id: attempt.id,
       provider_subscription_id: provider.id,
       provider_plan_id: attempt.provider_plan_id,
+      private_offer_id: attempt.private_offer_id ?? null,
       region: attempt.region,
       plan_key: attempt.plan_key,
       billing_cycle: attempt.billing_cycle,
@@ -326,7 +369,16 @@ async function projectSubscription(tenantId: string, attempt: any, provider: Raz
       // bought a 3-shop plan keeps 3 shops even if that tier is later
       // redefined — repricing an existing customer by editing a config file
       // should not be possible by accident.
-      included_store_count: includedStoresForPlan(attempt.plan_key, attempt.region),
+      included_store_count: privateOffer?.included_location_count ?? includedStoresForPlan(attempt.plan_key, attempt.region),
+      entitlement_snapshot: privateOffer && baseSnapshot ? {
+        ...baseSnapshot,
+        limits: {
+          ...baseSnapshot.limits,
+          maxLocations: privateOffer.included_location_count,
+          maxActiveRegisters: privateOffer.included_register_count,
+          maxActiveUsers: privateOffer.included_user_count,
+        },
+      } : undefined,
       additional_store_count: 0,
       additional_register_count: 0,
       additional_user_count: 0,
@@ -380,11 +432,23 @@ async function reconcileAttempt(tenantId: string, attempt: any): Promise<any | n
 
 export async function createSubscription(tenantId: string, input: CreateSubscriptionInput) {
   const region = await tenantRegion(tenantId)
-  const plan = getPlan(region, input.planKey)
+  const privateOffer = await privateOfferForCheckout(tenantId, input.privateOfferId)
+  const requestedPlanKey = privateOffer?.base_plan_key ?? input.planKey
+  if (privateOffer && (privateOffer.billing_cycle !== input.billingCycle || privateOffer.region !== region || privateOffer.base_plan_key !== input.planKey)) {
+    throw new BillingHttpError(400, 'The selected plan or billing cycle does not match this private offer')
+  }
+  const plan = getPlan(region, requestedPlanKey)
   if (!plan) throw new BillingHttpError(400, 'That plan is not available for this account region')
-  const planProviderId = providerPlanId(plan, input.billingCycle)
+  const planProviderId = privateOffer?.provider_plan_id ?? providerPlanId(plan, input.billingCycle)
   if (!planProviderId) throw new BillingHttpError(503, 'This test plan is not connected to a Razorpay Plan ID yet')
-  const quote = calculateQuote(plan, input.billingCycle)
+  const quote: BillingQuote = privateOffer ? {
+    baseAmountMinor: amount(privateOffer.negotiated_base_amount_minor),
+    taxAmountMinor: amount(privateOffer.tax_amount_minor),
+    totalAmountMinor: amount(privateOffer.total_amount_minor),
+    taxRateBps: privateOffer.tax_rate_bps,
+    taxMode: 'exclusive',
+    taxLabel: privateOffer.tax_rate_bps > 0 ? `GST (${(privateOffer.tax_rate_bps / 100).toFixed(0)}%)` : 'No tax',
+  } : calculateQuote(plan, input.billingCycle)
   try {
     const providerPlan = await fetchRazorpayPlan(planProviderId)
     if (providerPlan.item?.amount !== quote.totalAmountMinor || providerPlan.item?.currency !== plan.currency) {
@@ -440,6 +504,7 @@ export async function createSubscription(tenantId: string, input: CreateSubscrip
           total_amount_minor: BigInt(quote.totalAmountMinor),
           tax_rate_bps: quote.taxRateBps,
           provider_plan_id: planProviderId,
+          private_offer_id: privateOffer?.id ?? null,
           status: 'creating',
         },
       })
@@ -517,7 +582,9 @@ export async function createSubscription(tenantId: string, input: CreateSubscrip
     throw new BillingHttpError(503, 'We could not confirm the payment provider response. Retry with the same payment attempt.')
   }
 
+  if (privateOffer) attempt.private_offer = privateOffer
   const updatedAttempt = await adoptProviderSubscription(tenantId, attempt, provider)
+  if (privateOffer) updatedAttempt.private_offer = privateOffer
   return subscriptionResponse(updatedAttempt, region)
 }
 
@@ -562,6 +629,10 @@ export async function verifySubscription(tenantId: string, input: {
       provider_payload: provider,
     },
   })
+  if (provider.status === 'active' && attempt.private_offer_id) {
+    await client.$executeRaw`UPDATE public.private_billing_offers SET status = 'accepted', accepted_at = now(), updated_at = now() WHERE id = ${attempt.private_offer_id}::uuid AND tenant_id = ${tenantId}::uuid AND status = 'offered'`
+    await client.$executeRaw`UPDATE public.billing_trials SET status = 'cancelled', updated_at = now() WHERE tenant_id = ${tenantId}::uuid AND status IN ('pending', 'active')`
+  }
 
   if (input.razorpayPaymentId) {
     try {

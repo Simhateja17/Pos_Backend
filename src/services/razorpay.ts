@@ -127,6 +127,28 @@ export type RazorpayPlan = {
   item?: { amount?: number; currency?: string }
 }
 
+export async function createRazorpayPlan(input: {
+  amountMinor: number
+  currency: 'INR' | 'USD'
+  billingCycle: 'monthly' | 'annual'
+  name: string
+  description: string
+}): Promise<RazorpayPlan> {
+  return razorpayRequest<RazorpayPlan>('/plans', {
+    method: 'POST',
+    body: JSON.stringify({
+      period: input.billingCycle === 'monthly' ? 'monthly' : 'yearly',
+      interval: 1,
+      item: {
+        name: input.name.slice(0, 120),
+        description: input.description.slice(0, 255),
+        amount: input.amountMinor,
+        currency: input.currency,
+      },
+    }),
+  })
+}
+
 export async function fetchRazorpayPlan(planId: string): Promise<RazorpayPlan> {
   return razorpayRequest<RazorpayPlan>(`/plans/${encodeURIComponent(planId)}`)
 }

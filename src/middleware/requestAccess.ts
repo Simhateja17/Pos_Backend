@@ -6,7 +6,7 @@ import {
   getCounterDeviceToken,
   hashCounterDeviceToken,
 } from '../lib/counterDevice'
-import { OPEN_SUBSCRIPTION_STATUSES, subscriptionAccessForRow } from '../services/billingAccess'
+import { OPEN_SUBSCRIPTION_STATUSES, subscriptionAccessForRow, trialAccessForRow } from '../services/billingAccess'
 import { verifyOperatorToken } from './pinSwitch'
 
 type StaffRole = 'owner' | 'manager' | 'cashier'
@@ -85,7 +85,47 @@ export async function resolveRequestAccess(
       },
       orderBy: { updated_at: 'desc' },
     })
-    const subscription = subscriptionAccessForRow(subscriptionRow, now)
+    let trialRow: any | null = null
+    if (!subscriptionRow && typeof tx.$queryRaw === 'function') {
+      let trials: any[] = []
+      try {
+        trials = await tx.$queryRaw<any[]>`
+          SELECT * FROM public.billing_trials
+          WHERE tenant_id = ${identity.tenantId}::uuid AND status IN ('pending', 'active')
+          ORDER BY created_at DESC LIMIT 1
+        `
+      } catch {
+        // A rolling deploy can briefly run before migration 0072. Paid
+        // subscription checks remain authoritative until the trial table is available.
+      }
+      trialRow = trials[0] ?? null
+      if (trialRow?.status === 'pending') {
+        if (trialRow.latest_activation_at && new Date(trialRow.latest_activation_at).getTime() <= now.getTime()) {
+          await tx.$executeRaw`UPDATE public.billing_trials SET status = 'expired', updated_at = now() WHERE id = ${trialRow.id}::uuid AND status = 'pending'`
+          trialRow = null
+        } else {
+          let offerRows: any[] = []
+          if (trialRow.private_offer_id) {
+            try {
+              offerRows = await tx.$queryRaw<any[]>`
+                SELECT trial_days FROM public.private_billing_offers WHERE id = ${trialRow.private_offer_id}::uuid LIMIT 1
+              `
+            } catch {
+              offerRows = []
+            }
+          }
+          const trialDays = Math.max(1, Number(offerRows[0]?.trial_days ?? 1))
+          const activated = await tx.$queryRaw<any[]>`
+            UPDATE public.billing_trials
+            SET status = 'active', started_at = ${now}, activated_at = ${now}, ends_at = ${now} + (${trialDays} * interval '1 day'), updated_at = now()
+            WHERE id = ${trialRow.id}::uuid AND status = 'pending'
+            RETURNING *
+          `
+          trialRow = activated[0] ?? trialRow
+        }
+      }
+    }
+    const subscription = subscriptionRow ? subscriptionAccessForRow(subscriptionRow, now) : trialAccessForRow(trialRow, now)
 
     // Grace expiry is the only authorization-path write that must happen
     // immediately. It runs once when the boundary is crossed, not per request.
