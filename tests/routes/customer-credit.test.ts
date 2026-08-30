@@ -13,6 +13,7 @@ const creditCreateMock = vi.fn()
 const storesFindManyMock = vi.fn()
 const staffFindFirstMock = vi.fn()
 const queryRawMock = vi.fn()
+const tenantFindFirstMock = vi.fn()
 
 const client = {
   customers: {
@@ -28,6 +29,7 @@ const client = {
   },
   stores: { findMany: storesFindManyMock },
   staff_members: { findFirst: staffFindFirstMock },
+  tenants: { findFirst: tenantFindFirstMock },
   $queryRaw: queryRawMock,
 }
 
@@ -126,6 +128,7 @@ describe('customer credit routes', () => {
     }))
     storesFindManyMock.mockResolvedValue([{ id: storeA, name: 'Main shop' }, { id: storeB, name: 'Second shop' }])
     staffFindFirstMock.mockResolvedValue({ id: staffId })
+    tenantFindFirstMock.mockResolvedValue({ country: 'IN' })
     queryRawMock.mockResolvedValue([{ id: customerId, credit_limit: null }])
   })
 
@@ -238,5 +241,35 @@ describe('customer credit routes', () => {
       where: { customer_id: { in: [customerId, secondCustomerId] }, tenant_id: 'tenant-a' },
     }))
   })
-})
 
+  it('keeps customer credit and receivables unavailable for international tenants', async () => {
+    tenantFindFirstMock.mockResolvedValue({ country: 'US' })
+
+    const customerApp = await buildCustomerApp('manager')
+    const creditResponse = await request(customerApp).get(`/customers/${customerId}/credit`)
+    expect(creditResponse.status).toBe(404)
+    expect(creditGroupByMock).not.toHaveBeenCalled()
+
+    const repaymentResponse = await request(customerApp)
+      .post(`/customers/${customerId}/credit/repayments`)
+      .send({ amount: '10.00' })
+    expect(repaymentResponse.status).toBe(404)
+    expect(creditCreateMock).not.toHaveBeenCalled()
+
+    const receivablesResponse = await request(await buildReceivablesApp()).get('/receivables')
+    expect(receivablesResponse.status).toBe(404)
+    expect(customerFindManyMock).not.toHaveBeenCalled()
+  })
+
+  it('does not allow an international tenant to set a credit limit', async () => {
+    tenantFindFirstMock.mockResolvedValue({ country: 'US' })
+    customerUpdateMock.mockResolvedValue(customerRow({ credit_limit: new Prisma.Decimal('1000.00') }))
+
+    const response = await request(await buildCustomerApp('manager'))
+      .patch(`/customers/${customerId}`)
+      .send({ creditLimit: '1000.00' })
+
+    expect(response.status).toBe(404)
+    expect(customerUpdateMock).not.toHaveBeenCalled()
+  })
+})

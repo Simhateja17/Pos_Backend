@@ -14,6 +14,7 @@
     "db:generate": "prisma generate",
     "db:verify-production": "node -r dotenv/config scripts/verify-production-schema.mjs",
     "generate:openapi": "tsx src/contracts/openapi.ts",
+    "master-items:generate": "tsx scripts/generate-master-item-seed.ts",
     "razorpay:plans": "tsx scripts/create-razorpay-plans.ts",
     "master-items:seed": "tsx scripts/seed-master-items.ts"
   },

@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { ReceivablesQuerySchema } from '../contracts/schemas/customerCredit'
 import { forTenantTransaction } from '../db/tenantClient'
 import { customerSearchWhere } from '../lib/customers'
-import { creditLimitString, getCustomerCreditTotals } from '../lib/customerCredit'
+import { creditLimitString, getCustomerCreditTotals, isIndiaTenant } from '../lib/customerCredit'
 
 const router = Router()
 
@@ -32,6 +32,8 @@ router.get('/', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: 'Invalid receivables query' })
 
   const result = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+    if (!(await isIndiaTenant(tx, req.user!.tenantId))) return null
+
     const where: any = {}
     if (parsed.data.search) where.OR = customerSearchWhere(parsed.data.search)
 
@@ -94,6 +96,7 @@ router.get('/', async (req, res) => {
     }
   })
 
+  if (!result) return res.status(404).json({ error: 'Receivables are not available for this account.' })
   return res.json(result)
 })
 

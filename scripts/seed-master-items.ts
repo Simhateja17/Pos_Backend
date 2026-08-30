@@ -47,21 +47,29 @@ async function main() {
   await client.connect()
   try {
     await client.query('begin')
-    for (const row of rows) {
+    const columns = '(region, canonical_name, brand, category, subcategory, pack_size, unit, sell_unit, barcode, aliases, source, verified_at)'
+    const insertValues = (batch: typeof rows) => batch.map((_, index) => {
+      const offset = index * 12
+      return `(${Array.from({ length: 12 }, (_value, valueIndex) => `$${offset + valueIndex + 1}`).join(',')})`
+    }).join(',')
+    for (let start = 0; start < rows.length; start += 250) {
+      const batch = rows.slice(start, start + 250)
+      const parameters = batch.flatMap((row) => [
+        region, row.name, row.brand ?? null, row.category, row.subcategory ?? null,
+        row.packSize ?? null, row.unit, row.sellUnit, row.barcode ?? null,
+        [...new Set(row.aliases.map((alias) => alias.toLocaleLowerCase()))],
+        row.source ?? null, row.verifiedAt ?? null,
+      ])
       await client.query(
-        `insert into public.master_items
-          (region, canonical_name, brand, category, subcategory, pack_size, unit, sell_unit, barcode, aliases, source, verified_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        `insert into public.master_items ${columns}
+         values ${insertValues(batch)}
          on conflict (region, canonical_name, brand, pack_size, unit)
          do update set category=excluded.category, subcategory=excluded.subcategory,
            barcode=coalesce(excluded.barcode, master_items.barcode), aliases=excluded.aliases,
            source=coalesce(excluded.source, master_items.source),
            verified_at=coalesce(excluded.verified_at, master_items.verified_at),
            is_active=true, updated_at=now()`,
-        [region, row.name, row.brand ?? null, row.category, row.subcategory ?? null,
-          row.packSize ?? null, row.unit, row.sellUnit, row.barcode ?? null,
-          [...new Set(row.aliases.map((alias) => alias.toLocaleLowerCase()))],
-          row.source ?? null, row.verifiedAt ?? null],
+        parameters,
       )
     }
     await client.query('commit')

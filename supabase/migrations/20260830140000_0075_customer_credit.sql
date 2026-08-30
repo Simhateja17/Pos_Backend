@@ -112,6 +112,8 @@ begin
 end;
 $$;
 
+revoke execute on function public.validate_customer_credit_transaction() from anon, authenticated, public;
+
 drop trigger if exists customer_credit_transactions_validate on public.customer_credit_transactions;
 create trigger customer_credit_transactions_validate
 before insert on public.customer_credit_transactions
@@ -129,4 +131,3 @@ create policy tenant_isolation_customer_credit_transactions
 -- cannot edit or delete historical entries.  Corrections use offsetting rows.
 revoke update, delete on public.customer_credit_transactions from public, app_runtime;
 grant select, insert on public.customer_credit_transactions to app_runtime;
-

@@ -19,6 +19,7 @@ import {
 import {
   creditLimitString,
   getCustomerCreditTotalsForCustomer,
+  isIndiaTenant,
   lockCustomerForCredit,
   moneyString,
   resolveCreditRecorder,
@@ -170,6 +171,8 @@ router.get('/:customerId/credit', async (req, res) => {
   const customerId = req.params.customerId as string
 
   const result = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+    if (!(await isIndiaTenant(tx, req.user!.tenantId))) return null
+
     const customer = await tx.customers.findFirst({
       where: { id: customerId },
       select: { id: true, credit_limit: true },
@@ -216,6 +219,10 @@ router.post('/:customerId/credit/repayments', requireRole('cashier'), async (req
   }
 
   const result = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+    if (!(await isIndiaTenant(tx, req.user!.tenantId))) {
+      return { status: 404 as const, body: { error: 'Customer credit is not available for this account.' } }
+    }
+
     const customer = await lockCustomerForCredit(tx, customerId)
     if (!customer) return { status: 404 as const, body: { error: 'Customer not found' } }
 
@@ -406,15 +413,16 @@ router.patch('/:customerId', requireRole('cashier'), async (req, res) => {
     }
 
     const { creditLimit: _creditLimit, credit_limit: _snakeCreditLimit, ...profileFields } = parsed.data
-    const customer = await forTenantTransaction(req.user!.tenantId, (tx) =>
-      updateCustomer(tx, req.user!.tenantId, customerId, {
+    const customer = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+      if (requestedCreditLimit !== undefined && !(await isIndiaTenant(tx, req.user!.tenantId))) return null
+      return updateCustomer(tx, req.user!.tenantId, customerId, {
         ...profileFields,
         ...(requestedCreditLimit !== undefined ? { creditLimit: requestedCreditLimit } : {}),
         // Legacy clients may still send `name`; treat it as the same billing
         // identity instead of allowing two names to drift apart.
         billingName: parsed.data.billingName !== undefined ? parsed.data.billingName : parsed.data.name,
-      }),
-    )
+      })
+    })
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
     return res.json(toCustomerJson(customer))
   } catch (error) {

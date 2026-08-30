@@ -32,7 +32,7 @@ create index idx_master_items_region_category
   where is_active;
 create index idx_master_items_search_trgm
   on public.master_items using gin (
-    (lower(canonical_name || ' ' || coalesce(brand, '') || ' ' || array_to_string(aliases, ' '))) extensions.gin_trgm_ops
+    (lower(canonical_name || ' ' || coalesce(brand, ''))) extensions.gin_trgm_ops
   );
 create unique index idx_master_items_region_barcode
   on public.master_items (region, barcode)

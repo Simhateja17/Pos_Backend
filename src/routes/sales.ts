@@ -97,7 +97,7 @@ function toPaymentJson(row: any) {
     saleId: row.sale_id,
     method: row.method,
     direction: row.direction,
-    amount: row.amount.toString(),
+    amount: moneyString(row.amount),
     referenceCode: row.reference_code,
     createdBy: row.created_by,
     createdAt: row.created_at.toISOString(),
@@ -114,11 +114,11 @@ function toLineJson(row: any) {
     color: row.variants?.color ?? null,
     material: row.variants?.material ?? null,
     quantity: Number(row.quantity),
-    unitPrice: row.unit_price.toString(),
+    unitPrice: moneyString(row.unit_price),
     discountPercent: row.discount_percent ? row.discount_percent.toString() : null,
-    discountAmount: row.discount_amount.toString(),
+    discountAmount: moneyString(row.discount_amount),
     isTaxable: row.is_taxable,
-    lineTotal: row.line_total.toString(),
+    lineTotal: moneyString(row.line_total),
   }
 }
 
@@ -187,12 +187,12 @@ function toSaleJson(
     clientSaleId: sale.client_sale_id,
     shiftId: sale.shift_id,
     customerId: sale.customer_id,
-    subtotal: sale.subtotal.toString(),
-    discountAmount: sale.discount_amount.toString(),
-    taxAmount: sale.tax_amount.toString(),
-    totalAmount: sale.total_amount.toString(),
-    cashReceived: sale.cash_received?.toString() ?? null,
-    changeDue: sale.change_due?.toString() ?? '0.00',
+    subtotal: moneyString(sale.subtotal),
+    discountAmount: moneyString(sale.discount_amount),
+    taxAmount: moneyString(sale.tax_amount),
+    totalAmount: moneyString(sale.total_amount),
+    cashReceived: sale.cash_received === null || sale.cash_received === undefined ? null : moneyString(sale.cash_received),
+    changeDue: moneyString(sale.change_due),
     status: sale.status,
     createdBy: sale.created_by,
     createdAt: sale.created_at.toISOString(),
@@ -322,6 +322,7 @@ async function enqueueHardwareOutputs(input: {
   createdBy: string | null
 }) {
   await forTenantTransaction(input.tenantId, async (tx) => {
+    if (typeof tx.hardware_companions?.findFirst !== 'function') return
     const companion = await tx.hardware_companions.findFirst({
       where: { terminal_id: input.terminalId, store_id: input.storeId, revoked_at: null },
       select: { id: true, capabilities: true },

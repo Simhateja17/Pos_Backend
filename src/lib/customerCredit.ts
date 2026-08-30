@@ -12,7 +12,22 @@ export type CreditTotals = {
 
 export function moneyString(value: Prisma.Decimal | string | number | null | undefined): string {
   if (value === null || value === undefined) return '0.00'
-  return new Prisma.Decimal(value).toFixed(2)
+  // Prisma Decimal values and the lightweight Decimal-shaped objects used by
+  // route adapters/tests both expose the same stable string representation.
+  return new Prisma.Decimal(value.toString()).toFixed(2)
+}
+
+/**
+ * Customer credit is an India-only operating capability. Treat a missing
+ * tenant row or country as unavailable rather than silently defaulting to
+ * India at a financial boundary.
+ */
+export async function isIndiaTenant(client: any, tenantId: string): Promise<boolean> {
+  const tenant = await client.tenants.findFirst({
+    where: { id: tenantId },
+    select: { country: true },
+  })
+  return (tenant?.country ?? '').trim().toUpperCase() === 'IN'
 }
 
 function emptyTotals(): CreditTotals {
