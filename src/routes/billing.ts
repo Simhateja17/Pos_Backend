@@ -13,6 +13,56 @@ import { forTenant } from '../db/tenantClient'
 
 const router = Router()
 
+function privateOfferCatalog(tenantRegion: ReturnType<typeof regionForCountry>, offer: any) {
+  const base = getPlan(tenantRegion, offer.base_plan_key)
+  if (!base) return null
+
+  const option = toPlanOption({
+    ...base,
+    name: `${base.name} · Private offer`,
+    description: 'Your negotiated Ambel subscription offer.',
+    popular: false,
+    entitlements: {
+      ...base.entitlements,
+      maxLocations: offer.included_location_count,
+      maxActiveRegisters: offer.included_register_count,
+      maxActiveUsers: offer.included_user_count,
+    },
+    features: [
+      `${offer.included_location_count} locations`,
+      `${offer.included_register_count} active registers`,
+      `${offer.included_user_count} active users`,
+      ...base.features.filter((feature) => !/location|register|user/i.test(feature)),
+    ],
+    monthly: offer.billing_cycle === 'monthly'
+      ? { amountMinor: Number(offer.total_amount_minor), taxRateBps: 0, providerPlanId: offer.provider_plan_id }
+      : { amountMinor: 0 },
+    annual: offer.billing_cycle === 'annual'
+      ? { amountMinor: Number(offer.total_amount_minor), taxRateBps: 0, providerPlanId: offer.provider_plan_id }
+      : { amountMinor: 0 },
+  })
+  const offeredCycle: 'monthly' | 'annual' = offer.billing_cycle === 'annual' ? 'annual' : 'monthly'
+  option[offeredCycle] = {
+    baseAmountMinor: Number(offer.negotiated_base_amount_minor),
+    taxAmountMinor: Number(offer.tax_amount_minor),
+    totalAmountMinor: Number(offer.total_amount_minor),
+    taxRateBps: offer.tax_rate_bps,
+    taxMode: 'exclusive',
+    taxLabel: offer.tax_rate_bps > 0 ? `GST (${offer.tax_rate_bps / 100}%)` : 'No tax',
+  }
+  return {
+    mode: billingMode(),
+    region: tenantRegion,
+    plans: [option],
+    privateOfferId: offer.id,
+    billingCycle: offeredCycle,
+    trialDurationMinutes: Number(offer.trial_duration_minutes ?? 0) > 0
+      ? Number(offer.trial_duration_minutes)
+      : Number(offer.trial_days ?? 0) * 1440,
+    latestActivationAt: offer.latest_activation_at,
+  }
+}
+
 router.get('/plans', async (req, res) => {
   const requested = BillingRegionSchema.safeParse(req.query.region)
   const client = forTenant(req.user!.tenantId) as any
@@ -32,42 +82,41 @@ router.get('/plans', async (req, res) => {
     `
     const offer = offers[0]
     if (!offer) return res.status(404).json({ error: 'This private offer is no longer available' })
-    const base = getPlan(tenantRegion, offer.base_plan_key)
-    if (!base) return res.status(409).json({ error: 'The base plan for this offer is unavailable' })
-    const option = toPlanOption({
-      ...base,
-      name: `${base.name} · Private offer`,
-      description: 'Your negotiated Ambel subscription offer.',
-      popular: false,
-      entitlements: {
-        ...base.entitlements,
-        maxLocations: offer.included_location_count,
-        maxActiveRegisters: offer.included_register_count,
-        maxActiveUsers: offer.included_user_count,
-      },
-      features: [
-        `${offer.included_location_count} locations`,
-        `${offer.included_register_count} active registers`,
-        `${offer.included_user_count} active users`,
-        ...base.features.filter((feature) => !/location|register|user/i.test(feature)),
-      ],
-      monthly: offer.billing_cycle === 'monthly'
-        ? { amountMinor: Number(offer.total_amount_minor), taxRateBps: 0, providerPlanId: offer.provider_plan_id }
-        : { amountMinor: 0 },
-      annual: offer.billing_cycle === 'annual'
-        ? { amountMinor: Number(offer.total_amount_minor), taxRateBps: 0, providerPlanId: offer.provider_plan_id }
-        : { amountMinor: 0 },
-    })
-    const offeredCycle: 'monthly' | 'annual' = offer.billing_cycle === 'annual' ? 'annual' : 'monthly'
-    option[offeredCycle] = {
-      baseAmountMinor: Number(offer.negotiated_base_amount_minor),
-      taxAmountMinor: Number(offer.tax_amount_minor),
-      totalAmountMinor: Number(offer.total_amount_minor),
-      taxRateBps: offer.tax_rate_bps,
-      taxMode: 'exclusive',
-      taxLabel: offer.tax_rate_bps > 0 ? `GST (${offer.tax_rate_bps / 100}%)` : 'No tax',
+    const catalog = privateOfferCatalog(tenantRegion, offer)
+    if (!catalog) return res.status(409).json({ error: 'The base plan for this offer is unavailable' })
+    return res.json(catalog)
+  }
+
+  // A blocked owner can arrive here from an old bookmark, a cached redirect,
+  // or a browser that dropped the query string. Keep the negotiated offer
+  // authoritative in that recovery case instead of silently showing the
+  // public catalogue. Active trials and paid subscribers retain the normal
+  // plan catalogue, and managers/cashiers never receive another tenant's
+  // private offer details.
+  const effectiveRole = req.actingStaff?.role ?? req.user!.role
+  if (!offerId && effectiveRole === 'owner') {
+    let entitlement: Awaited<ReturnType<typeof getEntitlementSummary>> | null = null
+    try {
+      entitlement = await getEntitlementSummary(req.user!.tenantId)
+    } catch {
+      // Keep the catalogue endpoint usable during a rolling migration or a
+      // transient read-model failure. The explicit offer URL remains strict.
     }
-    return res.json({ mode: billingMode(), region: tenantRegion, plans: [option], privateOfferId: offer.id, billingCycle: offeredCycle, trialDurationMinutes: Number(offer.trial_duration_minutes ?? 0) > 0 ? Number(offer.trial_duration_minutes) : Number(offer.trial_days ?? 0) * 1440, latestActivationAt: offer.latest_activation_at })
+    if (entitlement && !entitlement.access.accessAllowed) {
+      const offers = await client.$queryRaw<any[]>`
+        SELECT * FROM public.private_billing_offers
+        WHERE tenant_id = ${req.user!.tenantId}::uuid
+          AND status = 'offered' AND latest_activation_at > now()
+        ORDER BY created_at DESC
+        LIMIT 1
+      `
+      const offer = offers[0]
+      if (offer) {
+        const catalog = privateOfferCatalog(tenantRegion, offer)
+        if (!catalog) return res.status(409).json({ error: 'The base plan for this offer is unavailable' })
+        return res.json(catalog)
+      }
+    }
   }
   return res.json({ mode: billingMode(), region: tenantRegion, plans: getPlans(tenantRegion).map(toPlanOption) })
 })
