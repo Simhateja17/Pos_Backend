@@ -339,6 +339,39 @@ export async function countAdminRows(table: string, builder?: (query: any) => an
   return result.count ?? 0
 }
 
+export type AdminTenantListRow = {
+  id: string
+  business_name: string
+  trade_name: string | null
+  country: string | null
+  city: string | null
+  created_at: string
+}
+
+/**
+ * Return a bounded, newest-first tenant page for the configured region. The
+ * database itself is already regional; the country predicate is a second
+ * server-side guard that mirrors the tenant-detail boundary in admin routes.
+ */
+export async function listRegionalTenants(limit = 20, offset = 0): Promise<{ rows: AdminTenantListRow[]; total: number }> {
+  const client = privilegedSupabase()
+  let query = client.from('tenants')
+    .select('id,business_name,trade_name,country,city,created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  query = backendAdminRegion() === 'IN'
+    ? query.eq('country', 'IN')
+    : query.not('country', 'ilike', 'IN')
+
+  const result = await query
+  if (result.error) throwDbError('list regional tenants', result.error)
+  return {
+    rows: (result.data ?? []) as AdminTenantListRow[],
+    total: result.count ?? 0,
+  }
+}
+
 export async function updateAdminRows(table: string, patch: Record<string, unknown>, builder: (query: any) => any): Promise<number> {
   const result = await builder(privilegedSupabase().from(table).update(patch))
   if (result.error) throwDbError(`update ${table}`, result.error)

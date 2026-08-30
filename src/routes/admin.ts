@@ -32,6 +32,7 @@ import {
   insertSupportRequest,
   inviteAuthUser,
   listAdminFactors,
+  listRegionalTenants,
   listPlatformAdmins,
   listSupportRequests,
   privilegedSupabase,
@@ -284,6 +285,61 @@ protectedRouter.get('/overview', async (req, res) => {
     subscriptions: { active: activeSubscriptions, expired: expiredSubscriptions },
     activeMerchantUsers: staff,
     operationalFailures: { windowHours: 24, emails: failedEmails, imports: failedImports, forecasts: failedForecasts },
+  })
+})
+
+protectedRouter.get('/tenants/recent', async (req, res) => {
+  const parsed = AdminListSchema.safeParse(req.query)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid list pagination' })
+  const { limit, cursor } = parsed.data
+  const page = await listRegionalTenants(limit, cursor)
+  const tenantIds = page.rows.map((tenant) => tenant.id)
+  const [staff, subscriptions] = tenantIds.length === 0
+    ? [[], []]
+    : await Promise.all([
+        queryAdminRows<Record<string, unknown>>('staff_members', (query) => query.in('tenant_id', tenantIds)),
+        queryAdminRows<Record<string, unknown>>('billing_subscriptions', (query) => query.in('tenant_id', tenantIds).order('updated_at', { ascending: false })),
+      ])
+
+  const staffByTenant = new Map<string, { total: number; active: number }>()
+  for (const member of staff) {
+    if (typeof member.tenant_id !== 'string') continue
+    const current = staffByTenant.get(member.tenant_id) ?? { total: 0, active: 0 }
+    current.total += 1
+    if (member.is_active === true) current.active += 1
+    staffByTenant.set(member.tenant_id, current)
+  }
+
+  const activeSubscriptionStatuses = new Set(['created', 'authenticated', 'active', 'pending', 'halted'])
+  const subscriptionsByTenant = new Map<string, { total: number; active: number; latestStatus: string | null }>()
+  for (const subscription of subscriptions) {
+    if (typeof subscription.tenant_id !== 'string') continue
+    const current = subscriptionsByTenant.get(subscription.tenant_id) ?? { total: 0, active: 0, latestStatus: null }
+    current.total += 1
+    if (activeSubscriptionStatuses.has(String(subscription.status ?? '').toLowerCase())) current.active += 1
+    if (!current.latestStatus) current.latestStatus = typeof subscription.status === 'string' ? subscription.status : null
+    subscriptionsByTenant.set(subscription.tenant_id, current)
+  }
+
+  await audit(req, 'admin.tenants.recent_viewed', { afterSummary: { resultCount: page.rows.length, offset: cursor, limit } })
+  return res.json({
+    region: backendAdminRegion(),
+    total: page.total,
+    cursor,
+    limit,
+    results: page.rows.map((tenant) => ({
+      id: tenant.id,
+      businessName: tenant.business_name,
+      tradeName: tenant.trade_name ?? null,
+      country: tenant.country,
+      city: tenant.city,
+      createdAt: tenant.created_at,
+      userCount: staffByTenant.get(tenant.id)?.total ?? 0,
+      activeUserCount: staffByTenant.get(tenant.id)?.active ?? 0,
+      subscriptionCount: subscriptionsByTenant.get(tenant.id)?.total ?? 0,
+      activeSubscriptionCount: subscriptionsByTenant.get(tenant.id)?.active ?? 0,
+      latestSubscriptionStatus: subscriptionsByTenant.get(tenant.id)?.latestStatus ?? null,
+    })),
   })
 })
 
