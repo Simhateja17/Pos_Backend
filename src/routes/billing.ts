@@ -9,7 +9,7 @@ import { requireRole } from '../middleware/requireRole'
 import { cancelSubscription, createSubscription, getBillingStatus, billingMode, regionForCountry, verifySubscription } from '../services/billing'
 import { canonicalBillingRegion, getPlan, getPlans, toPlanOption } from '../services/billingCatalog'
 import { entitlementStatusFields, getEntitlementSummary } from '../services/entitlements'
-import { forTenant } from '../db/tenantClient'
+import { forTenant, forTenantTransaction } from '../db/tenantClient'
 
 const router = Router()
 
@@ -74,12 +74,12 @@ router.get('/plans', async (req, res) => {
   }
   const offerId = typeof req.query.offer === 'string' ? req.query.offer : null
   if (offerId && /^[0-9a-f-]{36}$/i.test(offerId)) {
-    const offers = await client.$queryRaw<any[]>`
-      SELECT * FROM public.private_billing_offers
-      WHERE id = ${offerId}::uuid AND tenant_id = ${req.user!.tenantId}::uuid
-        AND status = 'offered' AND latest_activation_at > now()
-      LIMIT 1
-    `
+    const offers = await forTenantTransaction<any[]>(req.user!.tenantId, (tx) => tx.$queryRaw<any[]>`
+        SELECT * FROM public.private_billing_offers
+        WHERE id = ${offerId}::uuid AND tenant_id = ${req.user!.tenantId}::uuid
+          AND status = 'offered' AND latest_activation_at > now()
+        LIMIT 1
+      `)
     const offer = offers[0]
     if (!offer) return res.status(404).json({ error: 'This private offer is no longer available' })
     const catalog = privateOfferCatalog(tenantRegion, offer)
@@ -95,13 +95,13 @@ router.get('/plans', async (req, res) => {
   // managers/cashiers never receive another tenant's private offer details.
   const effectiveRole = req.actingStaff?.role ?? req.user!.role
   if (!offerId && effectiveRole === 'owner') {
-    const offers = await client.$queryRaw<any[]>`
-      SELECT * FROM public.private_billing_offers
-      WHERE tenant_id = ${req.user!.tenantId}::uuid
-        AND status = 'offered' AND latest_activation_at > now()
-      ORDER BY created_at DESC
-      LIMIT 1
-    `
+    const offers = await forTenantTransaction<any[]>(req.user!.tenantId, (tx) => tx.$queryRaw<any[]>`
+        SELECT * FROM public.private_billing_offers
+        WHERE tenant_id = ${req.user!.tenantId}::uuid
+          AND status = 'offered' AND latest_activation_at > now()
+        ORDER BY created_at DESC
+        LIMIT 1
+      `)
     const offer = offers[0]
     if (offer) {
       const catalog = privateOfferCatalog(tenantRegion, offer)
@@ -113,17 +113,16 @@ router.get('/plans', async (req, res) => {
 })
 
 router.get('/private-offers', requireRole('owner'), async (req, res) => {
-  const client = forTenant(req.user!.tenantId) as any
-  const offers = await client.$queryRaw<any[]>`
-    SELECT id, base_plan_key, billing_cycle, currency, negotiated_base_amount_minor,
-      tax_amount_minor, total_amount_minor, tax_rate_bps, included_location_count,
-      included_register_count, included_user_count, trial_days, trial_duration_minutes, latest_activation_at,
-      price_validity, fixed_billing_cycles, status, created_at
-    FROM public.private_billing_offers
-    WHERE tenant_id = ${req.user!.tenantId}::uuid
-      AND (status = 'accepted' OR (status = 'offered' AND latest_activation_at > now()))
-    ORDER BY created_at DESC
-  `
+  const offers = await forTenantTransaction<any[]>(req.user!.tenantId, (tx) => tx.$queryRaw<any[]>`
+      SELECT id, base_plan_key, billing_cycle, currency, negotiated_base_amount_minor,
+        tax_amount_minor, total_amount_minor, tax_rate_bps, included_location_count,
+        included_register_count, included_user_count, trial_days, trial_duration_minutes, latest_activation_at,
+        price_validity, fixed_billing_cycles, status, created_at
+      FROM public.private_billing_offers
+      WHERE tenant_id = ${req.user!.tenantId}::uuid
+        AND (status = 'accepted' OR (status = 'offered' AND latest_activation_at > now()))
+      ORDER BY created_at DESC
+    `)
   return res.json({ offers: offers.map((offer: any) => ({
     id: offer.id, basePlanKey: offer.base_plan_key, billingCycle: offer.billing_cycle,
     currency: offer.currency, baseAmountMinor: Number(offer.negotiated_base_amount_minor),

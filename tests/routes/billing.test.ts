@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
     tenants: { findFirst: vi.fn(async () => ({ country: 'IN' })) },
+  })),
+  forTenantTransaction: vi.fn((_tenantId: string, fn: (tx: any) => Promise<any>) => fn({
     $queryRaw: mocks.queryRaw,
   })),
 }))
