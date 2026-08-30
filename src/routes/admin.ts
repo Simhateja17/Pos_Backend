@@ -435,7 +435,7 @@ protectedRouter.get('/tenants/:tenantId', async (req, res) => {
     })),
     billingTimeline: transactions.map((transaction) => ({ id: transaction.id, kind: transaction.kind, status: transaction.status, amountMinor: transaction.amount_minor, currency: transaction.currency, createdAt: transaction.created_at })),
     entitlements: overrides.map((override) => ({ id: override.id, entitlementKey: override.entitlement_key, overrideValue: override.override_value, justification: override.justification, ticketId: override.ticket_id, expiresAt: override.expires_at, revokedAt: override.revoked_at })),
-    privateOffers: privateOffers.map((offer) => ({ id: offer.id, basePlanKey: offer.base_plan_key, billingCycle: offer.billing_cycle, currency: offer.currency, baseAmountMinor: offer.negotiated_base_amount_minor, taxAmountMinor: offer.tax_amount_minor, totalAmountMinor: offer.total_amount_minor, trialDays: offer.trial_days, status: offer.status, latestActivationAt: offer.latest_activation_at, providerMode: offer.provider_mode, providerPlanId: offer.provider_plan_id, createdAt: offer.created_at })),
+    privateOffers: privateOffers.map((offer) => ({ id: offer.id, basePlanKey: offer.base_plan_key, billingCycle: offer.billing_cycle, currency: offer.currency, baseAmountMinor: offer.negotiated_base_amount_minor, taxAmountMinor: offer.tax_amount_minor, totalAmountMinor: offer.total_amount_minor, trialDurationMinutes: Number(offer.trial_duration_minutes ?? 0) > 0 ? Number(offer.trial_duration_minutes) : Number(offer.trial_days ?? 0) * 1440, status: offer.status, latestActivationAt: offer.latest_activation_at, providerMode: offer.provider_mode, providerPlanId: offer.provider_plan_id, createdAt: offer.created_at })),
     operationalFailures: { emails: emailFailures, imports: importFailures, forecasts: forecastFailures },
   })
 })
@@ -578,7 +578,8 @@ protectedRouter.post('/private-billing-offers', requireAdminRole('platform_owner
     additional_location_unit_amount_minor: input.additionalLocationUnitAmountMinor,
     additional_register_unit_amount_minor: input.additionalRegisterUnitAmountMinor,
     additional_user_unit_amount_minor: input.additionalUserUnitAmountMinor,
-    trial_days: input.trialDays,
+    trial_days: Math.ceil(input.trialDurationMinutes / 1440),
+    trial_duration_minutes: input.trialDurationMinutes,
     latest_activation_at: input.latestActivationAt.toISOString(),
     price_validity: input.priceValidity,
     fixed_billing_cycles: input.fixedBillingCycles,
@@ -616,7 +617,7 @@ protectedRouter.post('/private-billing-offers', requireAdminRole('platform_owner
   }).eq('id', offer.id).eq('status', 'provisioning').select('*').single()
   if (completed.error || !completed.data) return res.status(500).json({ error: 'The Razorpay Plan was created but the offer could not be activated. Contact engineering with the audit ID.' })
 
-  if (input.trialDays > 0) {
+  if (input.trialDurationMinutes > 0) {
     const baseSnapshot = snapshotForPlan(region, input.basePlanKey)
     const entitlementSnapshot = {
       ...baseSnapshot,
@@ -646,7 +647,7 @@ protectedRouter.post('/private-billing-offers', requireAdminRole('platform_owner
     targetType: 'private_billing_offer',
     targetId: String(offer.id),
     reason: input.internalReason,
-    afterSummary: { basePlanKey: input.basePlanKey, billingCycle: input.billingCycle, currency, negotiatedBaseAmountMinor: input.negotiatedBaseAmountMinor, taxAmountMinor, totalAmountMinor, trialDays: input.trialDays },
+    afterSummary: { basePlanKey: input.basePlanKey, billingCycle: input.billingCycle, currency, negotiatedBaseAmountMinor: input.negotiatedBaseAmountMinor, taxAmountMinor, totalAmountMinor, trialDurationMinutes: input.trialDurationMinutes },
   })
   return res.status(201).json({ offer: completed.data })
 })

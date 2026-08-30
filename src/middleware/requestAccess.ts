@@ -108,16 +108,17 @@ export async function resolveRequestAccess(
           if (trialRow.private_offer_id) {
             try {
               offerRows = await tx.$queryRaw<any[]>`
-                SELECT trial_days FROM public.private_billing_offers WHERE id = ${trialRow.private_offer_id}::uuid LIMIT 1
+                SELECT trial_days, trial_duration_minutes FROM public.private_billing_offers WHERE id = ${trialRow.private_offer_id}::uuid LIMIT 1
               `
             } catch {
               offerRows = []
             }
           }
-          const trialDays = Math.max(1, Number(offerRows[0]?.trial_days ?? 1))
+          const storedMinutes = Number(offerRows[0]?.trial_duration_minutes ?? 0)
+          const trialMinutes = Math.max(1, storedMinutes > 0 ? storedMinutes : Number(offerRows[0]?.trial_days ?? 1) * 1440)
           const activated = await tx.$queryRaw<any[]>`
             UPDATE public.billing_trials
-            SET status = 'active', started_at = ${now}, activated_at = ${now}, ends_at = ${now} + (${trialDays} * interval '1 day'), updated_at = now()
+            SET status = 'active', started_at = ${now}, activated_at = ${now}, ends_at = ${now} + (${trialMinutes} * interval '1 minute'), updated_at = now()
             WHERE id = ${trialRow.id}::uuid AND status = 'pending'
             RETURNING *
           `

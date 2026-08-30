@@ -145,6 +145,25 @@ describe('resolveRequestAccess', () => {
     expect(sessionUpdateMany).not.toHaveBeenCalled()
   })
 
+  it('activates a private trial using its exact minute duration', async () => {
+    const queryRaw = vi.fn()
+      .mockResolvedValueOnce([{ id: 'trial-1', status: 'pending', private_offer_id: 'offer-1', latest_activation_at: new Date(Date.now() + 60_000) }])
+      .mockResolvedValueOnce([{ trial_days: 1, trial_duration_minutes: 5 }])
+      .mockResolvedValueOnce([{ id: 'trial-1', status: 'active', ends_at: new Date(Date.now() + 5 * 60_000), entitlement_snapshot: {} }])
+    const tx = transaction({
+      billing_subscriptions: { findFirst: vi.fn().mockResolvedValue(null), updateMany: vi.fn() },
+      $queryRaw: queryRaw,
+      $executeRaw: vi.fn(),
+    })
+    tenantMocks.forTenantTransaction.mockImplementationOnce(async (_tenantId, callback) => callback(tx))
+
+    await resolveRequestAccess(requestWith(), identity)
+
+    const activation = queryRaw.mock.calls[2]
+    expect(activation[0].join('')).toContain("interval '1 minute'")
+    expect(activation.slice(1)).toContain(5)
+  })
+
   it('rejects a durable operator session bound to a different terminal', async () => {
     const tx = transaction({
       terminals: {

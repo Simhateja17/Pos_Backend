@@ -67,7 +67,7 @@ router.get('/plans', async (req, res) => {
       taxMode: 'exclusive',
       taxLabel: offer.tax_rate_bps > 0 ? `GST (${offer.tax_rate_bps / 100}%)` : 'No tax',
     }
-    return res.json({ mode: billingMode(), region: tenantRegion, plans: [option], privateOfferId: offer.id, trialDays: offer.trial_days, latestActivationAt: offer.latest_activation_at })
+    return res.json({ mode: billingMode(), region: tenantRegion, plans: [option], privateOfferId: offer.id, trialDurationMinutes: Number(offer.trial_duration_minutes ?? 0) > 0 ? Number(offer.trial_duration_minutes) : Number(offer.trial_days ?? 0) * 1440, latestActivationAt: offer.latest_activation_at })
   }
   return res.json({ mode: billingMode(), region: tenantRegion, plans: getPlans(tenantRegion).map(toPlanOption) })
 })
@@ -77,7 +77,7 @@ router.get('/private-offers', requireRole('owner'), async (req, res) => {
   const offers = await client.$queryRaw<any[]>`
     SELECT id, base_plan_key, billing_cycle, currency, negotiated_base_amount_minor,
       tax_amount_minor, total_amount_minor, tax_rate_bps, included_location_count,
-      included_register_count, included_user_count, trial_days, latest_activation_at,
+      included_register_count, included_user_count, trial_days, trial_duration_minutes, latest_activation_at,
       price_validity, fixed_billing_cycles, status, created_at
     FROM public.private_billing_offers
     WHERE tenant_id = ${req.user!.tenantId}::uuid AND status IN ('offered', 'accepted')
@@ -89,7 +89,7 @@ router.get('/private-offers', requireRole('owner'), async (req, res) => {
     taxAmountMinor: Number(offer.tax_amount_minor), totalAmountMinor: Number(offer.total_amount_minor),
     taxRateBps: offer.tax_rate_bps, includedLocations: offer.included_location_count,
     includedRegisters: offer.included_register_count, includedUsers: offer.included_user_count,
-    trialDays: offer.trial_days, latestActivationAt: offer.latest_activation_at,
+    trialDurationMinutes: Number(offer.trial_duration_minutes ?? 0) > 0 ? Number(offer.trial_duration_minutes) : Number(offer.trial_days ?? 0) * 1440, latestActivationAt: offer.latest_activation_at,
     priceValidity: offer.price_validity, fixedBillingCycles: offer.fixed_billing_cycles,
     status: offer.status, createdAt: offer.created_at,
   })) })

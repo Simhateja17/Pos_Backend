@@ -53,7 +53,7 @@ export const AdminPrivateOfferSchema = z.object({
   additionalLocationUnitAmountMinor: z.number().int().nonnegative().max(100_000_000),
   additionalRegisterUnitAmountMinor: z.number().int().nonnegative().max(100_000_000),
   additionalUserUnitAmountMinor: z.number().int().nonnegative().max(100_000_000),
-  trialDays: z.number().int().min(0).max(365),
+  trialDurationMinutes: z.number().int().min(0).max(525_600),
   latestActivationAt: z.coerce.date(),
   priceValidity: z.enum(['until_changed', 'fixed_cycles']),
   fixedBillingCycles: z.number().int().positive().max(1_200).nullable(),
