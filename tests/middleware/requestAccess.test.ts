@@ -160,6 +160,7 @@ describe('resolveRequestAccess', () => {
     await resolveRequestAccess(requestWith(), identity)
 
     const activation = queryRaw.mock.calls[2]
+    expect(activation[0].join('')).toContain('ends_at = now()')
     expect(activation[0].join('')).toContain("interval '1 minute'")
     expect(activation.slice(1)).toContain(5)
   })

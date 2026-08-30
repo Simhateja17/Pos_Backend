@@ -118,7 +118,7 @@ export async function resolveRequestAccess(
           const trialMinutes = Math.max(1, storedMinutes > 0 ? storedMinutes : Number(offerRows[0]?.trial_days ?? 1) * 1440)
           const activated = await tx.$queryRaw<any[]>`
             UPDATE public.billing_trials
-            SET status = 'active', started_at = ${now}, activated_at = ${now}, ends_at = ${now} + (${trialMinutes} * interval '1 minute'), updated_at = now()
+            SET status = 'active', started_at = now(), activated_at = now(), ends_at = now() + (${trialMinutes}::int * interval '1 minute'), updated_at = now()
             WHERE id = ${trialRow.id}::uuid AND status = 'pending'
             RETURNING *
           `
