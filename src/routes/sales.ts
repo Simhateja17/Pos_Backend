@@ -20,6 +20,7 @@ import { consumeRateLimit } from '../lib/rateLimit'
 import { effectivePricesForVariants } from '../lib/storePricing'
 import { calculateCashChange } from '../lib/cashTender'
 import { ensureTaxInvoice } from '../services/taxDocuments'
+import { formatCompanionReceipt, type CompanionReceiptSale } from '../lib/hardwareReceipt'
 
 const router = Router()
 
@@ -303,28 +304,30 @@ async function enqueueHardwareOutputs(input: {
   tenantId: string
   storeId: string
   terminalId: string
-  sale: { id: string; totalAmount: string; cashReceived?: string | null; changeDue?: string }
+  sale: CompanionReceiptSale
   businessName: string
+  country: string
   createdBy: string | null
 }) {
   await forTenantTransaction(input.tenantId, async (tx) => {
     const companion = await tx.hardware_companions.findFirst({
       where: { terminal_id: input.terminalId, store_id: input.storeId, revoked_at: null },
-      select: { id: true },
+      select: { id: true, capabilities: true },
     })
     if (!companion) return
+    const capabilities = (companion.capabilities ?? {}) as Record<string, unknown>
     const jobs: any[] = []
-    if (input.sale.cashReceived) {
+    if (input.sale.cashReceived && capabilities.drawer === true) {
       jobs.push({
         tenant_id: input.tenantId, store_id: input.storeId, terminal_id: input.terminalId,
         companion_id: companion.id, sale_id: input.sale.id, kind: 'open_drawer', payload: {},
         idempotency_key: `sale:${input.sale.id}:drawer`, created_by: input.createdBy,
       })
     }
-    jobs.push({
+    if (capabilities.print === true) jobs.push({
       tenant_id: input.tenantId, store_id: input.storeId, terminal_id: input.terminalId,
       companion_id: companion.id, sale_id: input.sale.id, kind: 'print_receipt',
-      payload: { text: `${input.businessName}\nBill #${input.sale.id.slice(0, 8)}\nTotal: INR ${input.sale.totalAmount}\n${input.sale.cashReceived ? `Cash received: INR ${input.sale.cashReceived}\nChange: INR ${input.sale.changeDue ?? '0.00'}\n` : ''}Thank you\n` },
+      payload: { format: 'receipt_text_v1', paperWidthMm: 80, text: formatCompanionReceipt(input.sale, input.businessName, input.country) },
       idempotency_key: `sale:${input.sale.id}:receipt:original`, created_by: input.createdBy,
     })
     if (jobs.length) await tx.hardware_jobs.createMany({ data: jobs, skipDuplicates: true })
@@ -612,6 +615,7 @@ router.post('/', async (req, res) => {
         body: toSaleJson(sale, createdLines, createdPayments, tenant.business_name as string, taxInvoice?.documentNumber, partiesBySaleId.get(sale.id)),
         receiptEmailTarget,
         businessName: tenant.business_name as string,
+        country: tenant.country as string,
       }
     })
 
@@ -631,13 +635,14 @@ router.post('/', async (req, res) => {
         const successBody = result.body as { id: string; totalAmount: string }
         res.status(201).json(successBody)
         if (pairedTerminal) {
-          const hardwareSale = result.body as { id: string; totalAmount: string; cashReceived?: string | null; changeDue?: string; createdBy?: string | null }
+          const hardwareSale = result.body as Parameters<typeof enqueueHardwareOutputs>[0]['sale'] & { createdBy?: string | null }
           void enqueueHardwareOutputs({
             tenantId,
             storeId,
             terminalId: pairedTerminal.id,
             sale: hardwareSale,
             businessName: (result as any).businessName ?? '',
+            country: (result as any).country ?? 'IN',
             createdBy: hardwareSale.createdBy ?? null,
           }).catch((error) => console.error(`[hardware] failed to enqueue sale outputs sale=${hardwareSale.id}`, error))
         }

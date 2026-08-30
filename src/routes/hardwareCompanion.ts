@@ -26,6 +26,43 @@ router.post('/pair', async (req, res) => {
 })
 router.use(authenticated)
 router.post('/heartbeat', async (req: any, res) => { const parsed = HardwareHeartbeatSchema.safeParse(req.body); if (!parsed.success) return res.status(400).json({ error: 'Invalid heartbeat.' }); await forTenant(req.companionTenantId).hardware_companions.update({ where: { id: req.companion.id }, data: { last_seen_at: new Date(), version: parsed.data.version, capabilities: parsed.data.capabilities } }); return res.json({ ok: true, serverTime: new Date().toISOString() }) })
-router.get('/jobs/next', async (req: any, res) => { const job = await forTenantTransaction(req.companionTenantId, async (tx) => { const candidate = await tx.hardware_jobs.findFirst({ where: { companion_id: req.companion.id, status: 'queued' }, orderBy: { created_at: 'asc' } }); if (!candidate) return null; return tx.hardware_jobs.update({ where: { id: candidate.id }, data: { status: 'claimed', attempts: { increment: 1 }, claimed_at: new Date() } }) }); return res.json(job ? { id: job.id, kind: job.kind, payload: job.payload, attempt: job.attempts } : null) })
-router.post('/jobs/:id/result', async (req: any, res) => { const parsed = HardwareJobResultSchema.safeParse(req.body); if (!parsed.success) return res.status(400).json({ error: 'Invalid job result.' }); const updated = await forTenant(req.companionTenantId).hardware_jobs.updateMany({ where: { id: req.params.id, companion_id: req.companion.id, status: 'claimed' }, data: { status: parsed.data.status, error_message: parsed.data.error ?? null, completed_at: new Date() } }); if (!updated.count) return res.status(409).json({ error: 'Job is not claimed by this Companion.' }); return res.json({ ok: true }) })
+router.get('/jobs/next', async (req: any, res) => {
+  const staleBefore = new Date(Date.now() - 2 * 60_000)
+  const job = await forTenantTransaction(req.companionTenantId, async (tx) => {
+    const candidate = await tx.hardware_jobs.findFirst({
+      where: {
+        companion_id: req.companion.id,
+        attempts: { lt: 3 },
+        OR: [
+          { status: 'queued' },
+          { status: 'claimed', claimed_at: { lt: staleBefore } },
+        ],
+      },
+      orderBy: { created_at: 'asc' },
+    })
+    if (!candidate) return null
+    return tx.hardware_jobs.update({
+      where: { id: candidate.id },
+      data: { status: 'claimed', attempts: { increment: 1 }, claimed_at: new Date() },
+    })
+  })
+  return res.json(job ? { id: job.id, kind: job.kind, payload: job.payload, attempt: job.attempts } : null)
+})
+
+router.post('/jobs/:id/result', async (req: any, res) => {
+  const parsed = HardwareJobResultSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid job result.' })
+  const job = await forTenant(req.companionTenantId).hardware_jobs.findFirst({
+    where: { id: req.params.id, companion_id: req.companion.id, status: 'claimed' },
+  })
+  if (!job) return res.status(409).json({ error: 'Job is not claimed by this Companion.' })
+  const retrying = parsed.data.status === 'failed' && job.attempts < 3
+  await forTenant(req.companionTenantId).hardware_jobs.update({
+    where: { id: job.id },
+    data: retrying
+      ? { status: 'queued', error_message: parsed.data.error ?? 'Hardware command failed', claimed_at: null }
+      : { status: parsed.data.status, error_message: parsed.data.error ?? null, completed_at: new Date() },
+  })
+  return res.json({ ok: true, retrying })
+})
 export default router

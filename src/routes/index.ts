@@ -37,6 +37,8 @@ import { storeContextMiddleware } from '../middleware/storeContext'
 import setupRouter from './setup'
 import hardwareRouter from './hardware'
 import hardwareCompanionRouter from './hardwareCompanion'
+import adminRouter, { supportReadOnlyRouter } from './admin'
+import merchantSupportRouter from './support'
 
 const router = Router()
 
@@ -49,6 +51,16 @@ router.use('/auth', authRouter)
 // the tenant-aware, auth-gated /billing/plans route above is never confused
 // with this one.
 router.use('/public', publicPlansRouter)
+// Merchant consent requests use the normal merchant Supabase session.  They
+// are deliberately separate from /admin so an employee is never represented
+// as a merchant staff member or issued a merchant JWT.
+router.use('/support', merchantSupportRouter)
+// A support-session token is a short-lived, read-only server token minted only
+// after merchant consent. Mount it on the narrow `/sessions` prefix so the
+// Admin router's `/support/requests` consent queue is never intercepted by
+// the support-session bearer-token middleware.
+router.use('/admin/support/sessions', supportReadOnlyRouter)
+router.use('/admin', adminRouter)
 // The installed Companion authenticates with its own revocable, high-entropy
 // machine token rather than a staff browser session.
 router.use('/hardware/companion', hardwareCompanionRouter)

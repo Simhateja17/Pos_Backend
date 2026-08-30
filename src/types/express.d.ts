@@ -1,5 +1,25 @@
 declare namespace Express {
   export interface Request {
+    /** Platform-admin identity. Deliberately separate from merchant req.user. */
+    admin?: {
+      id: string
+      authUserId: string
+      email: string
+      displayName: string
+      role: 'platform_owner' | 'support_admin' | 'read_only'
+      region: 'IN' | 'INTL'
+      status: 'invited' | 'active'
+      aal: 'aal1' | 'aal2'
+      authTime: number
+      token: string
+      claims: Record<string, unknown>
+    }
+    supportSession?: {
+      requestId: string
+      adminId: string
+      tenantId: string
+      expiresAt: string
+    }
     user?: {
       id: string
       role: 'owner' | 'manager' | 'cashier'

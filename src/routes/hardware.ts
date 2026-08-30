@@ -47,6 +47,11 @@ router.post('/jobs', async (req, res) => {
   const storeId = activeStoreId(req)
   const companion = await forTenant(tenantId).hardware_companions.findFirst({ where: { terminal_id: parsed.data.terminalId, store_id: storeId, revoked_at: null } })
   if (!companion) return res.status(409).json({ error: 'Pair an online Companion to this counter first.' })
+  const capabilities = (companion.capabilities ?? {}) as Record<string, unknown>
+  const requiredCapability = parsed.data.kind === 'test_print' ? 'print' : 'drawer'
+  if (capabilities[requiredCapability] !== true) {
+    return res.status(409).json({ error: `This Companion does not report ${requiredCapability} support.` })
+  }
   const job = await forTenant(tenantId).hardware_jobs.create({ data: { tenant_id: tenantId, store_id: storeId, terminal_id: parsed.data.terminalId, companion_id: companion.id, kind: parsed.data.kind, payload: parsed.data.payload, idempotency_key: `test:${randomBytes(16).toString('hex')}`, created_by: staffId(req) } })
   return res.status(202).json({ id: job.id, status: job.status })
 })

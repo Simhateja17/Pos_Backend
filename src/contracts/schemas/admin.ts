@@ -1,0 +1,67 @@
+import { z } from 'zod'
+
+const email = z.string().trim().toLowerCase().email().max(320)
+const requiredText = (max = 500) => z.string().trim().min(1).max(max)
+
+export const AdminOtpRequestSchema = z.object({ email })
+export const AdminOtpVerifySchema = z.object({ email, otp: z.string().trim().regex(/^\d{6}$/) })
+
+export const AdminInviteSchema = z.object({
+  email,
+  displayName: requiredText(120),
+  role: z.enum(['platform_owner', 'support_admin', 'read_only']),
+})
+
+export const AdminSearchSchema = z.object({
+  q: z.string().trim().min(2).max(120),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  offset: z.coerce.number().int().min(0).max(10_000).default(0),
+})
+
+export const AdminTenantIdSchema = z.object({ tenantId: z.string().uuid() })
+
+export const AdminSupportRequestSchema = z.object({
+  tenantId: z.string().uuid(),
+  ticketId: requiredText(120),
+  reason: requiredText(1_000),
+})
+
+export const MerchantSupportDecisionSchema = z.object({
+  decision: z.enum(['approve', 'deny']),
+})
+
+export const AdminEntitlementOverrideSchema = z.object({
+  tenantId: z.string().uuid(),
+  entitlementKey: z.enum(['max_locations', 'max_active_users', 'max_active_registers', 'forecast_monthly_runs', 'catalog_products']),
+  overrideValue: z.number().int().nonnegative().max(100_000),
+  justification: requiredText(1_000),
+  ticketId: requiredText(120),
+  /** Overrides are bounded to 30 days; payment-provider state is untouched. */
+  expiresAt: z.coerce.date(),
+})
+
+export const AdminRevokeOverrideSchema = z.object({ reason: requiredText(1_000) })
+
+export const AdminRetrySchema = z.object({
+  operationKind: z.enum(['webhook', 'email', 'import', 'forecast']),
+  operationId: requiredText(200),
+  idempotencyKey: z.string().trim().min(8).max(200),
+})
+
+export const AdminMfaResetSchema = z.object({
+  targetEmail: email,
+  reason: requiredText(1_000),
+})
+
+export const AdminListSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  cursor: z.coerce.number().int().min(0).max(100_000).default(0),
+})
+
+export const AdminAuditQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).max(100_000).default(0),
+  action: z.string().trim().min(1).max(120).optional(),
+  tenantId: z.string().uuid().optional(),
+})
+
