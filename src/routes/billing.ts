@@ -67,7 +67,7 @@ router.get('/plans', async (req, res) => {
       taxMode: 'exclusive',
       taxLabel: offer.tax_rate_bps > 0 ? `GST (${offer.tax_rate_bps / 100}%)` : 'No tax',
     }
-    return res.json({ mode: billingMode(), region: tenantRegion, plans: [option], privateOfferId: offer.id, trialDurationMinutes: Number(offer.trial_duration_minutes ?? 0) > 0 ? Number(offer.trial_duration_minutes) : Number(offer.trial_days ?? 0) * 1440, latestActivationAt: offer.latest_activation_at })
+    return res.json({ mode: billingMode(), region: tenantRegion, plans: [option], privateOfferId: offer.id, billingCycle: offeredCycle, trialDurationMinutes: Number(offer.trial_duration_minutes ?? 0) > 0 ? Number(offer.trial_duration_minutes) : Number(offer.trial_days ?? 0) * 1440, latestActivationAt: offer.latest_activation_at })
   }
   return res.json({ mode: billingMode(), region: tenantRegion, plans: getPlans(tenantRegion).map(toPlanOption) })
 })
