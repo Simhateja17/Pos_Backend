@@ -83,7 +83,8 @@ describe('billing plan selection', () => {
     mocks.entitlementSummary.mockResolvedValue({ access: { accessAllowed: false } })
   })
 
-  it('returns the valid private offer for a blocked owner even without an offer query parameter', async () => {
+  it('returns the valid private offer even when the entitlement projection is unavailable', async () => {
+    mocks.entitlementSummary.mockRejectedValueOnce(new Error('read model unavailable'))
     mocks.queryRaw.mockResolvedValueOnce([privateOffer])
     const { default: billingRouter } = await import('../../src/routes/billing')
     const app = express()

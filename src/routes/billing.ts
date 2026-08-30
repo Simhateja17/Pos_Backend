@@ -87,35 +87,26 @@ router.get('/plans', async (req, res) => {
     return res.json(catalog)
   }
 
-  // A blocked owner can arrive here from an old bookmark, a cached redirect,
-  // or a browser that dropped the query string. Keep the negotiated offer
-  // authoritative in that recovery case instead of silently showing the
-  // public catalogue. Active trials and paid subscribers retain the normal
-  // plan catalogue, and managers/cashiers never receive another tenant's
-  // private offer details.
+  // An owner can arrive here from an old bookmark, a cached redirect, or a
+  // browser that dropped the query string. A still-valid negotiated offer is
+  // authoritative for that owner; do not make recovery depend on a separate
+  // entitlement projection that can be stale or temporarily unavailable.
+  // Active trials are routed into the app by the access guard, while
+  // managers/cashiers never receive another tenant's private offer details.
   const effectiveRole = req.actingStaff?.role ?? req.user!.role
   if (!offerId && effectiveRole === 'owner') {
-    let entitlement: Awaited<ReturnType<typeof getEntitlementSummary>> | null = null
-    try {
-      entitlement = await getEntitlementSummary(req.user!.tenantId)
-    } catch {
-      // Keep the catalogue endpoint usable during a rolling migration or a
-      // transient read-model failure. The explicit offer URL remains strict.
-    }
-    if (entitlement && !entitlement.access.accessAllowed) {
-      const offers = await client.$queryRaw<any[]>`
-        SELECT * FROM public.private_billing_offers
-        WHERE tenant_id = ${req.user!.tenantId}::uuid
-          AND status = 'offered' AND latest_activation_at > now()
-        ORDER BY created_at DESC
-        LIMIT 1
-      `
-      const offer = offers[0]
-      if (offer) {
-        const catalog = privateOfferCatalog(tenantRegion, offer)
-        if (!catalog) return res.status(409).json({ error: 'The base plan for this offer is unavailable' })
-        return res.json(catalog)
-      }
+    const offers = await client.$queryRaw<any[]>`
+      SELECT * FROM public.private_billing_offers
+      WHERE tenant_id = ${req.user!.tenantId}::uuid
+        AND status = 'offered' AND latest_activation_at > now()
+      ORDER BY created_at DESC
+      LIMIT 1
+    `
+    const offer = offers[0]
+    if (offer) {
+      const catalog = privateOfferCatalog(tenantRegion, offer)
+      if (!catalog) return res.status(409).json({ error: 'The base plan for this offer is unavailable' })
+      return res.json(catalog)
     }
   }
   return res.json({ mode: billingMode(), region: tenantRegion, plans: getPlans(tenantRegion).map(toPlanOption) })
