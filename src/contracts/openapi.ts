@@ -691,12 +691,12 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/sales',
-  description: "Complete a checkout sale — server recomputes totals, enforces payment-sum, gates above-threshold discounts and customer-credit-limit overrides behind manager+ approval, and writes sale+lines+payments+stock movements plus any credit ledger row atomically. Response includes the sale's payments array.",
+  description: "Complete a checkout sale — server recomputes totals, enforces payment-sum, requires a customer credit sale to remain within the customer's configured credit limit, gates above-threshold discounts behind manager+ approval, and writes sale+lines+payments+stock movements plus any credit ledger row atomically. Response includes the sale's payments array.",
   request: { body: { content: { 'application/json': { schema: CreateSaleSchema } } } },
   responses: {
     201: { description: 'Sale completed', content: { 'application/json': { schema: SaleSchema } } },
     400: { description: 'Invalid request, variant not found, or payment sum mismatch' },
-    403: { description: 'Discount or customer credit limit requires manager or owner approval' },
+    403: { description: 'Discount requires manager or owner approval, or the customer credit limit would be exceeded' },
     409: { description: 'Target shift is already closed' },
   },
 })

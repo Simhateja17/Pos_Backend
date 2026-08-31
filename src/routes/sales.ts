@@ -58,12 +58,6 @@ export function isApprovedForDiscount(req: import('express').Request): boolean {
   return ROLE_RANK[actingRole] >= ROLE_RANK.manager
 }
 
-export function isApprovedForCreditLimit(req: import('express').Request): boolean {
-  const actingRole = req.actingStaff?.role ?? req.user?.role
-  if (!actingRole) return false
-  return ROLE_RANK[actingRole] >= ROLE_RANK.manager
-}
-
 // Derives a line's effective discount percent from WHICHEVER discount field
 // is actually present — discountPercent and discountAmount are both
 // schema-legal and mutually exclusive, so the D-05 gate must not be
@@ -579,14 +573,13 @@ router.post('/', async (req, res) => {
         if (
           creditLimit !== null &&
           creditLimit !== undefined &&
-          currentCredit.balance.plus(creditAmount).greaterThan(new Prisma.Decimal(creditLimit)) &&
-          !isApprovedForCreditLimit(req)
+          currentCredit.balance.plus(creditAmount).greaterThan(new Prisma.Decimal(creditLimit))
         ) {
           return {
             status: 403,
             body: {
-              error: 'This sale would exceed the customer credit limit. Ask a manager or owner to approve it.',
-              code: 'credit_limit_override_required',
+              error: `This customer's credit limit is ₹${moneyString(creditLimit)}, and this sale would exceed it. Increase the credit limit or collect payment through another payment method.`,
+              code: 'credit_limit_exceeded',
               balance: moneyString(currentCredit.balance),
               creditLimit: creditLimitString(creditLimit),
               requestedCredit: moneyString(creditAmount),

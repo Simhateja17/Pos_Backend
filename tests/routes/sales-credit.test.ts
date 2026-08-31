@@ -217,28 +217,31 @@ describe('POST /sales customer-credit checkout path', () => {
     })
 
     expect(response.status).toBe(403)
-    expect(response.body.code).toBe('credit_limit_override_required')
+    expect(response.body.code).toBe('credit_limit_exceeded')
     expect(response.body).toMatchObject({ balance: '70.00', creditLimit: '100.00', requestedCredit: '118.00' })
     expect(salesCreateMock).not.toHaveBeenCalled()
     expect(creditCreateMock).not.toHaveBeenCalled()
   })
 
-  it('lets a manager override an exceeded credit limit while retaining the ledger amount', async () => {
-    const app = await buildApp('manager')
-    queryRawMock.mockResolvedValue([{ id: customerId, credit_limit: new Prisma.Decimal('100.00') }])
-    creditGroupByMock.mockResolvedValue([
-      { customer_id: customerId, type: 'credit_sale', _sum: { amount: new Prisma.Decimal('70.00') }, _max: { created_at: new Date() } },
-    ])
+  it('blocks an owner when a credit sale exceeds the customer limit and explains the next step', async () => {
+    const app = await buildApp('owner')
+    effectivePricesMock.mockResolvedValue([new Prisma.Decimal('5196.00')])
+    queryRawMock.mockResolvedValue([{ id: customerId, credit_limit: new Prisma.Decimal('4000.00') }])
+    creditGroupByMock.mockResolvedValue([])
 
     const response = await request(app).post('/sales').send({
       ...splitTenderBody,
       clientSaleId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-      payments: [{ method: 'credit', amount: '118.00' }],
+      payments: [{ method: 'credit', amount: '6131.28' }],
     })
 
-    expect(response.status).toBe(201)
-    expect(creditCreateMock).toHaveBeenCalledWith({
-      data: expect.objectContaining({ type: 'credit_sale', amount: '118.00', recorded_by: staffId }),
-    })
+    expect(response.status).toBe(403)
+    expect(response.body.code).toBe('credit_limit_exceeded')
+    expect(response.body).toMatchObject({ balance: '0.00', creditLimit: '4000.00', requestedCredit: '6131.28' })
+    expect(response.body.error).toContain('₹4000.00')
+    expect(response.body.error).toContain('Increase the credit limit')
+    expect(response.body.error).toContain('another payment method')
+    expect(salesCreateMock).not.toHaveBeenCalled()
+    expect(creditCreateMock).not.toHaveBeenCalled()
   })
 })
