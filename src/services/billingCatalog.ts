@@ -85,7 +85,7 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
     entitlements: retailEntitlements(2, 5, 3),
     addons: [],
     monthly: { amountMinor: 79_900, taxRateBps: 1_800 },
-    annual: { amountMinor: 958_800, taxRateBps: 1_800 },
+    annual: { amountMinor: 799_000, taxRateBps: 1_800 },
   },
   {
     key: 'growth',
@@ -99,25 +99,25 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
     entitlements: retailEntitlements(5, 15, 8),
     addons: [],
     monthly: { amountMinor: 149_900, taxRateBps: 1_800 },
-    annual: { amountMinor: 1_798_800, taxRateBps: 1_800 },
+    annual: { amountMinor: 1_499_000, taxRateBps: 1_800 },
   },
   {
     key: 'pro',
-    includedStores: 6,
+    includedStores: 8,
     region: 'IN',
     currency: 'INR',
     name: 'Pro',
     description: 'Maximum included capacity with flexible add-ons for larger retailers.',
     popular: false,
-    features: ['6 locations included', '10 active users included', '6 active registers included', 'Unlimited POS transactions', 'ML reorder intelligence', 'GST-ready reports and CSV export', 'Offline billing and sync', 'Priority support'],
-    entitlements: retailEntitlements(6, 10, 6),
+    features: ['8 locations included', '20 active users included', '12 active registers included', 'Unlimited POS transactions', 'ML reorder intelligence', 'GST-ready reports and CSV export', 'Offline billing and sync', 'Priority support'],
+    entitlements: retailEntitlements(8, 20, 12),
     addons: [
       { key: 'location', label: 'Additional location', unitAmountMinor: 29_900 },
       { key: 'register', label: 'Additional register', unitAmountMinor: 19_900 },
       { key: 'user', label: 'Additional user', unitAmountMinor: 9_900 },
     ],
     monthly: { amountMinor: 299_900, taxRateBps: 1_800 },
-    annual: { amountMinor: 3_598_800, taxRateBps: 1_800 },
+    annual: { amountMinor: 2_999_000, taxRateBps: 1_800 },
   },
   {
     key: 'starter',
@@ -131,7 +131,7 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
     entitlements: retailEntitlements(2, 5, 3),
     addons: [],
     monthly: { amountMinor: 4_900 },
-    annual: { amountMinor: 58_800 },
+    annual: { amountMinor: 49_000 },
   },
   {
     key: 'growth',
@@ -145,7 +145,7 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
     entitlements: retailEntitlements(5, 15, 8),
     addons: [],
     monthly: { amountMinor: 9_900 },
-    annual: { amountMinor: 118_800 },
+    annual: { amountMinor: 99_000 },
   },
   {
     key: 'pro',
@@ -163,7 +163,7 @@ const DEFAULT_CATALOG: BillingPlanDefinition[] = [
       { key: 'user', label: 'Additional user', unitAmountMinor: 500 },
     ],
     monthly: { amountMinor: 19_900 },
-    annual: { amountMinor: 238_800 },
+    annual: { amountMinor: 199_000 },
   },
 ]
 
