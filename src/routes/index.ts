@@ -29,6 +29,7 @@ import reportsRouter from './reports'
 import emailRouter from './email'
 import billingRouter from './billing'
 import publicPlansRouter from './publicPlans'
+import publicBlogsRouter from './publicBlogs'
 import storesRouter from './stores'
 import availabilityRouter from './availability'
 import transfersRouter from './transfers'
@@ -53,6 +54,7 @@ router.use('/auth', authRouter)
 // the tenant-aware, auth-gated /billing/plans route above is never confused
 // with this one.
 router.use('/public', publicPlansRouter)
+router.use('/public/blogs', publicBlogsRouter)
 // Merchant consent requests use the normal merchant Supabase session.  They
 // are deliberately separate from /admin so an employee is never represented
 // as a merchant staff member or issued a merchant JWT.

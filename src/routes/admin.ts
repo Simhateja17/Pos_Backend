@@ -3,6 +3,8 @@ import { Router, type Request, type Response } from 'express'
 import jwt from 'jsonwebtoken'
 import {
   AdminAuditQuerySchema,
+  AdminBlogIdSchema,
+  AdminBlogPostSchema,
   AdminEntitlementOverrideSchema,
   AdminInviteSchema,
   AdminListSchema,
@@ -764,6 +766,58 @@ protectedRouter.get('/audit', requireAdminRole('platform_owner', 'support_admin'
     return res.send(csv)
   }
   return res.json({ events })
+})
+
+protectedRouter.get('/blog-posts', requireAdminRole('platform_owner', 'support_admin', 'read_only'), async (req, res) => {
+  const posts = await queryAdminRows<Record<string, unknown>>('blog_posts', (query) =>
+    query.eq('region', backendAdminRegion()).order('updated_at', { ascending: false }),
+  )
+  await audit(req, 'admin.blog_posts.viewed', { afterSummary: { count: posts.length } })
+  res.json({ posts })
+})
+
+protectedRouter.post('/blog-posts', requireAdminRole('platform_owner'), async (req, res) => {
+  const parsed = AdminBlogPostSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid blog post', details: parsed.error.flatten() })
+  const now = new Date().toISOString()
+  const post = await queryAdminSingle<Record<string, unknown>>('blog_posts', (query) => query.insert({
+    region: backendAdminRegion(),
+    slug: parsed.data.slug,
+    title: parsed.data.title,
+    excerpt: parsed.data.excerpt,
+    body: parsed.data.body,
+    category: parsed.data.category,
+    author_name: parsed.data.authorName,
+    cover_image_url: parsed.data.coverImageUrl,
+    seo_title: parsed.data.seoTitle,
+    seo_description: parsed.data.seoDescription,
+    status: parsed.data.status,
+    published_at: parsed.data.status === 'published' ? now : null,
+    created_by: req.admin?.id,
+    updated_by: req.admin?.id,
+  }).select('*').single())
+  if (!post) return res.status(500).json({ error: 'Blog post could not be created' })
+  await audit(req, `admin.blog_post.${parsed.data.status === 'published' ? 'published' : 'created'}`, { targetType: 'blog_post', targetId: String(post.id), afterSummary: { slug: post.slug, status: post.status } })
+  res.status(201).json({ post })
+})
+
+protectedRouter.put('/blog-posts/:postId', requireAdminRole('platform_owner'), async (req, res) => {
+  const params = AdminBlogIdSchema.safeParse({ postId: routeParam(req, 'postId') })
+  const parsed = AdminBlogPostSchema.safeParse(req.body)
+  if (!params.success || !parsed.success) return res.status(400).json({ error: 'Invalid blog post' })
+  const existing = await queryAdminSingle<Record<string, unknown>>('blog_posts', (query) => query.eq('id', params.data.postId).eq('region', backendAdminRegion()))
+  if (!existing) return res.status(404).json({ error: 'Blog post not found' })
+  const publishing = existing.status !== 'published' && parsed.data.status === 'published'
+  const post = await queryAdminSingle<Record<string, unknown>>('blog_posts', (query) => query.update({
+    slug: parsed.data.slug, title: parsed.data.title, excerpt: parsed.data.excerpt, body: parsed.data.body,
+    category: parsed.data.category, author_name: parsed.data.authorName, cover_image_url: parsed.data.coverImageUrl,
+    seo_title: parsed.data.seoTitle, seo_description: parsed.data.seoDescription, status: parsed.data.status,
+    published_at: parsed.data.status === 'published' ? (existing.published_at ?? new Date().toISOString()) : null,
+    updated_by: req.admin?.id, updated_at: new Date().toISOString(),
+  }).eq('id', params.data.postId).eq('region', backendAdminRegion()).select('*').single())
+  if (!post) return res.status(500).json({ error: 'Blog post could not be updated' })
+  await audit(req, `admin.blog_post.${publishing ? 'published' : 'updated'}`, { targetType: 'blog_post', targetId: params.data.postId, beforeSummary: { slug: existing.slug, status: existing.status }, afterSummary: { slug: post.slug, status: post.status } })
+  res.json({ post })
 })
 
 router.use(protectedRouter)

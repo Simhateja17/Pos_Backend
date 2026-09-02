@@ -87,3 +87,20 @@ export const AdminAuditQuerySchema = z.object({
   action: z.string().trim().min(1).max(120).optional(),
   tenantId: z.string().uuid().optional(),
 })
+
+const optionalUrl = z.union([z.string().trim().url().max(2_000).refine((value) => /^https?:\/\//i.test(value), 'Use an HTTP or HTTPS image URL'), z.literal('')]).transform((value) => value || null)
+
+export const AdminBlogPostSchema = z.object({
+  slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(120),
+  title: requiredText(160),
+  excerpt: requiredText(320),
+  body: requiredText(50_000),
+  category: requiredText(80),
+  authorName: requiredText(120).default('Ambel POS Editorial'),
+  coverImageUrl: optionalUrl.default(''),
+  seoTitle: z.string().trim().max(70).optional().transform((value) => value || null),
+  seoDescription: z.string().trim().max(170).optional().transform((value) => value || null),
+  status: z.enum(['draft', 'published']).default('draft'),
+})
+
+export const AdminBlogIdSchema = z.object({ postId: z.string().uuid() })
