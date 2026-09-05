@@ -105,7 +105,8 @@ export async function createRazorpaySubscription(input: {
   billingCycle: 'monthly' | 'annual'
   notes: Record<string, string>
 }): Promise<RazorpaySubscription> {
-  const totalCount = input.billingCycle === 'monthly' ? 1_200 : 100
+  // Limit mandates to 10 years; a 100-year term exceeds UPI Checkout's end-time limit.
+  const totalCount = input.billingCycle === 'monthly' ? 120 : 10
   return razorpayRequest<RazorpaySubscription>('/subscriptions', {
     method: 'POST',
     body: JSON.stringify({
