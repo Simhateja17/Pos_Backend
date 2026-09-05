@@ -1,5 +1,5 @@
 import { activeStoreId } from '../middleware/storeContext'
-import { Router } from 'express'
+import { Router, type Request, type Response } from 'express'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
 import { CreateTerminalSchema, UpdateTerminalSchema } from '../contracts/schemas/terminal'
@@ -14,6 +14,26 @@ import {
 import { requireOperatorOnPairedDevice } from '../middleware/requireOperatorOnPairedDevice'
 
 const router = Router()
+
+/**
+ * Counters are a single-store surface, same as settings.ts's singleStoreId:
+ * `X-Store-Id: all` has no single till list to show. Reject it before any
+ * query runs and give the client the same machine-readable code settings.ts
+ * uses, so the frontend can show its established "choose a store" picker
+ * instead of a generic load failure.
+ */
+function singleStoreId(req: Request, res: Response): string | null {
+  if (req.storeContext?.scope === 'business') {
+    res.status(400).json({ code: 'choose_store', error: 'Choose a store to manage its counters' })
+    return null
+  }
+  try {
+    return activeStoreId(req)
+  } catch {
+    res.status(400).json({ code: 'choose_store', error: 'Choose a store to manage its counters' })
+    return null
+  }
+}
 
 function toTerminalJson(row: any, hasOpenShift: boolean, currentDeviceHash?: string, activeCashierName?: string | null) {
   return {
@@ -59,8 +79,9 @@ async function listWithOpenShifts(client: any, storeId: string, currentDeviceHas
  * Mutations below are manager+ (owner/manager configure the store's counters).
  */
 router.get('/', async (req, res) => {
+  const storeId = singleStoreId(req, res)
+  if (!storeId) return
   const client = forTenant(req.user!.tenantId) as any
-  const storeId = activeStoreId(req)
   const token = getCounterDeviceToken(req)
   const currentDeviceHash = token ? hashCounterDeviceToken(token) : undefined
 
@@ -103,13 +124,15 @@ router.post('/', requireOperatorOnPairedDevice, requireRole('manager'), async (r
   if (!parsed.success) {
     return res.status(400).json({ error: 'Enter a name for this counter.' })
   }
+  const storeId = singleStoreId(req, res)
+  if (!storeId) return
 
   const client = forTenant(req.user!.tenantId) as any
   try {
     const created = await client.terminals.create({
       data: {
         tenant_id: req.user!.tenantId,
-        store_id: activeStoreId(req),
+        store_id: storeId,
         name: parsed.data.name,
         cash_mode: parsed.data.cashMode,
       },
@@ -129,9 +152,11 @@ router.post('/', requireOperatorOnPairedDevice, requireRole('manager'), async (r
  * counter, or pair a replacement browser to the counter after a failure.
  */
 router.post('/:terminalId/pair', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {
+  const storeId = singleStoreId(req, res)
+  if (!storeId) return
   const client = forTenant(req.user!.tenantId) as any
   const pinReadyStaff = await client.staff_members.count({
-    where: { store_id: activeStoreId(req), is_active: true, pin_hash: { not: null } },
+    where: { store_id: storeId, is_active: true, pin_hash: { not: null } },
   })
   if (pinReadyStaff === 0) {
     return res.status(409).json({
@@ -139,7 +164,7 @@ router.post('/:terminalId/pair', requireOperatorOnPairedDevice, requireRole('man
     })
   }
   const target = await client.terminals.findFirst({
-    where: { id: req.params.terminalId, store_id: activeStoreId(req) },
+    where: { id: req.params.terminalId, store_id: storeId },
   })
   if (!target) return res.status(404).json({ error: 'Counter not found' })
   if (!target.is_active) return res.status(409).json({ error: 'Turn that counter on before pairing a device.' })
@@ -196,10 +221,12 @@ router.patch('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager
     return res.status(400).json({ error: 'Invalid request' })
   }
 
+  const storeId = singleStoreId(req, res)
+  if (!storeId) return
   const client = forTenant(req.user!.tenantId) as any
   // RLS-scoped read first so another tenant's id cannot be renamed by guessing.
   const existing = await client.terminals.findFirst({
-    where: { id: req.params.terminalId, store_id: activeStoreId(req) },
+    where: { id: req.params.terminalId, store_id: storeId },
   })
   if (!existing) {
     return res.status(404).json({ error: 'Counter not found' })
@@ -250,9 +277,11 @@ router.patch('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager
  * instead of silently orphaning history.
  */
 router.delete('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {
+  const storeId = singleStoreId(req, res)
+  if (!storeId) return
   const client = forTenant(req.user!.tenantId) as any
   const existing = await client.terminals.findFirst({
-    where: { id: req.params.terminalId, store_id: activeStoreId(req) },
+    where: { id: req.params.terminalId, store_id: storeId },
   })
   if (!existing) {
     return res.status(404).json({ error: 'Counter not found' })
