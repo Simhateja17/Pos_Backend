@@ -255,7 +255,8 @@ describe('POST /auth/signup and /auth/login', () => {
 
     expect(res.status).toBe(409)
     expect(res.body).toEqual({
-      error: 'An account already exists with this email. Log in instead',
+      code: 'DUPLICATE_ACCOUNT',
+      message: 'An account already exists with this email. Log in instead',
     })
     expect(tenantsCreateMock).not.toHaveBeenCalled()
   })
@@ -321,7 +322,7 @@ describe('POST /auth/signup and /auth/login', () => {
       .send({ email: 'owner@example.com', otp: '000000' })
 
     expect(res.status).toBe(401)
-    expect(res.body).toEqual({ error: 'Invalid or expired code' })
+    expect(res.body).toEqual({ code: 'UNAUTHENTICATED', message: 'Invalid or expired code' })
     expect(staffMembersFindFirstMock).not.toHaveBeenCalled()
   })
 
@@ -356,7 +357,8 @@ describe('POST /auth/signup and /auth/login', () => {
 
     expect(res.status).toBe(404)
     expect(res.body).toEqual({
-      error: 'No account found with this email. Create a store account first',
+      code: 'NO_ACCOUNT',
+      message: 'No account found with this email. Create a store account first',
     })
   })
 
@@ -377,7 +379,11 @@ describe('POST /auth/signup and /auth/login', () => {
 
     expect(res.status).toBe(429)
     expect(res.headers['retry-after']).toBe('34')
-    expect(res.body).toEqual({ error: 'Too many code requests. Please try again in 34 seconds.' })
+    expect(res.body).toEqual({
+      code: 'RATE_LIMITED',
+      message: 'Too many code requests. Please try again in 34 seconds.',
+      retryAfterSeconds: 34,
+    })
   })
 })
 
@@ -536,6 +542,23 @@ describe('POST /auth/owner-pin-recovery/request', () => {
     expect(res.body).toEqual({ ok: true })
   })
 
+  it('uses the fixed regional mobile deep link without accepting an arbitrary redirect URL', async () => {
+    resetPasswordForEmailMock.mockResolvedValue({ data: {}, error: null })
+
+    const app = await buildApp()
+    const res = await request(app).post('/auth/owner-pin-recovery/request').send({
+      email: 'owner@example.com',
+      platform: 'mobile',
+      region: 'IN',
+      redirectTo: 'https://attacker.example/callback',
+    })
+
+    expect(res.status).toBe(200)
+    expect(resetPasswordForEmailMock).toHaveBeenCalledWith('owner@example.com', {
+      redirectTo: 'ambelpos://owner-pin-recovery?region=IN',
+    })
+  })
+
   it('Test 3: an invalid email fails schema validation with 400 and never calls Supabase', async () => {
     const app = await buildApp()
     const res = await request(app).post('/auth/owner-pin-recovery/request').send({ email: 'not-an-email' })
@@ -551,6 +574,54 @@ describe('POST /auth/owner-pin-recovery/request', () => {
     const res = await request(app).post('/auth/owner-pin-recovery/request').send({ email: 'owner@example.com' })
 
     expect(res.status).toBe(502)
+  })
+})
+
+describe('POST /auth/refresh', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    refreshSessionMock.mockReset()
+  })
+
+  async function buildApp() {
+    const { default: authRouter } = await import('../../src/routes/auth')
+    const app = express()
+    app.use(express.json())
+    app.use('/auth', authRouter)
+    return app
+  }
+
+  it('returns the complete rotated pair from verified JWT claims', async () => {
+    refreshSessionMock.mockResolvedValue({
+      data: {
+        user: { id: 'user-1', email: 'owner@example.com' },
+        session: {
+          access_token: fakeJwt({ staff_role: 'owner', tenant_id: 'tenant-1' }),
+          refresh_token: 'refresh-2',
+        },
+      },
+      error: null,
+    })
+    const res = await request(await buildApp()).post('/auth/refresh').send({ refreshToken: 'refresh-1' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.session).toEqual({ accessToken: expect.any(String), refreshToken: 'refresh-2' })
+    expect(res.body.user).toEqual({ id: 'user-1', email: 'owner@example.com', role: 'owner', tenantId: 'tenant-1' })
+    expect(res.headers['cache-control']).toBe('no-store')
+  })
+
+  it('maps a rejected or reused refresh token to a terminal stable code', async () => {
+    refreshSessionMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 401 } })
+    const res = await request(await buildApp()).post('/auth/refresh').send({ refreshToken: 'reused' })
+    expect(res.status).toBe(401)
+    expect(res.body.code).toBe('REFRESH_REJECTED')
+  })
+
+  it('maps provider failure to retryable service unavailable', async () => {
+    refreshSessionMock.mockResolvedValue({ data: { user: null, session: null }, error: { status: 503 } })
+    const res = await request(await buildApp()).post('/auth/refresh').send({ refreshToken: 'refresh-1' })
+    expect(res.status).toBe(502)
+    expect(res.body.code).toBe('SERVICE_UNAVAILABLE')
   })
 })
 
@@ -597,7 +668,7 @@ describe('POST /auth/owner-pin-recovery/confirm', () => {
       expect.objectContaining({ where: { user_id: 'owner-1' } }),
     )
     expect(staffSessionsUpdateManyMock).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { staff_id: 'owner-1', logged_out_at: null } }),
+      expect.objectContaining({ where: { staff_members: { user_id: 'owner-1' }, logged_out_at: null } }),
     )
   })
 

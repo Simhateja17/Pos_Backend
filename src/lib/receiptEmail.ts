@@ -30,7 +30,7 @@ export async function sendReceiptEmail(input: ReceiptEmailInput): Promise<{ ok: 
   }
   try {
     await resend.emails.send({
-      from: 'receipts@couture-pos.example.com',
+      from: 'support@ambelpos.com',
       to: input.to,
       subject: `Bill from ${input.businessName} — ${input.totalAmount}`,
       text: `Thank you for your purchase. Bill ${input.saleId}: ${input.totalAmount} total.`,

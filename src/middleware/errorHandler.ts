@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express'
 import { randomUUID } from 'node:crypto'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 interface HttpError extends Error {
   status?: number
@@ -19,8 +20,7 @@ export function errorHandler(err: HttpError, req: Request, res: Response, next: 
   console.error(`[request:${requestId}]`, err)
   const status = err.status ?? 500
   const exposeMessage = status < 500 || err.expose === true
-  res.status(status).json({
-    error: exposeMessage ? err.message ?? 'Request failed' : 'Internal server error',
-    requestId,
-  })
+  const message = exposeMessage ? err.message ?? 'Request failed' : 'Internal server error'
+  const code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'FORBIDDEN' : status === 429 ? 'RATE_LIMITED' : status >= 500 ? 'SERVICE_UNAVAILABLE' : 'REQUEST_FAILED'
+  res.status(status).json(errorEnvelope(code, message, undefined, requestId))
 }

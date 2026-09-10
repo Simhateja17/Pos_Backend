@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 /**
  * Fixed 3-tier role hierarchy (owner >= manager >= cashier), per Phase 1
@@ -26,11 +27,11 @@ export function requireRole(min: keyof typeof ROLE_RANK) {
     const actingRole = effectiveRole(req)
 
     if (!actingRole) {
-      return res.status(401).json({ error: 'Unauthorized' })
+      return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Authentication is required.'))
     }
 
     if (ROLE_RANK[actingRole] < ROLE_RANK[min]) {
-      return res.status(403).json({ error: 'Insufficient permissions' })
+      return res.status(403).json(errorEnvelope('FORBIDDEN', 'Insufficient permissions.'))
     }
 
     next()

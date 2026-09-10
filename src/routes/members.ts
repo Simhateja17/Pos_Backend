@@ -10,6 +10,7 @@ import {
 import { requireRole } from '../middleware/requireRole'
 import { forTenant } from '../db/tenantClient'
 import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
+import { errorEnvelope } from '../contracts/schemas/error'
 import {
   requireOperatorOnPairedDevice,
   requireOperatorOrFirstPinSetup,
@@ -82,12 +83,12 @@ router.get('/', requireRole('manager'), async (req, res) => {
 router.post('/', requireOperatorOrFirstPinSetup, requireRole('manager'), async (req, res) => {
   const parsed = CreateStaffSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Enter a name, role, and a four-digit temporary PIN.' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Enter a name, role, and a four-digit temporary PIN.'))
   }
 
   const actingRole = req.actingStaff?.role ?? req.user!.role
   if (actingRole === 'manager' && parsed.data.role !== 'cashier') {
-    return res.status(403).json({ error: 'Managers can create cashier profiles only.' })
+    return res.status(403).json(errorEnvelope('FORBIDDEN', 'Managers can create cashier profiles only.'))
   }
 
   // A staff member belongs to exactly one shop (Phase 8, migration 0042), so
@@ -97,7 +98,7 @@ router.post('/', requireOperatorOrFirstPinSetup, requireRole('manager'), async (
   try {
     storeId = activeStoreId(req)
   } catch {
-    return res.status(400).json({ error: 'Choose a store before adding staff.' })
+    return res.status(400).json(errorEnvelope('STORE_FORBIDDEN', 'Choose a store before adding staff.'))
   }
 
   const client = forTenant(req.user!.tenantId) as any
@@ -120,7 +121,7 @@ router.post('/', requireOperatorOrFirstPinSetup, requireRole('manager'), async (
     return res.status(201).json(toMemberJson(staff))
   } catch (error) {
     console.error('[members:create] staff_members.create failed', error)
-    return res.status(500).json({ error: 'Could not create staff profile' })
+    return res.status(500).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not create staff profile'))
   }
 })
 
@@ -141,7 +142,7 @@ router.post('/', requireOperatorOrFirstPinSetup, requireRole('manager'), async (
 router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), async (req, res) => {
   const parsed = InviteMemberSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid request'))
   }
 
   const { email, name, role } = parsed.data
@@ -154,7 +155,7 @@ router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), asyn
   try {
     storeId = activeStoreId(req)
   } catch {
-    return res.status(400).json({ error: 'Choose a store before adding staff.' })
+    return res.status(400).json(errorEnvelope('STORE_FORBIDDEN', 'Choose a store before adding staff.'))
   }
 
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
@@ -163,7 +164,7 @@ router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), asyn
 
   if (error || !data?.user) {
     const status = (error as { status?: number } | null)?.status === 422 ? 409 : 500
-    return res.status(status).json({ error: 'Could not send invite' })
+    return res.status(status).json(errorEnvelope(status === 409 ? 'MEMBER_CONFLICT' : 'SERVICE_UNAVAILABLE', 'Could not send invite'))
   }
 
   try {
@@ -189,7 +190,7 @@ router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), asyn
     } catch {
       // best-effort only
     }
-    return res.status(500).json({ error: 'Could not create staff record' })
+    return res.status(500).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not create staff record'))
   }
 })
 
@@ -198,7 +199,7 @@ router.post('/invite', requireOperatorOnPairedDevice, requireRole('owner'), asyn
 router.post('/:memberId/reset-pin', requireOperatorOrFirstPinSetup, requireRole('manager'), async (req, res) => {
   const parsed = ResetStaffPinSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'PIN must be exactly 4 digits.' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'PIN must be exactly 4 digits.'))
   }
 
   const client = forTenant(req.user!.tenantId) as any
@@ -206,16 +207,16 @@ router.post('/:memberId/reset-pin', requireOperatorOrFirstPinSetup, requireRole(
   try {
     storeId = activeStoreId(req)
   } catch {
-    return res.status(400).json({ error: 'Choose a store before resetting a PIN.' })
+    return res.status(400).json(errorEnvelope('STORE_FORBIDDEN', 'Choose a store before resetting a PIN.'))
   }
   const target = await client.staff_members.findFirst({
     where: { id: req.params.memberId, store_id: storeId },
   })
-  if (!target) return res.status(404).json({ error: 'Member not found' })
+  if (!target) return res.status(404).json(errorEnvelope('MEMBER_NOT_FOUND', 'Member not found'))
 
   const actingRole = req.actingStaff?.role ?? req.user!.role
   if (actingRole === 'manager' && target.role !== 'cashier') {
-    return res.status(403).json({ error: 'Managers can reset cashier PINs only.' })
+    return res.status(403).json(errorEnvelope('FORBIDDEN', 'Managers can reset cashier PINs only.'))
   }
 
   const updated = await client.staff_members.update({
@@ -249,7 +250,7 @@ router.post('/:memberId/reset-pin', requireOperatorOrFirstPinSetup, requireRole(
 router.patch('/:memberId/role', requireOperatorOnPairedDevice, requireRole('owner'), async (req, res) => {
   const parsed = UpdateMemberRoleSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid request'))
   }
 
   const client = forTenant(req.user!.tenantId) as any
@@ -259,7 +260,7 @@ router.patch('/:memberId/role', requireOperatorOnPairedDevice, requireRole('owne
       where: { id: req.params.memberId },
     })
     if (!target) {
-      return res.status(404).json({ error: 'Member not found' })
+      return res.status(404).json(errorEnvelope('MEMBER_NOT_FOUND', 'Member not found'))
     }
 
     // WR-04: demoting the tenant's only remaining active owner would
@@ -272,7 +273,7 @@ router.patch('/:memberId/role', requireOperatorOnPairedDevice, requireRole('owne
         where: { role: 'owner', is_active: true },
       })
       if (activeOwners <= 1) {
-        return res.status(409).json({ error: 'Cannot remove the last owner' })
+        return res.status(409).json(errorEnvelope('MEMBER_CONFLICT', 'Cannot remove the last owner'))
       }
     }
 
@@ -282,7 +283,7 @@ router.patch('/:memberId/role', requireOperatorOnPairedDevice, requireRole('owne
     })
     return res.status(200).json(toMemberJson(staff))
   } catch {
-    return res.status(404).json({ error: 'Member not found' })
+    return res.status(404).json(errorEnvelope('MEMBER_NOT_FOUND', 'Member not found'))
   }
 })
 
@@ -299,7 +300,7 @@ router.delete('/:memberId', requireOperatorOnPairedDevice, requireRole('owner'),
       where: { id: req.params.memberId },
     })
     if (!target) {
-      return res.status(404).json({ error: 'Member not found' })
+      return res.status(404).json(errorEnvelope('MEMBER_NOT_FOUND', 'Member not found'))
     }
 
     // WR-04: deactivating the tenant's only remaining active owner would
@@ -310,7 +311,7 @@ router.delete('/:memberId', requireOperatorOnPairedDevice, requireRole('owner'),
         where: { role: 'owner', is_active: true },
       })
       if (activeOwners <= 1) {
-        return res.status(409).json({ error: 'Cannot remove the last owner' })
+        return res.status(409).json(errorEnvelope('MEMBER_CONFLICT', 'Cannot remove the last owner'))
       }
     }
 
@@ -326,7 +327,7 @@ router.delete('/:memberId', requireOperatorOnPairedDevice, requireRole('owner'),
     }
     return res.status(200).json(toMemberJson(staff))
   } catch {
-    return res.status(404).json({ error: 'Member not found' })
+    return res.status(404).json(errorEnvelope('MEMBER_NOT_FOUND', 'Member not found'))
   }
 })
 

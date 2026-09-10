@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
 import { resolveRequestAccess } from './requestAccess'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 // supabase-js 2.110 initialises a Realtime client even though this API only
 // uses Auth's `getUser()`. Node 20 has no native WebSocket, so provide the
@@ -73,7 +74,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   const bearerToken = header?.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : undefined
 
   if (!bearerToken) {
-    return res.status(401).json({ error: 'Unauthorized' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Authentication is required.'))
   }
 
   // The browser Supabase client is the sole owner of refresh-token rotation.
@@ -83,21 +84,21 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   const token = bearerToken
   const { data, error } = await supabase.auth.getUser(token)
   if (error || !data?.user) {
-    return res.status(401).json({ error: 'Unauthorized' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Your secure session is not valid.'))
   }
 
   let claims: Record<string, unknown>
   try {
     claims = decodeJwtPayload(token)
   } catch {
-    return res.status(401).json({ error: 'Unauthorized' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Your secure session is not valid.'))
   }
 
   const claimedRole = getStaffRoleClaim(claims)
   const tenantId = typeof claims.tenant_id === 'string' ? claims.tenant_id : undefined
 
   if (!claimedRole || !tenantId) {
-    return res.status(403).json({ error: 'No tenant membership found' })
+    return res.status(403).json(errorEnvelope('NO_MEMBERSHIP', 'This account has no store membership.'))
   }
 
   // JWT claims are a cache of membership state, not the authority itself.
@@ -111,7 +112,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   })
 
   if (!resolved.membership || !resolved.accessContext) {
-    return res.status(403).json({ error: 'No tenant membership found' })
+    return res.status(403).json(errorEnvelope('NO_MEMBERSHIP', 'This account has no store membership.'))
   }
 
   req.user = {

@@ -2,12 +2,10 @@ import type { NextFunction, Request, Response } from 'express'
 import { forTenant } from '../db/tenantClient'
 import { findPairedTerminal, isRegisterLocked } from '../lib/counterDevice'
 import { ROLE_RANK } from './requireRole'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 function locked(res: Response) {
-  return res.status(423).json({
-    code: 'REGISTER_LOCKED',
-    error: 'This register is locked. Enter a staff PIN to continue.',
-  })
+  return res.status(423).json(errorEnvelope('REGISTER_LOCKED', 'This register is locked. Enter a staff PIN to continue.'))
 }
 
 /**
@@ -26,7 +24,7 @@ export async function requireOperatorOnPairedDevice(
   res: Response,
   next: NextFunction,
 ) {
-  if (!req.user) return res.status(401).json({ error: 'Unauthorized' })
+  if (!req.user) return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Authentication is required.'))
 
   // authMiddleware already resolved the device inside the consolidated access
   // transaction. Retain the fallback for standalone mounting/tests only.
@@ -52,7 +50,7 @@ export async function requireOperatorOrFirstPinSetup(
   res: Response,
   next: NextFunction,
 ) {
-  if (!req.user) return res.status(401).json({ error: 'Unauthorized' })
+  if (!req.user) return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Authentication is required.'))
   if (req.actingStaff) return next()
 
   const client = forTenant(req.user.tenantId) as any

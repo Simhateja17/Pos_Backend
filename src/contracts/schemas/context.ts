@@ -25,10 +25,35 @@ export const AppContextSchema = z
         taxTreatment: z.enum(['cgst_sgst', 'igst']),
       })
       .nullable(),
+    stores: z.array(
+      z.object({
+        id: z.string().uuid(),
+        name: z.string(),
+        city: z.string().nullable(),
+        state: z.string().nullable(),
+        country: z.string(),
+        isActive: z.boolean(),
+        isOwnStore: z.boolean(),
+      }),
+    ).default([]),
+    region: z.enum(['IN', 'US']).nullable(),
+    permissions: z.array(z.string()).default([]),
+    capabilities: z.array(z.string()).default([]),
     onboarding: z.object({
       step: z.number().int().min(0).max(8),
       completed: z.boolean(),
     }),
+    operator: z.object({
+      state: z.enum(['absent', 'valid', 'invalid', 'locked']),
+      staff: z.object({
+        id: z.string().uuid(),
+        role: z.enum(['owner', 'manager', 'cashier']),
+        storeId: z.string().uuid().nullable(),
+        mustChangePin: z.boolean(),
+      }).nullable(),
+      registerLocked: z.boolean(),
+      mustChangePin: z.boolean(),
+    }).optional(),
   })
   .openapi('AppContext')
 

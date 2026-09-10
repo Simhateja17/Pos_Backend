@@ -74,6 +74,18 @@ export const AuthResponseSchema = z
   })
   .openapi('AuthResponse')
 
+export const RefreshRequestSchema = z
+  .object({ refreshToken: z.string().min(1) })
+  .openapi('RefreshRequest')
+
+export const RefreshResponseSchema = z
+  .object({
+    user: AuthResponseSchema.shape.user.optional(),
+    session: AuthResponseSchema.shape.session,
+    operatorToken: z.string().optional(),
+  })
+  .openapi('RefreshResponse')
+
 export const SetPinSchema = z
   .object({
     pin: z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits'),
@@ -88,6 +100,8 @@ export const SetPinSchema = z
 export const OwnerPinRecoveryRequestSchema = z
   .object({
     email: z.string().email(),
+    platform: z.enum(['web', 'mobile']).default('web'),
+    region: z.enum(['IN', 'US']).optional(),
   })
   .openapi('OwnerPinRecoveryRequest')
 
@@ -95,5 +109,6 @@ export type SignupInput = z.infer<typeof SignupSchema>
 export type LoginInput = z.infer<typeof LoginSchema>
 export type OtpRequestInput = z.infer<typeof OtpRequestSchema>
 export type AuthResponse = z.infer<typeof AuthResponseSchema>
+export type RefreshRequestInput = z.infer<typeof RefreshRequestSchema>
 export type SetPinInput = z.infer<typeof SetPinSchema>
 export type OwnerPinRecoveryRequestInput = z.infer<typeof OwnerPinRecoveryRequestSchema>

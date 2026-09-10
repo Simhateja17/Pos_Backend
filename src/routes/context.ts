@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { forTenantTransaction } from '../db/tenantClient'
 import { statesMatch } from '../services/taxDocuments'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 const router = Router()
 
@@ -16,7 +17,9 @@ router.get('/', async (req, res) => {
   // "which shift is mine" — must then read as that cashier, not the owner.
   const actingStaffId = req.actingStaff?.id ?? null
 
-  const { tenant, staff, store } = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+  const role = req.actingStaff?.role ?? req.user!.role
+  const ownStoreId = req.actingStaff?.storeId ?? req.user!.storeId
+  const { tenant, staff, store, stores } = await forTenantTransaction(req.user!.tenantId, async (tx) => {
     // These are intentionally sequential on one transaction client. Promise
     // parallelism against a single pg client does not reduce database work,
     // and using two independent tenant transactions was the direct source of
@@ -28,14 +31,46 @@ router.get('/', async (req, res) => {
     const store = req.storeContext?.activeStoreId
       ? await tx.stores.findFirst({ where: { id: req.storeContext.activeStoreId } })
       : null
-    return { tenant, staff, store }
+    const stores = await tx.stores.findMany({
+      where: role === 'owner' ? {} : { id: ownStoreId },
+      orderBy: [{ created_at: 'asc' }],
+    })
+    return { tenant, staff, store, stores }
   })
 
   if (!tenant) {
-    return res.status(404).json({ error: 'Tenant not found' })
+    return res.status(404).json(errorEnvelope('NO_MEMBERSHIP', 'Tenant not found'))
   }
 
   const locality = [tenant.city, tenant.state].filter(Boolean).join(', ') || null
+  const operator = req.accessContext?.operator
+  const permissions = role === 'owner'
+    ? ['context:read', 'stores:read', 'stores:select', 'members:write', 'reports:read', 'sales:write', 'inventory:write']
+    : role === 'manager'
+      ? ['context:read', 'stores:read', 'sales:write', 'inventory:write', 'reports:read']
+      : ['context:read', 'stores:read', 'sales:write']
+  const capabilities = role === 'cashier'
+    ? ['sales', 'returns:request', 'shift']
+    : ['sales', 'catalogue', 'inventory', 'reports', 'staff']
+  const operatorJson = operator?.state === 'valid'
+    ? {
+        state: 'valid' as const,
+        staff: {
+          id: operator.staff.id,
+          role: operator.staff.role,
+          storeId: operator.staff.storeId ?? null,
+          mustChangePin: Boolean(operator.staff.mustChangePin),
+        },
+        registerLocked: false,
+        mustChangePin: Boolean(operator.staff.mustChangePin),
+      }
+    : {
+        state: (operator?.state ?? 'absent') as 'absent' | 'invalid',
+        staff: null,
+        registerLocked: operator?.state === 'invalid',
+        mustChangePin: false,
+      }
+
   return res.json({
     staff: {
       id: staff?.id ?? null,
@@ -61,10 +96,23 @@ router.get('/', async (req, res) => {
             : 'igst',
         }
       : null,
+    stores: stores.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      city: row.city,
+      state: row.state,
+      country: row.country,
+      isActive: row.is_active,
+      isOwnStore: row.id === ownStoreId,
+    })),
+    region: ['IN', 'INDIA'].includes(String(tenant.country).toUpperCase()) ? 'IN' : 'US',
+    permissions,
+    capabilities,
     onboarding: {
       step: tenant.onboarding_step,
       completed: tenant.onboarding_completed_at !== null,
     },
+    operator: operatorJson,
   })
 })
 

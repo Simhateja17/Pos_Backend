@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from 'express'
 import { verifyOperatorToken } from './pinSwitch'
 import { forTenantTransaction } from '../db/tenantClient'
 import { findPairedTerminal } from '../lib/counterDevice'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 /**
  * operatorContext — verifies the X-Operator-Token header (issued by
@@ -38,7 +39,7 @@ export async function operatorContext(req: Request, res: Response, next: NextFun
   if (req.accessContext) {
     const cached = req.accessContext.operator
     if (cached.state !== 'valid') {
-      return res.status(401).json({ error: 'Invalid operator session' })
+      return res.status(401).json(errorEnvelope('OPERATOR_INVALID', 'The operator session is no longer valid.'))
     }
     req.actingStaff = cached.staff
     return next()
@@ -48,7 +49,7 @@ export async function operatorContext(req: Request, res: Response, next: NextFun
   const claims = verifyOperatorToken(tokenString)
 
   if (!claims || !req.user || claims.tenantId !== req.user.tenantId) {
-    return res.status(401).json({ error: 'Invalid operator session' })
+    return res.status(401).json(errorEnvelope('OPERATOR_INVALID', 'The operator session is no longer valid.'))
   }
 
   if (!claims.sessionId) {
@@ -84,7 +85,7 @@ export async function operatorContext(req: Request, res: Response, next: NextFun
   })
 
   if (!resolvedStoreId) {
-    return res.status(401).json({ error: 'Invalid operator session' })
+    return res.status(401).json(errorEnvelope('OPERATOR_INVALID', 'The operator session is no longer valid.'))
   }
 
   req.actingStaff = {

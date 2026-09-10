@@ -16,8 +16,11 @@ import {
   OtpRequestSchema,
   OwnerPinRecoveryRequestSchema,
   AuthResponseSchema,
+  RefreshRequestSchema,
+  RefreshResponseSchema,
   SetPinSchema,
 } from './schemas/auth'
+import { ApiErrorEnvelopeSchema } from './schemas/error'
 import {
   CreateStaffSchema,
   InviteMemberSchema,
@@ -154,6 +157,11 @@ import {
 
 const registry = new OpenAPIRegistry()
 
+const apiError = (description: string) => ({
+  description,
+  content: { 'application/json': { schema: ApiErrorEnvelopeSchema } },
+})
+
 const HardwareOverviewSchema = z.object({
   terminals: z.array(z.object({ id: z.string().uuid(), name: z.string(), cashMode: z.string(), isCurrentDevice: z.boolean() })),
   companions: z.array(z.object({ id: z.string().uuid(), terminalId: z.string().uuid(), machineName: z.string(), os: z.string(), version: z.string(), capabilities: z.record(z.string(), z.unknown()), lastSeenAt: z.string().datetime().nullable(), online: z.boolean() })),
@@ -239,8 +247,9 @@ registry.registerPath({
   description: 'Read the authenticated caller and tenant display context for the application shell.',
   responses: {
     200: { description: 'Authenticated application context', content: { 'application/json': { schema: AppContextSchema } } },
-    401: { description: 'Unauthenticated' },
-    404: { description: 'Tenant not found' },
+    401: apiError('Unauthenticated'),
+    403: apiError('No membership or register access'),
+    404: apiError('Tenant not found'),
   },
 })
 
@@ -369,15 +378,10 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Code sent (if applicable)', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
-    400: { description: 'Invalid request' },
-    404: {
-      description: 'No account found for login',
-      content: { 'application/json': { schema: z.object({ error: z.string() }) } },
-    },
-    429: {
-      description: 'Supabase OTP send cooldown is active',
-      content: { 'application/json': { schema: z.object({ error: z.string() }) } },
-    },
+    400: apiError('Invalid request'),
+    404: apiError('No account found for login'),
+    429: apiError('Supabase OTP send cooldown is active'),
+    502: apiError('OTP provider unavailable'),
   },
 })
 
@@ -390,8 +394,33 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Recovery email requested when applicable', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
-    400: { description: 'Invalid email address' },
-    502: { description: 'Recovery email provider unavailable' },
+    400: apiError('Invalid email address'),
+    502: apiError('Recovery email provider unavailable'),
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/auth/refresh',
+  description: 'Rotate a bearer access/refresh pair for mobile. Refresh tokens are single-use; a rejected or reused token ends the session.',
+  request: { body: { content: { 'application/json': { schema: RefreshRequestSchema } } } },
+  responses: {
+    200: { description: 'Rotated session pair', content: { 'application/json': { schema: RefreshResponseSchema } } },
+    400: { description: 'Missing refresh token', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+    401: { description: 'Refresh token rejected', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+    403: { description: 'No tenant membership', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+    502: { description: 'Provider temporarily unavailable', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/auth/logout',
+  description: 'Revoke the bearer session. Mobile sends Authorization; cookie compatibility is retained for the web surface.',
+  responses: {
+    204: { description: 'Session revoked' },
+    401: { description: 'Session already ended', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+    503: { description: 'Revocation could not be confirmed', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
   },
 })
 
@@ -404,9 +433,9 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Owner PIN recovered', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
-    400: { description: 'Invalid PIN' },
-    401: { description: 'Invalid or expired recovery link' },
-    403: { description: 'Owner role required' },
+    400: apiError('Invalid PIN'),
+    401: apiError('Invalid or expired recovery link'),
+    403: apiError('Owner role required'),
   },
 })
 
@@ -419,8 +448,11 @@ registry.registerPath({
   },
   responses: {
     201: { description: 'Signup successful', content: { 'application/json': { schema: AuthResponseSchema } } },
-    401: { description: 'Invalid or expired code' },
-    409: { description: 'An account already exists with this email' },
+    400: apiError('Invalid request'),
+    401: apiError('Invalid or expired code'),
+    403: apiError('No store membership'),
+    409: apiError('An account already exists with this email'),
+    502: apiError('Account session provider unavailable'),
   },
 })
 
@@ -433,7 +465,9 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Login successful', content: { 'application/json': { schema: AuthResponseSchema } } },
-    401: { description: 'Invalid or expired code' },
+    400: apiError('Invalid request'),
+    401: apiError('Invalid or expired code'),
+    403: apiError('No store membership'),
   },
 })
 
@@ -443,7 +477,8 @@ registry.registerPath({
   description: "List the caller's tenant's staff members. Requires manager or owner role.",
   responses: {
     200: { description: 'List of staff members', content: { 'application/json': { schema: z.array(MemberSchema) } } },
-    403: { description: 'Insufficient permissions' },
+    401: apiError('Unauthenticated'),
+    403: apiError('Insufficient permissions'),
   },
 })
 
@@ -454,8 +489,10 @@ registry.registerPath({
   request: { body: { content: { 'application/json': { schema: CreateStaffSchema } } } },
   responses: {
     201: { description: 'Staff profile created', content: { 'application/json': { schema: MemberSchema } } },
-    400: { description: 'Invalid staff details' },
-    403: { description: 'Insufficient permissions' },
+    400: apiError('Invalid staff details or store scope'),
+    401: apiError('Unauthenticated'),
+    403: apiError('Insufficient permissions'),
+    500: apiError('Staff profile could not be created'),
   },
 })
 
@@ -468,7 +505,11 @@ registry.registerPath({
   },
   responses: {
     201: { description: 'Invite sent and staff row created', content: { 'application/json': { schema: MemberSchema } } },
-    403: { description: 'Insufficient permissions' },
+    400: apiError('Invalid invite or store scope'),
+    401: apiError('Unauthenticated'),
+    403: apiError('Insufficient permissions'),
+    409: apiError('Member already exists'),
+    500: apiError('Invite could not be sent'),
   },
 })
 
@@ -482,8 +523,11 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Role updated', content: { 'application/json': { schema: MemberSchema } } },
-    403: { description: 'Insufficient permissions' },
-    404: { description: 'Member not found' },
+    400: apiError('Invalid request'),
+    401: apiError('Unauthenticated'),
+    403: apiError('Insufficient permissions'),
+    404: apiError('Member not found'),
+    409: apiError('Cannot remove the last owner'),
   },
 })
 
@@ -496,8 +540,10 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Member deactivated', content: { 'application/json': { schema: MemberSchema } } },
-    403: { description: 'Insufficient permissions' },
-    404: { description: 'Member not found' },
+    401: apiError('Unauthenticated'),
+    403: apiError('Insufficient permissions'),
+    404: apiError('Member not found'),
+    409: apiError('Cannot remove the last owner'),
   },
 })
 
@@ -511,8 +557,10 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'PIN reset', content: { 'application/json': { schema: MemberSchema } } },
-    403: { description: 'Insufficient permissions' },
-    404: { description: 'Member not found' },
+    400: apiError('Invalid PIN or store scope'),
+    401: apiError('Unauthenticated'),
+    403: apiError('Insufficient permissions'),
+    404: apiError('Member not found'),
   },
 })
 
@@ -630,8 +678,9 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'PIN set', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
-    400: { description: 'Invalid PIN' },
-    404: { description: 'No staff record found for this account' },
+    400: apiError('Invalid PIN'),
+    401: apiError('Unauthenticated'),
+    404: apiError('No staff record found for this account'),
   },
 })
 
@@ -641,6 +690,7 @@ registry.registerPath({
   description: 'Lock this browser as a shared register while keeping the organisation session connected.',
   responses: {
     200: { description: 'Register locked', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+    401: apiError('Unauthenticated'),
   },
 })
 
@@ -653,8 +703,11 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'PIN-switch successful', content: { 'application/json': { schema: PinSwitchResponseSchema } } },
-    401: { description: 'Incorrect PIN, locked out, or unauthenticated' },
-    409: { description: 'The browser must be paired before a register or approval session can start' },
+    400: apiError('Invalid request'),
+    401: apiError('Incorrect PIN, locked out, or unauthenticated'),
+    403: apiError('Staff member is not allowed for this store'),
+    409: apiError('The browser must be paired before a register or approval session can start'),
+    429: apiError('PIN rate limit reached'),
   },
 })
 
@@ -665,7 +718,8 @@ registry.registerPath({
   request: { body: { content: { 'application/json': { schema: ChangeOperatorPinSchema } } } },
   responses: {
     200: { description: 'PIN changed', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
-    400: { description: 'Invalid PIN or operator session' },
+    400: apiError('Invalid PIN or operator session'),
+    401: apiError('Unauthenticated'),
   },
 })
 
@@ -675,6 +729,7 @@ registry.registerPath({
   description: 'End the current cashier session while keeping the organisation/device session connected.',
   responses: {
     200: { description: 'Operator session ended', content: { 'application/json': { schema: z.object({ ok: z.boolean() }) } } },
+    401: apiError('Unauthenticated'),
   },
 })
 
@@ -1032,6 +1087,9 @@ registry.registerPath({
       description: 'Stores',
       content: { 'application/json': { schema: StoreListSchema } },
     },
+    401: apiError('Unauthenticated'),
+    403: apiError('Store access denied'),
+    423: apiError('Register is locked'),
   },
 })
 

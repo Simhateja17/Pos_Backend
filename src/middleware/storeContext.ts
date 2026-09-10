@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express'
 import { forTenant } from '../db/tenantClient'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 const STORE_HEADER = 'x-store-id'
 
@@ -66,14 +67,14 @@ async function effectiveMembershipStoreId(req: Request): Promise<string | null> 
  */
 export async function storeContextMiddleware(req: Request, res: Response, next: NextFunction) {
   if (!req.user) {
-    return res.status(401).json({ error: 'Unauthorized' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Authentication is required.'))
   }
 
   const requested = requestedStoreId(req)
   const role = effectiveRole(req)
   const membershipStoreId = await effectiveMembershipStoreId(req)
   if (!role || !membershipStoreId) {
-    return res.status(401).json({ error: 'Invalid operator session' })
+    return res.status(401).json(errorEnvelope('OPERATOR_INVALID', 'The operator session is no longer valid.'))
   }
 
   // A PIN-switched manager/cashier may only operate on the counter's store.
@@ -84,7 +85,7 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
       select: { store_id: true },
     })
     if (!terminal || terminal.store_id !== membershipStoreId) {
-      return res.status(403).json({ error: 'This operator belongs to a different store' })
+      return res.status(403).json(errorEnvelope('STORE_FORBIDDEN', 'This operator belongs to a different store.'))
     }
   }
 
@@ -102,7 +103,7 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
   // Business-wide read scope, for the owner's combined dashboard and reports.
   if (requested.toLowerCase() === 'all') {
     if (role !== 'owner') {
-      return res.status(403).json({ error: 'You can only act in your own store' })
+      return res.status(403).json(errorEnvelope('STORE_FORBIDDEN', 'You can only act in your own store.'))
     }
     req.storeContext = { scope: 'business', activeStoreId: null, actingRemotely: false }
     return next()
@@ -110,14 +111,14 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
 
   // Reject malformed input before it reaches the database.
   if (!UUID_PATTERN.test(requested)) {
-    return res.status(400).json({ error: 'Invalid store id' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid store id.'))
   }
 
   // Only an owner may operate outside their own shop. A manager or cashier
   // naming another shop is not a bad request — it is an authorization failure,
   // and it is the exact attempt this phase exists to refuse.
   if (role !== 'owner') {
-    return res.status(403).json({ error: 'You can only act in your own store' })
+    return res.status(403).json(errorEnvelope('STORE_FORBIDDEN', 'You can only act in your own store.'))
   }
 
   // Tenant-scoped, so RLS refuses another business's store id outright — this
@@ -131,7 +132,7 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
     // Deliberately does not distinguish "not yours" from "does not exist" or
     // "deactivated" — that difference is only useful to someone probing for
     // other tenants' store ids.
-    return res.status(403).json({ error: 'Store not found for this business' })
+    return res.status(403).json(errorEnvelope('STORE_FORBIDDEN', 'Store not found for this business.'))
   }
 
   // Closed shops are immutable operating scopes, but their sales, shifts,
@@ -139,7 +140,7 @@ export async function storeContextMiddleware(req: Request, res: Response, next: 
   // Owners may therefore select them for safe reads; every mutating request
   // remains blocked until the shop is explicitly reactivated.
   if (!store.is_active && req.method !== 'GET' && req.method !== 'HEAD') {
-    return res.status(409).json({ error: 'This store is closed. Reactivate it before recording new activity.' })
+    return res.status(409).json(errorEnvelope('STORE_CLOSED', 'This store is closed. Reactivate it before recording new activity.'))
   }
 
   req.storeContext = { scope: 'store', activeStoreId: store.id, actingRemotely: true }

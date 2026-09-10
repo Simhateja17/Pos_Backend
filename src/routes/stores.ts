@@ -3,6 +3,7 @@ import { forTenantTransaction } from '../db/tenantClient'
 import { storeAllowance, storeLimitMessage } from '../services/storeLimit'
 import { effectiveRole, requireRole } from '../middleware/requireRole'
 import { CreateStoreSchema, UpdateStoreSchema } from '../contracts/schemas/store'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 const router = Router()
 
@@ -69,7 +70,7 @@ router.get('/', async (req, res) => {
 router.post('/', requireRole('owner'), async (req, res) => {
   const parsed = CreateStoreSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid store', details: parsed.error.flatten() })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid store'))
   }
 
   const input = parsed.data
@@ -116,13 +117,13 @@ router.post('/', requireRole('owner'), async (req, res) => {
   } catch (error: any) {
     // 0041's case-insensitive unique index on (tenant_id, lower(name)).
     if (error?.code === 'P2002') {
-      return res.status(409).json({ error: 'A store with that name already exists' })
+      return res.status(409).json(errorEnvelope('STORE_CONFLICT', 'A store with that name already exists'))
     }
     if (error?.message?.includes('All stores must be in the business registration state')) {
-      return res.status(409).json({ error: error.message })
+      return res.status(409).json(errorEnvelope('STORE_CONFLICT', error.message))
     }
     if (error?.message?.includes('Store allowance reached')) {
-      return res.status(409).json({ error: 'Your store allowance was reached by another request. Refresh and try again.' })
+      return res.status(409).json(errorEnvelope('STORE_CONFLICT', 'Your store allowance was reached by another request. Refresh and try again.'))
     }
     throw error
   }
@@ -137,7 +138,7 @@ router.post('/', requireRole('owner'), async (req, res) => {
 router.patch('/:storeId', requireRole('owner'), async (req, res) => {
   const parsed = UpdateStoreSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid store', details: parsed.error.flatten() })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid store'))
   }
 
   const input = parsed.data
@@ -173,26 +174,21 @@ router.patch('/:storeId', requireRole('owner'), async (req, res) => {
       const updated = await tx.stores.update({ where: { id: storeId }, data })
       return { status: 200 as const, updated, allowance: null }
     })
-    if (result.status === 404) return res.status(404).json({ error: 'Store not found' })
+    if (result.status === 404) return res.status(404).json(errorEnvelope('STORE_FORBIDDEN', 'Store not found'))
     if (result.status === 409) {
-      return res.status(409).json({
-        error: result.allowance
-          ? storeLimitMessage(result.allowance)
-          : 'A business must have at least one active store',
-        ...(result.allowance ? { storeAllowance: result.allowance } : {}),
-      })
+      return res.status(409).json(errorEnvelope('STORE_CONFLICT', result.allowance ? storeLimitMessage(result.allowance) : 'A business must have at least one active store'))
     }
     const updated = result.updated!
     res.json(toStoreJson(updated, req.user!.storeId))
   } catch (error: any) {
     if (error?.code === 'P2002') {
-      return res.status(409).json({ error: 'A store with that name already exists' })
+      return res.status(409).json(errorEnvelope('STORE_CONFLICT', 'A store with that name already exists'))
     }
     if (error?.message?.includes('All stores must be in the business registration state')) {
-      return res.status(409).json({ error: error.message })
+      return res.status(409).json(errorEnvelope('STORE_CONFLICT', error.message))
     }
     if (error?.message?.includes('Store allowance reached')) {
-      return res.status(409).json({ error: 'Your store allowance was reached by another request. Refresh and try again.' })
+      return res.status(409).json(errorEnvelope('STORE_CONFLICT', 'Your store allowance was reached by another request. Refresh and try again.'))
     }
     throw error
   }

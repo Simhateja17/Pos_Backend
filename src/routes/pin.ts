@@ -8,6 +8,7 @@ import { findPairedTerminal, setRegisterLockedCookie } from '../lib/counterDevic
 import { consumeRateLimit } from '../lib/rateLimit'
 import { pinSessionRequiresTerminal } from '../lib/pinSessionPolicy'
 import { storeScopeWhere } from '../middleware/storeContext'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 const router = Router()
 const PIN_SWITCH_WINDOW_MS = 15 * 60 * 1000
@@ -20,7 +21,7 @@ const PIN_SWITCH_ACTOR_LIMIT = 30
  * the lock screen without a PIN-verified operator session.
  */
 router.post('/lock', async (req, res) => {
-  if (!req.user) return res.status(401).json({ error: 'Unauthorized' })
+  if (!req.user) return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Authentication is required.'))
 
   if (req.actingStaff?.sessionId) {
     const client = forTenant(req.user.tenantId) as any
@@ -47,11 +48,11 @@ router.post('/lock', async (req, res) => {
 router.post('/switch', async (req, res) => {
   const parsed = PinSwitchSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid request'))
   }
 
   if (!req.user) {
-    return res.status(401).json({ error: 'Unauthorized' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Authentication is required.'))
   }
 
   const { staffId, pin, sessionType } = parsed.data
@@ -68,7 +69,7 @@ router.post('/switch', async (req, res) => {
   if (!targetLimit.allowed || !actorLimit.allowed) {
     const retryAfter = Math.max(targetLimit.retryAfterSeconds, actorLimit.retryAfterSeconds)
     res.set('Retry-After', String(retryAfter))
-    return res.status(429).json({ error: 'Too many PIN attempts. Please try again later.' })
+    return res.status(429).json(errorEnvelope('RATE_LIMITED', 'Too many PIN attempts. Please try again later.', retryAfter))
   }
 
   const client = forTenant(req.user.tenantId) as any
@@ -78,7 +79,7 @@ router.post('/switch', async (req, res) => {
   // attribution. Only management authentication is allowed before pairing so
   // an owner/manager can assign this browser to a counter.
   if (!terminal && pinSessionRequiresTerminal(sessionType)) {
-    return res.status(409).json({ error: 'Assign this device to a counter before staff can sign in.' })
+    return res.status(409).json(errorEnvelope('REGISTER_LOCKED', 'Assign this device to a counter before staff can sign in.'))
   }
 
   const result = await validatePin(req.user.tenantId, staffId, pin)
@@ -88,11 +89,11 @@ router.post('/switch', async (req, res) => {
       result.reason === 'locked'
         ? 'Too many attempts. Ask a manager to unlock this terminal.'
         : 'Incorrect PIN — try again.'
-    return res.status(401).json({ error: message })
+    return res.status(401).json(errorEnvelope(result.reason === 'locked' ? 'RATE_LIMITED' : 'OPERATOR_INVALID', message))
   }
 
   if (sessionType === 'management' && result.staff.role === 'cashier') {
-    return res.status(403).json({ error: 'Owner or manager PIN required.' })
+    return res.status(403).json(errorEnvelope('FORBIDDEN', 'Owner or manager PIN required.'))
   }
 
   // A PIN is a staff identity, not a tenant-wide capability. Owners are
@@ -103,7 +104,7 @@ router.post('/switch', async (req, res) => {
     const targetStoreId = result.staff.storeId
     const requestStoreId = terminal?.store_id ?? req.storeContext?.activeStoreId
     if (!targetStoreId || !requestStoreId || targetStoreId !== requestStoreId) {
-      return res.status(403).json({ error: 'That staff member belongs to a different store.' })
+      return res.status(403).json(errorEnvelope('STORE_FORBIDDEN', 'That staff member belongs to a different store.'))
     }
   }
 
@@ -143,7 +144,7 @@ router.post('/switch', async (req, res) => {
 router.post('/change', async (req, res) => {
   const parsed = ChangeOperatorPinSchema.safeParse(req.body)
   if (!parsed.success || !req.user || !req.actingStaff?.id) {
-    return res.status(400).json({ error: 'PIN must be exactly 4 digits.' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'PIN must be exactly 4 digits.'))
   }
 
   const client = forTenant(req.user.tenantId) as any

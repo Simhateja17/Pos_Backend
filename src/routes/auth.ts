@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
 import { createClient } from '@supabase/supabase-js'
 import bcrypt from 'bcrypt'
-import { SignupSchema, LoginSchema, OtpRequestSchema, SetPinSchema, OwnerPinRecoveryRequestSchema } from '../contracts/schemas/auth'
+import { SignupSchema, LoginSchema, OtpRequestSchema, SetPinSchema, OwnerPinRecoveryRequestSchema, RefreshRequestSchema } from '../contracts/schemas/auth'
+import { errorEnvelope } from '../contracts/schemas/error'
 import { STARTER_CATEGORIES } from '../contracts/schemas/category'
 import { authMiddleware, decodeJwtPayload, getStaffRoleClaim } from '../middleware/auth'
 import { forTenant } from '../db/tenantClient'
@@ -76,7 +77,7 @@ function otpRetryAfterSeconds(error: { message?: string | null }): number {
 router.post('/otp/request', async (req, res) => {
   const parsed = OtpRequestSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid request'))
   }
 
   const { email, purpose } = parsed.data
@@ -99,9 +100,7 @@ router.post('/otp/request', async (req, res) => {
   // response as an intentionally idempotent request.
   if (purpose === 'login' && error?.status === 422) {
     console.log(`[auth:otp/request] returning 404 — no login account exists`)
-    return res.status(404).json({
-      error: 'No account found with this email. Create a store account first',
-    })
+    return res.status(404).json(errorEnvelope('NO_ACCOUNT', 'No account found with this email. Create a store account first'))
   }
 
   const providerCode = (error as { code?: string } | null)?.code
@@ -109,9 +108,7 @@ router.post('/otp/request', async (req, res) => {
     const retryAfter = otpRetryAfterSeconds(error)
     res.set('Retry-After', String(retryAfter))
     console.log(`[auth:otp/request] returning 429 — provider cooldown retryAfter=${retryAfter}s`)
-    return res.status(429).json({
-      error: `Too many code requests. Please try again in ${retryAfter} seconds.`,
-    })
+    return res.status(429).json(errorEnvelope('RATE_LIMITED', `Too many code requests. Please try again in ${retryAfter} seconds.`, retryAfter))
   }
 
   // Anything else (5xx: SMTP/provider failure, etc.) is a real delivery
@@ -119,10 +116,51 @@ router.post('/otp/request', async (req, res) => {
   // sent just strands the caller waiting for a code that will never arrive.
   if (error && error.status !== 422) {
     console.log(`[auth:otp/request] returning 502 — real send failure, not the expected 422`)
-    return res.status(502).json({ error: 'Could not send the code. Please try again shortly.' })
+    return res.status(502).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not send the code. Please try again shortly.'))
   }
 
   return res.status(200).json({ ok: true })
+})
+
+/**
+ * POST /refresh is the mobile refresh owner. The caller sends the current
+ * rotating refresh token in the body; the backend returns the complete new
+ * pair and never logs either token. A rejected/reused token is terminal for
+ * that session, while provider/network failures remain retryable on the
+ * client.
+ */
+router.post('/refresh', async (req, res) => {
+  const parsed = RefreshRequestSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'A refresh token is required.'))
+  }
+
+  const { data, error } = await supabaseAnon.auth.refreshSession({ refresh_token: parsed.data.refreshToken })
+  if (error || !data?.session || !data.user) {
+    const providerStatus = error?.status
+    if (providerStatus && providerStatus >= 500) {
+      return res.status(502).json(errorEnvelope('SERVICE_UNAVAILABLE', 'The secure session service is unavailable. Try again shortly.'))
+    }
+    return res.status(401).json(errorEnvelope('REFRESH_REJECTED', 'Your secure session has ended. Sign in again.'))
+  }
+
+  let claims: Record<string, unknown>
+  try {
+    claims = decodeJwtPayload(data.session.access_token)
+  } catch {
+    return res.status(401).json(errorEnvelope('REFRESH_REJECTED', 'Your secure session has ended. Sign in again.'))
+  }
+  const role = getStaffRoleClaim(claims)
+  const tenantId = typeof claims.tenant_id === 'string' ? claims.tenant_id : undefined
+  if (!role || !tenantId) {
+    return res.status(403).json(errorEnvelope('NO_MEMBERSHIP', 'This account no longer has store access.'))
+  }
+
+  res.set('Cache-Control', 'no-store')
+  return res.json({
+    user: { id: data.user.id, email: data.user.email, role, tenantId },
+    session: { accessToken: data.session.access_token, refreshToken: data.session.refresh_token },
+  })
 })
 
 /**
@@ -149,7 +187,7 @@ router.post('/otp/request', async (req, res) => {
 router.post('/signup', async (req, res) => {
   const parsed = SignupSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid request'))
   }
 
   const {
@@ -184,7 +222,7 @@ router.post('/signup', async (req, res) => {
 
   if (verifyError || !verifyData?.user || !verifyData.session) {
     console.log(`[auth:signup] verifyOtp failed status=${verifyError?.status} code=${(verifyError as { code?: string } | undefined)?.code} message=${verifyError?.message}`)
-    return res.status(401).json({ error: 'Invalid or expired code' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Invalid or expired code'))
   }
   console.log(`[auth:signup] verifyOtp ok userId=${verifyData.user.id}`)
 
@@ -198,13 +236,11 @@ router.post('/signup', async (req, res) => {
     const existingClaims = decodeJwtPayload(verifyData.session.access_token)
     if (existingClaims.tenant_id) {
       console.log(`[auth:signup] userId=${newUser.id} already has tenant_id claim — duplicate account, 409`)
-      return res.status(409).json({
-        error: 'An account already exists with this email. Log in instead',
-      })
+      return res.status(409).json(errorEnvelope('DUPLICATE_ACCOUNT', 'An account already exists with this email. Log in instead'))
     }
   } catch (decodeError) {
     console.log(`[auth:signup] decodeJwtPayload threw: ${decodeError instanceof Error ? decodeError.message : decodeError}`)
-    return res.status(401).json({ error: 'Invalid or expired code' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Invalid or expired code'))
   }
 
   const tenantId = randomUUID()
@@ -292,7 +328,7 @@ router.post('/signup', async (req, res) => {
 
     if (refreshError || !refreshed?.session) {
       console.log(`[auth:signup] tenant=${tenantId} created but refreshSession failed status=${refreshError?.status} message=${refreshError?.message}`)
-      return res.status(500).json({ error: 'Account created but failed to start a session. Please log in.' })
+      return res.status(503).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Account created but failed to start a session. Please log in.'))
     }
 
     console.log(`[auth:signup] tenant=${tenantId} userId=${newUser.id} complete — 201`)
@@ -326,7 +362,7 @@ router.post('/signup', async (req, res) => {
     } catch (cleanupError) {
       console.log(`[auth:signup] cleanup deleteUser(${newUser.id}) also failed: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`)
     }
-    return res.status(500).json({ error: 'Failed to create account. Please try again.' })
+    return res.status(500).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Failed to create account. Please try again.'))
   }
 })
 
@@ -342,7 +378,7 @@ router.post('/signup', async (req, res) => {
 router.post('/login', async (req, res) => {
   const parsed = LoginSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid request'))
   }
 
   const { email, otp } = parsed.data
@@ -352,7 +388,7 @@ router.post('/login', async (req, res) => {
 
   if (error || !data?.session || !data.user) {
     console.log(`[auth:login] verifyOtp failed status=${error?.status} code=${(error as { code?: string } | undefined)?.code} message=${error?.message}`)
-    return res.status(401).json({ error: 'Invalid or expired code' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Invalid or expired code'))
   }
   console.log(`[auth:login] verifyOtp ok userId=${data.user.id}`)
 
@@ -369,7 +405,7 @@ router.post('/login', async (req, res) => {
     claims = decodeJwtPayload(data.session.access_token)
   } catch (decodeError) {
     console.log(`[auth:login] decodeJwtPayload threw: ${decodeError instanceof Error ? decodeError.message : decodeError}`)
-    return res.status(401).json({ error: 'Invalid or expired code' })
+    return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Invalid or expired code'))
   }
 
   const role = getStaffRoleClaim(claims)
@@ -377,7 +413,7 @@ router.post('/login', async (req, res) => {
 
   if (!role || !tenantId) {
     console.log(`[auth:login] userId=${data.user.id} missing role/tenant_id claim (role=${role} tenantId=${tenantId}) — no staff_members row?`)
-    return res.status(401).json({ error: 'Invalid or expired code' })
+    return res.status(401).json(errorEnvelope('NO_MEMBERSHIP', 'This account no longer has store access.'))
   }
   console.log(`[auth:login] userId=${data.user.id} role=${role} tenantId=${tenantId} — 200`)
 
@@ -395,7 +431,7 @@ router.post('/login', async (req, res) => {
     })
     if (!owner) {
       console.log(`[auth:login] userId=${data.user.id} owner membership disappeared after OTP verification`)
-      return res.status(401).json({ error: 'Invalid or expired code' })
+      return res.status(401).json(errorEnvelope('UNAUTHENTICATED', 'Invalid or expired code'))
     }
     const now = new Date()
     const managementSession = await client.staff_sessions.create({
@@ -448,11 +484,33 @@ router.post('/logout', async (req, res) => {
   const token = bearerToken ?? accessToken
 
   if (token) {
+    // Revoke durable operator sessions belonging to the authenticated account
+    // before ending the bearer session. This is best-effort and never exposes
+    // token claims to the caller; the next request still revalidates the JWT.
+    try {
+      const { data: userData } = await supabaseAnon.auth.getUser(token)
+      if (userData?.user) {
+        const claims = decodeJwtPayload(token)
+        const tenantId = typeof claims.tenant_id === 'string' ? claims.tenant_id : null
+        if (tenantId) {
+          const client = forTenant(tenantId) as any
+          await client.staff_sessions.updateMany({
+            where: { staff_members: { user_id: userData.user.id }, logged_out_at: null },
+            data: { logged_out_at: new Date(), logout_reason: 'global_logout', last_seen_at: new Date() },
+          })
+        }
+      }
+    } catch (operatorError) {
+      console.error('[auth:logout] operator-session revocation failed', operatorError)
+    }
     const { error } = await supabaseAdmin.auth.admin.signOut(token, 'global')
     if (error) {
       console.error('[auth:logout] Supabase session revocation failed', error)
       clearAuthCookies(res)
-      return res.status(503).json({ error: 'Could not end the secure session. Please try again.' })
+      if (error.status === 401 || error.status === 403) {
+        return res.status(401).json(errorEnvelope('SESSION_REVOKED', 'Your secure session has already ended.'))
+      }
+      return res.status(503).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not end the secure session. Please try again.'))
     }
   }
 
@@ -489,7 +547,7 @@ router.get('/session', async (req, res) => {
 router.post('/set-pin', authMiddleware, async (req, res) => {
   const parsed = SetPinSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid PIN', details: parsed.error.flatten() })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid PIN'))
   }
 
   const pinHash = await bcrypt.hash(parsed.data.pin, 10)
@@ -515,7 +573,7 @@ router.post('/set-pin', authMiddleware, async (req, res) => {
     // req.user.id has no matching staff_members row — shouldn't happen for
     // a real authenticated staff session, but fail loudly rather than
     // silently succeeding.
-    return res.status(404).json({ error: 'No staff record found for this account' })
+    return res.status(404).json(errorEnvelope('NO_MEMBERSHIP', 'No staff record found for this account'))
   }
 
   if (isFirstActivation && existing) {
@@ -549,13 +607,15 @@ router.post('/set-pin', authMiddleware, async (req, res) => {
 router.post('/owner-pin-recovery/request', async (req, res) => {
   const parsed = OwnerPinRecoveryRequestSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid email address' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid email address'))
   }
 
-  const { email } = parsed.data
+  const { email, platform, region } = parsed.data
   console.log(`[auth:owner-pin-recovery:request] email=${maskEmail(email)}`)
 
-  const redirectTo = process.env.OWNER_PIN_RECOVERY_REDIRECT_URL
+  const redirectTo = platform === 'mobile'
+    ? `ambelpos://owner-pin-recovery?region=${region ?? 'US'}`
+    : process.env.OWNER_PIN_RECOVERY_REDIRECT_URL
   const { error } = await supabaseAnon.auth.resetPasswordForEmail(email, { redirectTo })
 
   if (error) {
@@ -563,7 +623,7 @@ router.post('/owner-pin-recovery/request', async (req, res) => {
     // A real send failure (provider down) is distinguishable server-side
     // and does not leak account existence — "we could not send anything"
     // is true regardless of whether the address is registered.
-    return res.status(502).json({ error: 'Could not send recovery email' })
+    return res.status(502).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not send recovery email'))
   }
 
   return res.status(200).json({ ok: true })
@@ -582,12 +642,12 @@ router.post('/owner-pin-recovery/request', async (req, res) => {
  */
 router.post('/owner-pin-recovery/confirm', authMiddleware, async (req, res) => {
   if (req.user!.role !== 'owner') {
-    return res.status(403).json({ error: 'Owner role required' })
+    return res.status(403).json(errorEnvelope('FORBIDDEN', 'Owner role required'))
   }
 
   const parsed = SetPinSchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid PIN', details: parsed.error.flatten() })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid PIN'))
   }
 
   const pinHash = await bcrypt.hash(parsed.data.pin, 10)
@@ -599,14 +659,14 @@ router.post('/owner-pin-recovery/confirm', authMiddleware, async (req, res) => {
   })
 
   if (updated.count === 0) {
-    return res.status(404).json({ error: 'No staff record found for this account' })
+    return res.status(404).json(errorEnvelope('NO_MEMBERSHIP', 'No staff record found for this account'))
   }
 
   // Revoke this owner's other active PIN-switch sessions — a recovery is a
   // credential reset, and an old session minted under the forgotten PIN
   // must not keep working after it.
   await client.staff_sessions.updateMany({
-    where: { staff_id: req.user!.id, logged_out_at: null },
+    where: { staff_members: { user_id: req.user!.id }, logged_out_at: null },
     data: { logged_out_at: new Date() },
   })
 
