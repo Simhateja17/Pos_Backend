@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { DashboardQuerySchema } from '../contracts/schemas/dashboard'
 import { storeScopeWhere } from '../middleware/storeContext'
 import { forTenantTransaction } from '../db/tenantClient'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 const router = Router()
 const RANGE_DAYS = { '7d': 7, '14d': 14, '30d': 30 } as const
@@ -81,7 +82,7 @@ function sumAmounts(rows: Array<{ total_amount: Prisma.Decimal | string | number
  */
 router.get('/', async (req, res) => {
   const parsed = DashboardQuerySchema.safeParse(req.query)
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid dashboard range' })
+  if (!parsed.success) return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid dashboard range.'))
 
   const now = new Date()
   // Phase 8: every fact below is per-shop. Under store scope this narrows to

@@ -6,6 +6,7 @@ import { allowsFractionalQuantity } from '../contracts/schemas/product'
 import { ROLE_RANK } from '../middleware/requireRole'
 import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
 import { forTenant } from '../db/tenantClient'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 const router = Router()
 const MAX_STOCK_QUANTITY = 999_999_999.999
@@ -132,10 +133,10 @@ router.post('/', async (req, res) => {
 router.get('/', async (req, res) => {
   const variantId = req.query.variantId as string | undefined
   if (!variantId) {
-    return res.status(400).json({ error: 'variantId query parameter is required' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'variantId query parameter is required.'))
   }
   if (!z.string().uuid().safeParse(variantId).success) {
-    return res.status(400).json({ error: 'Invalid variantId' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid variantId.'))
   }
   const client = forTenant(req.user!.tenantId) as any
   const rows = await client.stock_movements.findMany({

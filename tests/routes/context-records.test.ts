@@ -9,6 +9,7 @@ const getUserMock = vi.fn()
 const tenantsFindFirstMock = vi.fn()
 const staffFindFirstMock = vi.fn()
 const storesFindFirstMock = vi.fn()
+const storesFindManyMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 const customersFindManyMock = vi.fn()
 const customersCountMock = vi.fn()
@@ -40,7 +41,7 @@ vi.mock('../../src/db/tenantClient', () => ({
   forTenantTransaction: vi.fn(async (_tenantId: string, callback: (tx: any) => Promise<unknown>) =>
     callback({
       tenants: { findFirst: tenantsFindFirstMock },
-      stores: { findFirst: storesFindFirstMock },
+      stores: { findFirst: storesFindFirstMock, findMany: storesFindManyMock },
       staff_members: {
         findFirst: (args: { where?: { role?: string } }) =>
           args.where?.role ? membershipFindFirstMock(args) : staffFindFirstMock(args),
@@ -86,6 +87,7 @@ describe('context and tenant record read routes', () => {
       id: 'store-1', name: 'Bandra', city: 'Mumbai', state: 'Maharashtra',
       tax_rate_state: 0.025, tax_rate_county: 0.01, tax_rate_city: 0.005, tax_rate_district: 0,
     })
+    storesFindManyMock.mockReset().mockResolvedValue([{ id: 'store-1', name: 'Bandra', city: 'Mumbai', state: 'Maharashtra', country: 'IN', is_active: true }])
     customersFindManyMock.mockReset().mockResolvedValue([])
     customersCountMock.mockReset().mockResolvedValue(0)
     salesFindManyMock.mockReset().mockResolvedValue([])
@@ -104,7 +106,7 @@ describe('context and tenant record read routes', () => {
 
   it('returns only verified caller/tenant display context and ignores forged tenant query data', async () => {
     tenantsFindFirstMock.mockResolvedValue({
-      id: 'tenant-real', business_name: 'Real Shop', city: 'Mumbai', state: 'Maharashtra', onboarding_step: 3, onboarding_completed_at: null,
+      id: 'tenant-real', business_name: 'Real Shop', country: 'IN', city: 'Mumbai', state: 'Maharashtra', onboarding_step: 3, onboarding_completed_at: null,
     })
     staffFindFirstMock.mockResolvedValue({ id: 'staff-1', name: 'Real Owner' })
     const app = await buildApp()
@@ -116,6 +118,11 @@ describe('context and tenant record read routes', () => {
       tenant: { id: 'tenant-real', businessName: 'Real Shop', locality: 'Mumbai, Maharashtra' },
       store: { id: 'store-1', name: 'Bandra', locality: 'Mumbai, Maharashtra', combinedTaxRatePercent: '4.0000', taxTreatment: 'cgst_sgst' },
       onboarding: { step: 3, completed: false },
+      stores: [{ id: 'store-1', name: 'Bandra', city: 'Mumbai', state: 'Maharashtra', country: 'IN', isActive: true, isOwnStore: true }],
+      region: 'IN',
+      permissions: ['context:read', 'stores:read', 'stores:select', 'members:write', 'reports:read', 'sales:write', 'inventory:write'],
+      capabilities: ['sales', 'catalogue', 'inventory', 'reports', 'staff'],
+      operator: { state: 'absent', staff: null, registerLocked: false, mustChangePin: false },
     })
     const { forTenantTransaction } = await import('../../src/db/tenantClient')
     expect(forTenantTransaction).toHaveBeenCalledWith('tenant-real', expect.any(Function))

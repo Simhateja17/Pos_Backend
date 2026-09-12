@@ -30,6 +30,7 @@ import {
   CustomerPurchaseListQuerySchema,
   UpdateCustomerInputSchema,
 } from '../contracts/schemas/customer'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 const router = Router()
 const customerIdSchema = z.string().uuid()
@@ -105,7 +106,7 @@ function writeErrorResponse(error: unknown, res: any) {
  */
 router.get('/records', async (req, res) => {
   const parsed = CustomerListQuerySchema.safeParse(req.query)
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid customer query' })
+  if (!parsed.success) return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid customer query.'))
 
   const client = forTenant(req.user!.tenantId) as any
   const where: any = {}

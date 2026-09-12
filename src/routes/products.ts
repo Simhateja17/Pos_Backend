@@ -1,13 +1,19 @@
 import { Router, type Request } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
-import { CreateProductSchema, UpdateProductSchema, UpdateVariantSchema } from '../contracts/schemas/product'
+import {
+  CreateProductSchema,
+  ProductRecordsQuerySchema,
+  UpdateProductSchema,
+  UpdateVariantSchema,
+} from '../contracts/schemas/product'
 import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
 import { activeStoreId } from '../middleware/storeContext'
 import { effectivePricesForVariants } from '../lib/storePricing'
 import { findExactVariant } from '../services/catalogLookup'
+import { errorEnvelope } from '../contracts/schemas/error'
 
 const uuidSchema = z.string().uuid()
 
@@ -234,6 +240,74 @@ router.get('/', async (req, res) => {
       ),
     ),
   )
+})
+
+/**
+ * GET /records — paginated catalog read model for operational clients.
+ *
+ * Checkout keeps using GET / because that legacy response is intentionally an
+ * array. Mobile/admin record pages use this envelope so a large catalog can be
+ * searched and appended without loading the tenant's entire catalog at once.
+ */
+router.get('/records', async (req, res) => {
+  const parsed = ProductRecordsQuerySchema.safeParse(req.query)
+  if (!parsed.success) return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid product query.'))
+
+  const client = forTenant(req.user!.tenantId) as any
+  const where: any = {}
+  const search = parsed.data.search?.trim()
+  if (search) {
+    const exact = await findExactVariant(client, search, req.user!.tenantId)
+    if (exact) {
+      where.id = exact.product_id
+    } else {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { variants: { some: { sku: { contains: search, mode: 'insensitive' } } } },
+        { variants: { some: { barcode: { contains: search } } } },
+        { variants: { some: { size: { contains: search, mode: 'insensitive' } } } },
+        { variants: { some: { color: { contains: search, mode: 'insensitive' } } } },
+        { variants: { some: { material: { contains: search, mode: 'insensitive' } } } },
+      ]
+    }
+  }
+  if (parsed.data.cursor) where.created_at = { lt: new Date(parsed.data.cursor) }
+
+  const [rows, total] = await Promise.all([
+    client.products.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      take: parsed.data.limit + 1,
+      include: { variants: { orderBy: { created_at: 'asc' } } },
+    }),
+    client.products.count({ where }),
+  ])
+  const hasMore = rows.length > parsed.data.limit
+  const page = rows.slice(0, parsed.data.limit)
+  const variantRows: VariantRow[] = page.flatMap((product: any) => product.variants as VariantRow[])
+  const stockByVariant = await stockLevelsFor(client, req, variantRows.map((variant) => variant.id))
+  const categoryNameById = await categoryNames(client)
+  const effectivePrices = req.storeContext?.scope === 'store'
+    ? await effectivePricesForVariants(client, activeStoreId(req), variantRows as any)
+    : variantRows.map((variant) => variant.price)
+  const effectivePriceByVariant = new Map(variantRows.map((variant, index) => [variant.id, effectivePrices[index]]))
+  const includeCostBasis = canReadCostBasis(req)
+  const items = page.map((product: any) => toProductJson(
+    product,
+    product.variants.map((variant: VariantRow) => toVariantJson(
+      variant,
+      Number(stockByVariant.get(variant.id) ?? 0),
+      effectivePriceByVariant.get(variant.id),
+      includeCostBasis,
+    )),
+    categoryNameById,
+  ))
+
+  return res.json({
+    items,
+    total,
+    nextCursor: hasMore ? page[page.length - 1].created_at.toISOString() : null,
+  })
 })
 
 /**

@@ -27,8 +27,11 @@ import {
 } from '../lib/customerCredit'
 import { ensureTaxInvoice } from '../services/taxDocuments'
 import { formatCompanionReceipt, type CompanionReceiptSale } from '../lib/hardwareReceipt'
+import { errorEnvelope } from '../contracts/schemas/error'
+import saleQuoteRouter from './saleQuote'
 
 const router = Router()
+router.use(saleQuoteRouter)
 
 const ZERO = new Prisma.Decimal(0)
 const RECEIPT_RESEND_COOLDOWN_MS = 60 * 1000
@@ -47,6 +50,54 @@ const SALE_LINE_INCLUDE = {
     },
   },
 } as const
+
+type SalesRange = 'today' | '7d' | 'month'
+
+type ZonedParts = { year: number; month: number; day: number; hour: number; minute: number; second: number }
+
+function zonedParts(value: Date, timeZone: string): ZonedParts {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(value)
+  const values = Object.fromEntries(
+    parts.filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]),
+  ) as Record<string, number>
+  return {
+    year: values.year,
+    month: values.month,
+    day: values.day,
+    hour: values.hour % 24,
+    minute: values.minute,
+    second: values.second,
+  }
+}
+
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = zonedParts(instant, timeZone)
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - instant.getTime()
+}
+
+function wallClockToInstant(wallClockAsUtc: number, timeZone: string): Date {
+  const firstGuess = new Date(wallClockAsUtc - zoneOffsetMs(new Date(wallClockAsUtc), timeZone))
+  return new Date(wallClockAsUtc - zoneOffsetMs(firstGuess, timeZone))
+}
+
+/** Server-owned local range boundaries. The client sends only the named range. */
+function rangeStart(now: Date, timeZone: string, range: SalesRange): Date {
+  const localNow = zonedParts(now, timeZone)
+  const daysAgo = range === 'today' ? 0 : range === '7d' ? 7 : 0
+  const localDay = range === 'month'
+    ? Date.UTC(localNow.year, localNow.month - 1, 1, 0, 0, 0)
+    : Date.UTC(localNow.year, localNow.month - 1, localNow.day - daysAgo, 0, 0, 0)
+  return wallClockToInstant(localDay, timeZone)
+}
 
 // D-05 body-dependent role gate — mirrors stockMovements.ts's isAllowedToAdjust
 // exactly, reusing the same ROLE_RANK import and acting-identity precedence
@@ -413,7 +464,7 @@ router.post('/', async (req, res) => {
       for (const line of parsed.data.lines) {
         const variant = await tx.variants.findFirst({
           where: { id: line.variantId },
-          include: { products: { select: { name: true } } },
+          include: { products: { select: { name: true, is_active: true } } },
         })
         if (!variant) {
           missingVariantIds.push(line.variantId)
@@ -863,7 +914,7 @@ router.get('/payments', requireRole('manager'), async (req, res) => {
 router.get('/records', async (req, res) => {
   const client = forTenant(req.user!.tenantId) as any
   const parsed = SaleListQuerySchema.safeParse(req.query)
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid sale query' })
+  if (!parsed.success) return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid sale query.'))
   const where: any = {}
   Object.assign(where, storeScopeWhere(req))
 
@@ -873,7 +924,7 @@ router.get('/records', async (req, res) => {
   const actingRole = req.actingStaff?.role ?? req.user!.role
   if (actingRole === 'cashier') {
     const terminal = await findPairedTerminal(client, req)
-    if (!terminal) return res.status(409).json({ error: 'This device is not paired to a counter.' })
+    if (!terminal) return res.status(409).json(errorEnvelope('REGISTER_LOCKED', 'This device is not paired to a counter.'))
     const currentShift = await client.shifts.findFirst({
       where: { ...storeScopeWhere(req), terminal_id: terminal.id, closed_at: null },
       select: { id: true },
@@ -882,7 +933,16 @@ router.get('/records', async (req, res) => {
     where.shift_id = currentShift.id
   }
   if (parsed.data.status) where.status = parsed.data.status
-  if (parsed.data.from || parsed.data.to || parsed.data.cursor) {
+  if (parsed.data.range) {
+    const tenant = await client.tenants.findFirst({ select: { timezone: true } })
+    const timeZone = tenant?.timezone?.trim() || 'UTC'
+    const now = new Date()
+    where.created_at = {
+      gte: rangeStart(now, timeZone, parsed.data.range),
+      lte: now,
+      ...(parsed.data.cursor ? { lt: new Date(parsed.data.cursor) } : {}),
+    }
+  } else if (parsed.data.from || parsed.data.to || parsed.data.cursor) {
     where.created_at = {
       ...(parsed.data.from ? { gte: new Date(parsed.data.from) } : {}),
       ...(parsed.data.to ? { lte: new Date(parsed.data.to) } : {}),

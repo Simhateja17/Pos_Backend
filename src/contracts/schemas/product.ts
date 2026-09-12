@@ -184,3 +184,20 @@ export type Variant = z.infer<typeof VariantSchema>
 export type CreateProductInput = z.infer<typeof CreateProductSchema>
 export type UpdateVariantInput = z.infer<typeof UpdateVariantSchema>
 export type UpdateProductInput = z.infer<typeof UpdateProductSchema>
+
+/** Read-only catalog page used by mobile and other non-checkout clients. */
+export const ProductRecordsQuerySchema = z
+  .object({
+    search: z.string().trim().max(100).optional(),
+    cursor: z.string().datetime({ offset: true }).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+  })
+  .openapi('ProductRecordsQuery')
+
+export const ProductRecordsSchema = z
+  .object({
+    items: z.array(ProductSchema),
+    total: z.number().int().nonnegative(),
+    nextCursor: z.string().datetime({ offset: true }).nullable(),
+  })
+  .openapi('ProductRecords')

@@ -130,10 +130,15 @@ export const SaleListQuerySchema = z
   .object({
     search: z.string().trim().max(100).optional(),
     status: z.string().trim().max(50).optional(),
+    range: z.enum(['today', '7d', 'month']).optional(),
     from: z.string().datetime({ offset: true }).optional(),
     to: z.string().datetime({ offset: true }).optional(),
     cursor: z.string().datetime({ offset: true }).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(25),
+  })
+  .refine((query) => !query.range || (!query.from && !query.to), {
+    message: 'range cannot be combined with from or to',
+    path: ['range'],
   })
   .refine((query) => !query.from || !query.to || new Date(query.from) <= new Date(query.to), {
     message: 'from must be before to',
@@ -170,3 +175,22 @@ export type CreateSaleInput = z.infer<typeof CreateSaleSchema>
 export type Sale = z.infer<typeof SaleSchema>
 export type ResendReceiptInput = z.infer<typeof ResendReceiptInputSchema>
 export type ResendReceiptResponse = z.infer<typeof ResendReceiptResponseSchema>
+
+/** Online preview only. Final checkout rechecks stock, price, tax and shift. */
+export const SaleQuoteRequestSchema = z.object({
+  lines: z.array(z.object({
+    variantId: z.string().uuid(),
+    quantity: z.number().int().positive().max(1000000),
+  }).strict()).min(1).max(200),
+}).strict().openapi('SaleQuoteRequest')
+
+export const SaleQuoteSchema = z.object({
+  storeId: z.string().uuid(),
+  currency: z.string(),
+  subtotal: z.string(),
+  taxAmount: z.string(),
+  totalAmount: z.string(),
+  lines: z.array(z.object({
+    variantId: z.string().uuid(), productName: z.string(), quantity: z.number(), unitPrice: z.string(),
+  })),
+}).openapi('SaleQuote')

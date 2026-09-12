@@ -29,10 +29,18 @@ import {
   UpdateMemberRoleSchema,
 } from './schemas/member'
 import { ChangeOperatorPinSchema, PinSwitchSchema, PinSwitchResponseSchema, StaffSessionSchema } from './schemas/pin'
-import { ProductSchema, CreateProductSchema, VariantSchema, UpdateProductSchema, UpdateVariantSchema } from './schemas/product'
+import {
+  ProductRecordsQuerySchema,
+  ProductRecordsSchema,
+  ProductSchema,
+  CreateProductSchema,
+  VariantSchema,
+  UpdateProductSchema,
+  UpdateVariantSchema,
+} from './schemas/product'
 import { MasterItemListSchema, MasterItemSearchSchema } from './schemas/masterItem'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
-import { CreateSaleSchema, SaleSchema, SaleListQuerySchema, SaleListSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema } from './schemas/sale'
+import { CreateSaleSchema, SaleSchema, SaleListQuerySchema, SaleListSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema, SaleQuoteRequestSchema, SaleQuoteSchema } from './schemas/sale'
 import { CreateReturnSchema, ReturnResponseSchema } from './schemas/return'
 import {
   CreateCustomerInputSchema,
@@ -260,8 +268,11 @@ registry.registerPath({
   request: { query: DashboardQuerySchema },
   responses: {
     200: { description: 'Tenant dashboard read model', content: { 'application/json': { schema: DashboardSchema } } },
-    400: { description: 'Invalid dashboard range' },
-    401: { description: 'Unauthenticated' },
+    400: apiError('Invalid dashboard range'),
+    401: apiError('Unauthenticated'),
+    402: apiError('An active subscription is required'),
+    403: apiError('Manager or owner role required'),
+    409: apiError('Register or store access is unavailable'),
   },
 })
 
@@ -576,6 +587,20 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/products/records',
+  description: "Paginated tenant-scoped catalog records with server-side search. Checkout compatibility continues to use GET /products.",
+  request: { query: ProductRecordsQuerySchema },
+  responses: {
+    200: { description: 'Paginated products', content: { 'application/json': { schema: ProductRecordsSchema } } },
+    400: apiError('Invalid product query'),
+    401: apiError('Unauthenticated'),
+    403: apiError('Store or register access is not available'),
+    402: apiError('An active subscription is required'),
+  },
+})
+
+registry.registerPath({
+  method: 'get',
   path: '/master-items',
   description: 'Search Ambel-curated regional item identities for inventory autocomplete. Manager+.',
   request: { query: MasterItemSearchSchema },
@@ -666,6 +691,10 @@ registry.registerPath({
   description: 'Variants at or below their reorder threshold (INV-03).',
   responses: {
     200: { description: 'Low-stock variants', content: { 'application/json': { schema: z.array(LowStockVariantSchema) } } },
+    401: apiError('Unauthenticated'),
+    402: apiError('An active subscription is required'),
+    403: apiError('Manager or owner role required'),
+    409: apiError('Register or store access is unavailable'),
   },
 })
 
@@ -744,6 +773,18 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: 'post', path: '/sales/quote',
+  description: 'Read-only online total for whole-quantity carts without discounts. No reservation; POST /sales revalidates all state.',
+  request: { body: { content: { 'application/json': { schema: SaleQuoteRequestSchema } } } },
+  responses: {
+    200: { description: 'Server total', content: { 'application/json': { schema: SaleQuoteSchema } } },
+    400: { description: 'Invalid cart or store scope' },
+    404: { description: 'Store or item not found' },
+    409: { description: 'Inactive item or insufficient stock' },
+  },
+})
+
+registry.registerPath({
   method: 'post',
   path: '/sales',
   description: "Complete a checkout sale — server recomputes totals, enforces payment-sum, requires a customer credit sale to remain within the customer's configured credit limit, gates above-threshold discounts behind manager+ approval, and writes sale+lines+payments+stock movements plus any credit ledger row atomically. Response includes the sale's payments array.",
@@ -763,6 +804,11 @@ registry.registerPath({
   request: { query: SaleListQuerySchema },
   responses: {
     200: { description: 'Paginated sales', content: { 'application/json': { schema: SaleListSchema } } },
+    400: apiError('Invalid sale query or incompatible range/from/to filters'),
+    401: apiError('Unauthenticated'),
+    402: apiError('An active subscription is required'),
+    403: apiError('Insufficient permissions'),
+    409: apiError('Register or paired-terminal access is unavailable'),
   },
 })
 
@@ -879,7 +925,10 @@ registry.registerPath({
   request: { query: CustomerListQuerySchema },
   responses: {
     200: { description: 'Paginated customers', content: { 'application/json': { schema: CustomerListSchema } } },
-    400: { description: 'Invalid customer filters' },
+    400: apiError('Invalid customer filters'),
+    401: apiError('Unauthenticated'),
+    402: apiError('An active subscription is required'),
+    403: apiError('Insufficient permissions'),
   },
 })
 

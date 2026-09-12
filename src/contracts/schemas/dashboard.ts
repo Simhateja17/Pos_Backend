@@ -43,7 +43,10 @@ const LowStockItemSchema = z.object({
   productName: z.string(),
   sku: z.string(),
   quantity: z.number(),
-  reorderThreshold: z.number().int(),
+  // numeric(12,3): weighted/volume variants can use fractional reorder
+  // points, and the dashboard must preserve the same precision as catalog
+  // and stock contracts.
+  reorderThreshold: z.number(),
 }).openapi('DashboardLowStockItem')
 
 const ActionableItemSchema = z.discriminatedUnion('type', [
@@ -53,7 +56,7 @@ const ActionableItemSchema = z.discriminatedUnion('type', [
     productName: z.string(),
     sku: z.string(),
     quantity: z.number(),
-    reorderThreshold: z.number().int(),
+    reorderThreshold: z.number(),
   }),
   z.object({
     type: z.literal('open_shift'),
