@@ -696,7 +696,7 @@ async function allocateSequence(tx: any, source: TaxSaleSource, type: TaxDocumen
   return BigInt(String(rows[0].sequence_number))
 }
 
-async function insertSnapshot(tx: any, snapshot: TaxDocumentSnapshot, createdBy: string | null): Promise<void> {
+async function insertSnapshot(tx: any, snapshot: TaxDocumentSnapshot, createdBy: string | null) {
   const created = await tx.tax_documents.create({
     data: {
       tenant_id: snapshot.tenantId,
@@ -724,9 +724,10 @@ async function insertSnapshot(tx: any, snapshot: TaxDocumentSnapshot, createdBy:
     },
   })
 
+  const createdLines: any[] = []
   for (let index = 0; index < snapshot.lines.length; index += 1) {
     const line = snapshot.lines[index]
-    await tx.tax_document_lines.create({
+    createdLines.push(await tx.tax_document_lines.create({
       data: {
         tenant_id: snapshot.tenantId,
         document_id: created.id,
@@ -750,8 +751,10 @@ async function insertSnapshot(tx: any, snapshot: TaxDocumentSnapshot, createdBy:
         cess_amount: line.cessAmount,
         line_total: line.lineTotal,
       },
-    })
+    }))
   }
+
+  return toTaxDocumentJson(created, createdLines)
 }
 
 export function toTaxDocumentJson(row: any, lines: any[] = []): TaxDocumentSnapshot & { id: string; createdAt: string } {
@@ -858,11 +861,7 @@ export async function ensureTaxInvoice(tx: any, input: { tenantId: string; saleI
   const sequenceNumber = await allocateSequence(tx, source, 'tax_invoice', financialYear)
   const documentNumber = formatDocumentNumber(source.invoicePrefix, 'tax_invoice', financialYear, sequenceNumber)
   const snapshot = buildTaxInvoiceSnapshot({ source, financialYear, sequenceNumber, documentNumber })
-  await insertSnapshot(tx, snapshot, input.createdBy ?? null)
-  const created = await tx.tax_documents.findFirst({
-    where: { tenant_id: input.tenantId, document_number: documentNumber },
-  })
-  return created ? readTaxDocument(tx, input.tenantId, created.id) : null
+  return insertSnapshot(tx, snapshot, input.createdBy ?? null)
 }
 
 export async function createCreditNoteForReturn(tx: any, input: {
@@ -903,9 +902,6 @@ export async function createCreditNoteForReturn(tx: any, input: {
     returnReferenceId: input.returnReferenceId,
     refundPayments: input.refundPayments,
   })
-  await insertSnapshot(tx, snapshot, input.createdBy ?? null)
-  const created = await tx.tax_documents.findFirst({
-    where: { tenant_id: input.tenantId, document_number: documentNumber },
-  })
-  return { document: created ? await readTaxDocument(tx, input.tenantId, created.id) : null, idempotent: false }
+  const created = await insertSnapshot(tx, snapshot, input.createdBy ?? null)
+  return { document: created, idempotent: false }
 }

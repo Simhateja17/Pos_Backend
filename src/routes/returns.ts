@@ -254,7 +254,11 @@ router.post('/', async (req, res) => {
         })),
         createdBy,
       })
-      if (!creditNoteResult.document) return { status: 500, body: { error: 'Could not create credit note' } }
+      // Returning an error object from an interactive transaction commits any
+      // stock/refund writes made above. Throw so an impossible missing
+      // document rolls the entire return back instead of reporting failure
+      // after partially committing it.
+      if (!creditNoteResult.document) throw new Error('Could not create credit note')
 
       return {
         status: 201,
