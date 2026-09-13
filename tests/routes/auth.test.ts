@@ -750,6 +750,41 @@ describe('POST /auth/logout', () => {
   beforeEach(() => {
     vi.resetModules()
     adminSignOutMock.mockReset().mockResolvedValue({ error: null })
+    getUserMock.mockReset()
+    staffSessionsUpdateManyMock.mockReset()
+  })
+
+  it('uses a logout reason accepted by the deployed staff session constraint', async () => {
+    const token = fakeJwt({ tenant_id: 'tenant-1' })
+    getUserMock.mockResolvedValue({ data: { user: { id: 'owner-1' } }, error: null })
+    staffSessionsUpdateManyMock.mockImplementation(async (args: { data: { logout_reason: string } }) => {
+      const allowed = ['explicit', 'idle', 'interrupted', 'expired']
+      if (!allowed.includes(args.data.logout_reason)) {
+        throw new Error('staff_sessions_logout_reason_check')
+      }
+      return { count: 1 }
+    })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    const { default: authRouter } = await import('../../src/routes/auth')
+    const app = express()
+    app.use(express.json())
+    app.use('/auth', authRouter)
+
+    const response = await request(app)
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(response.status).toBe(204)
+    expect(staffSessionsUpdateManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: { staff_members: { user_id: 'owner-1' }, logged_out_at: null },
+      data: expect.objectContaining({ logout_reason: 'explicit' }),
+    }))
+    expect(consoleError).not.toHaveBeenCalledWith(
+      '[auth:logout] operator-session revocation failed',
+      expect.anything(),
+    )
+    consoleError.mockRestore()
   })
 
   it('revokes the provider session before clearing the local cookies', async () => {

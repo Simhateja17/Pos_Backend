@@ -521,7 +521,11 @@ router.post('/logout', async (req, res) => {
           const client = forTenant(tenantId) as any
           await client.staff_sessions.updateMany({
             where: { staff_members: { user_id: userData.user.id }, logged_out_at: null },
-            data: { logged_out_at: new Date(), logout_reason: 'global_logout', last_seen_at: new Date() },
+            // `explicit` is the deployed staff_sessions constraint value for a
+            // user-initiated sign-out. The provider scope is global, but the DB
+            // enum deliberately records why the operator session ended rather
+            // than the Supabase revocation scope.
+            data: { logged_out_at: new Date(), logout_reason: 'explicit', last_seen_at: new Date() },
           })
         }
       }
