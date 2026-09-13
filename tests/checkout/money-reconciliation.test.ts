@@ -5,6 +5,18 @@ import { computeCheckout } from '../../src/lib/money'
 const D = (v: string) => new Prisma.Decimal(v)
 
 describe('computeCheckout', () => {
+  it('rounds a fractional-paise percentage discount to a payable currency total', () => {
+    const result = computeCheckout({
+      lines: [{ price: D('204.99'), quantity: 1, isTaxable: false }],
+      cartDiscountPercent: D('10'),
+      taxRate: D('0'),
+    })
+
+    expect(result.cartDiscount.toString()).toBe('20.5')
+    expect(result.discountedSubtotal.toString()).toBe('184.49')
+    expect(result.total.toString()).toBe('184.49')
+  })
+
   it('Test 1: no discount, all taxable — subtotal/tax/total computed correctly', () => {
     const result = computeCheckout({
       lines: [

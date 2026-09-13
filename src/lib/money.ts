@@ -73,7 +73,9 @@ export function computeCheckout(input: CheckoutInput): CheckoutResult {
 
   let cartDiscount = ZERO
   if (input.cartDiscountPercent) {
-    cartDiscount = subtotal.times(input.cartDiscountPercent.dividedBy(100))
+    cartDiscount = subtotal
+      .times(input.cartDiscountPercent.dividedBy(100))
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
   } else if (input.cartDiscountAmount) {
     cartDiscount = input.cartDiscountAmount
   }
@@ -98,7 +100,10 @@ export function computeCheckout(input: CheckoutInput): CheckoutResult {
   const tax = rawTax.isNegative()
     ? ZERO
     : rawTax.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
-  const total = discountedSubtotal.plus(tax)
+  // Discounts may produce fractions smaller than the currency unit. Tender
+  // amounts use two decimals, so the authoritative payable total must also
+  // be rounded before the route performs its exact payment-sum comparison.
+  const total = discountedSubtotal.plus(tax).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
 
   return { subtotal, cartDiscount, discountedSubtotal, tax, total }
 }
