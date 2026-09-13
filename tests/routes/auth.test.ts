@@ -11,6 +11,7 @@ process.env.SUPABASE_JWT_SECRET = 'test-jwt-secret'
 // auth.ts instantiates separate admin and anon-key clients at module load.
 const createUserMock = vi.fn()
 const deleteUserMock = vi.fn()
+const adminMembershipLimitMock = vi.fn()
 const adminSignOutMock = vi.fn()
 const signInWithOtpMock = vi.fn()
 const verifyOtpMock = vi.fn()
@@ -25,7 +26,16 @@ const getUserMock = vi.fn()
 vi.mock('@supabase/supabase-js', () => ({
   createClient: vi.fn((_url: string, key: string) => {
     if (key === 'service-role-key') {
-      return { auth: { admin: { createUser: createUserMock, deleteUser: deleteUserMock, signOut: adminSignOutMock } } }
+      return {
+        auth: { admin: { createUser: createUserMock, deleteUser: deleteUserMock, signOut: adminSignOutMock } },
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({ limit: adminMembershipLimitMock })),
+            })),
+          })),
+        })),
+      }
     }
     return {
       auth: {
@@ -41,6 +51,7 @@ vi.mock('@supabase/supabase-js', () => ({
 }))
 
 const tenantsCreateMock = vi.fn()
+const tenantsDeleteMock = vi.fn()
 const storesCreateMock = vi.fn(async () => ({ id: 'store-1' }))
 const staffMembersCreateMock = vi.fn()
 const staffSessionsUpdateManyMock = vi.fn()
@@ -60,7 +71,7 @@ const notificationsCreateMock = vi.fn(async () => ({ id: 'notification-1' }))
 
 vi.mock('../../src/db/tenantClient', () => ({
   forTenant: vi.fn(() => ({
-    tenants: { create: tenantsCreateMock },
+    tenants: { create: tenantsCreateMock, delete: tenantsDeleteMock },
     stores: { create: storesCreateMock },
     staff_members: {
       create: staffMembersCreateMock,
@@ -123,12 +134,14 @@ describe('POST /auth/signup and /auth/login', () => {
     vi.mocked(createClient).mockClear()
     createUserMock.mockReset()
     deleteUserMock.mockReset()
+    adminMembershipLimitMock.mockReset().mockResolvedValue({ data: [], error: null })
     adminSignOutMock.mockReset()
     signInWithOtpMock.mockReset()
     verifyOtpMock.mockReset()
     refreshSessionMock.mockReset()
     setSessionMock.mockReset()
     tenantsCreateMock.mockReset()
+    tenantsDeleteMock.mockReset()
     storesCreateMock.mockReset().mockResolvedValue({ id: 'store-1' })
     staffMembersCreateMock.mockReset()
     staffMembersFindFirstMock.mockReset()
@@ -239,6 +252,7 @@ describe('POST /auth/signup and /auth/login', () => {
   })
 
   it('Test 2: signup OTP for an existing tenant member returns 409 with the UI-SPEC-exact copy', async () => {
+    adminMembershipLimitMock.mockResolvedValue({ data: [{ id: 'staff-existing' }], error: null })
     verifyOtpMock.mockResolvedValue({
       data: {
         user: { id: 'user-1', email: 'owner@example.com' },
@@ -259,6 +273,28 @@ describe('POST /auth/signup and /auth/login', () => {
       message: 'An account already exists with this email. Log in instead',
     })
     expect(tenantsCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an existing database membership even when the JWT tenant claim is missing', async () => {
+    verifyOtpMock.mockResolvedValue({
+      data: {
+        user: { id: 'user-1', email: 'owner@example.com' },
+        session: {
+          access_token: fakeJwt({ role: 'authenticated', sub: 'user-1' }),
+          refresh_token: 'refresh-token-existing',
+        },
+      },
+      error: null,
+    })
+    adminMembershipLimitMock.mockResolvedValue({ data: [{ id: 'staff-existing' }], error: null })
+
+    const app = await buildApp()
+    const res = await request(app).post('/auth/signup').send(validSignupBody())
+
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBe('DUPLICATE_ACCOUNT')
+    expect(tenantsCreateMock).not.toHaveBeenCalled()
+    expect(deleteUserMock).not.toHaveBeenCalled()
   })
 
   it('Test 3a: login with valid credentials returns 200 with { user: { role, tenantId, ... }, session }', async () => {

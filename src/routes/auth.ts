@@ -22,9 +22,9 @@ function maskEmail(email: string): string {
 }
 
 // ADMIN client — service-role key, the highest-privilege credential in this
-// phase. Confined to exactly this file, and only used for
-// auth.admin.createUser/deleteUser (Supabase Auth account bootstrap during
-// signup). NEVER used for any tenant-scoped route (those exclusively use
+// phase. Confined to exactly this file, and used for Supabase Auth account
+// administration plus the pre-tenant membership existence check during
+// signup. NEVER used for ordinary tenant-scoped routes (those exclusively use
 // forTenant()/basePrisma per 01-05/01-06/01-08). T-1-05.
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL as string,
@@ -228,6 +228,29 @@ router.post('/signup', async (req, res) => {
 
   const newUser = verifyData.user
 
+  // The database is the authority for membership. A JWT is only a cache and
+  // may have been minted before a membership existed or by a temporarily
+  // misconfigured hook. Relying on the claim alone previously allowed one
+  // Auth user to create multiple tenants, after which the single-tenant token
+  // hook selected an arbitrary one. The partial unique index added alongside
+  // this check closes the concurrent-signup race between this read and insert.
+  const { data: activeMemberships, error: membershipLookupError } = await supabaseAdmin
+    .from('staff_members')
+    .select('id')
+    .eq('user_id', newUser.id)
+    .eq('is_active', true)
+    .limit(1)
+
+  if (membershipLookupError) {
+    console.log(`[auth:signup] userId=${newUser.id} membership lookup failed status=${membershipLookupError.code ?? 'unknown'} message=${membershipLookupError.message}`)
+    return res.status(503).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not verify account membership. Please try again shortly.'))
+  }
+
+  if (activeMemberships && activeMemberships.length > 0) {
+    console.log(`[auth:signup] userId=${newUser.id} already has an active database membership — duplicate account, 409`)
+    return res.status(409).json(errorEnvelope('DUPLICATE_ACCOUNT', 'An account already exists with this email. Log in instead'))
+  }
+
   // A pre-existing store owner's custom-hook JWT carries tenant_id (same
   // claim /login relies on). verifyOtp on an already-registered email logs
   // them in rather than erroring, so this is the only signal that
@@ -354,13 +377,15 @@ router.post('/signup', async (req, res) => {
     })
   } catch (writeError) {
     console.log(`[auth:signup] tenant=${tenantId} userId=${newUser.id} write step threw: ${writeError instanceof Error ? writeError.stack ?? writeError.message : writeError}`)
-    // Partial-failure cleanup: an orphaned Supabase Auth user with no
-    // tenant/staff row is worse than a failed signup — best-effort delete,
-    // never let a cleanup failure mask the original 500.
+    // Clean up only the tenant created by this request. Deleting the Auth user
+    // is unsafe: verifyOtp may have returned a pre-existing identity whose
+    // membership was created by a concurrent request. The tenant cascade
+    // removes this request's partial store/staff/category rows, while an Auth
+    // identity with no membership can safely retry signup.
     try {
-      await supabaseAdmin.auth.admin.deleteUser(newUser.id)
+      await forTenant(tenantId).tenants.delete({ where: { id: tenantId } })
     } catch (cleanupError) {
-      console.log(`[auth:signup] cleanup deleteUser(${newUser.id}) also failed: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`)
+      console.log(`[auth:signup] cleanup tenant(${tenantId}) also failed: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`)
     }
     return res.status(500).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Failed to create account. Please try again.'))
   }
