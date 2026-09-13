@@ -830,7 +830,7 @@ export async function readTaxDocument(tx: any, tenantId: string, documentId: str
   return result
 }
 
-async function lockTaxInvoiceSale(tx: any, tenantId: string, saleId: string): Promise<string | null> {
+export async function lockTaxInvoiceSale(tx: any, tenantId: string, saleId: string): Promise<string | null> {
   const rows = await tx.$queryRaw<Array<{ sale_id: string | null }>>`
     SELECT public.lock_tax_invoice_sale(
       ${tenantId}::uuid,

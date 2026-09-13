@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client'
 import { CreateReturnSchema } from '../contracts/schemas/return'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { findPairedTerminal } from '../lib/counterDevice'
-import { createCreditNoteForReturn, ensureTaxInvoice } from '../services/taxDocuments'
+import { createCreditNoteForReturn, ensureTaxInvoice, lockTaxInvoiceSale } from '../services/taxDocuments'
 
 const router = Router()
 
@@ -73,11 +73,11 @@ router.post('/', async (req, res) => {
       // record. Without this lock, two concurrent requests could both pass the
       // check and append duplicate stock/refund rows before one of them hit the
       // credit-note unique index.
-      await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id FROM public.sales
-        WHERE id = ${sale.id}::uuid AND tenant_id = ${tenantId}::uuid
-        FOR UPDATE
-      `
+      // app_runtime intentionally cannot issue SELECT ... FOR UPDATE against
+      // the append-only sales table. Use the tenant-checked SECURITY DEFINER
+      // boundary created for this exact lock instead.
+      const lockedSaleId = await lockTaxInvoiceSale(tx, tenantId, sale.id)
+      if (!lockedSaleId) return { status: 404, body: { error: 'Sale not found' } }
 
       // A retried return must be a read of the already committed result. This
       // check happens before stock/payment writes and is backed by the partial
@@ -290,6 +290,7 @@ router.post('/', async (req, res) => {
     }
   } catch (err: any) {
     // Never leak raw Prisma/Postgres errors, same convention as sales.ts.
+    console.error('[returns:create] failed', err)
     return res.status(500).json({ error: 'Could not process return' })
   }
 })
