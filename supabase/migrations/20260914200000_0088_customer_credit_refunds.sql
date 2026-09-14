@@ -2,9 +2,6 @@
 -- Each credit refund is bound to the stable mobile return reference so a
 -- retry cannot append a second ledger effect.
 
-alter type public.customer_credit_transaction_type
-  add value if not exists 'credit_refund';
-
 alter table public.customer_credit_transactions
   add column if not exists return_reference_id uuid;
 

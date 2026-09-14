@@ -2,6 +2,7 @@ import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { Prisma } from '@prisma/client'
 import { createHash } from 'node:crypto'
+import { z } from 'zod'
 import { CreateReturnSchema, ReturnQuoteRequestSchema } from '../contracts/schemas/return'
 import { allowsFractionalQuantity } from '../contracts/schemas/product'
 import { unsupportedTenderMethods } from '../lib/tenderRules'
@@ -12,6 +13,44 @@ import { createCreditNoteForReturn, lockTaxInvoiceSale, previewTaxInvoice } from
 const router = Router()
 
 const ZERO = new Prisma.Decimal(0)
+
+/** Read-only recovery authority for a payload-bound return reference. */
+router.get('/recovery/:returnReferenceId', async (req, res) => {
+  const reference = req.params.returnReferenceId
+  if (!z.string().uuid().safeParse(reference).success) return res.status(400).json({ code: 'INVALID_OPERATION_ID', error: 'Invalid return recovery ID.' })
+  let storeId: string
+  try { storeId = activeStoreId(req) } catch { return res.status(400).json({ code: 'STORE_REQUIRED', error: 'Choose a store before checking a return.' }) }
+  const client = forTenant(req.user!.tenantId) as any
+  const staff = req.actingStaff?.id ?? (await client.staff_members.findFirst({ where: { user_id: req.user!.id, is_active: true, store_id: storeId }, select: { id: true } }))?.id
+  if (!staff) return res.status(403).json({ code: 'OPERATOR_INVALID', error: 'The active operator is unavailable.' })
+  const document = await client.tax_documents.findFirst({ where: { tenant_id: req.user!.tenantId, store_id: storeId, document_type: 'credit_note', return_reference_id: reference, created_by: staff } })
+  if (!document) return res.status(404).json({ code: 'OPERATION_NOT_COMMITTED', error: 'No completed return uses this recovery ID.' })
+  const lines = await client.tax_document_lines.findMany({
+    where: { tenant_id: req.user!.tenantId, document_id: document.id },
+    orderBy: { line_number: 'asc' },
+  })
+  const refundPayments = Array.isArray(document.payment_snapshot)
+    ? document.payment_snapshot.map((payment: any) => ({
+        method: String(payment.method),
+        amount: String(payment.amount),
+        referenceCode: payment.referenceCode ?? null,
+      }))
+    : []
+  return res.json({
+    saleId: document.sale_id,
+    returnReferenceId: reference,
+    refundedLines: lines.map((line: any) => ({
+      saleLineItemId: line.sale_line_item_id,
+      quantity: Number(line.quantity),
+      refundAmount: line.line_total.toString(),
+    })),
+    refundTotal: document.grand_total.toString(),
+    refundPayments,
+    creditNoteId: document.id,
+    creditNoteNumber: document.document_number,
+    idempotent: true,
+  })
+})
 
 /** Credit-note lines are the line-specific return ledger. Stock movements are
  * variant-scoped and cannot distinguish two sale lines for the same variant
@@ -176,6 +215,8 @@ router.post('/', async (req, res) => {
   try {
     const pairedTerminal = await findPairedTerminal(forTenant(tenantId) as any, req)
     const actingRole = req.actingStaff?.role ?? req.user!.role
+    const actingStaffId = await resolveActingStaffId(forTenant(tenantId) as any, req)
+    if (!actingStaffId) return res.status(409).json({ code: 'OPERATOR_INVALID', error: 'The active operator is unavailable.' })
     const requestHash = createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex')
     if (actingRole === 'cashier' && !pairedTerminal) {
       return res.status(409).json({ error: 'This device is not paired to a counter.' })
@@ -234,6 +275,9 @@ router.post('/', async (req, res) => {
         if (existingCreditNote.sale_id !== sale.id) {
           return { status: 409, body: { error: 'Return reference has already been used for another sale.' } }
         }
+        if (existingCreditNote.created_by !== actingStaffId) {
+          return { status: 409, body: { code: 'IDEMPOTENCY_CONFLICT', error: 'This return reference belongs to a different operator.' } }
+        }
         // Null is retained only for credit notes created before 0087. Every
         // new mobile return binds its reference to the exact immutable body.
         if (existingCreditNote.request_hash && existingCreditNote.request_hash !== requestHash) {
@@ -245,6 +289,13 @@ router.post('/', async (req, res) => {
             saleId: existingCreditNote.sale_id,
             returnReferenceId: parsed.data.returnReferenceId,
             refundTotal: existingCreditNote.grand_total.toString(),
+            refundPayments: Array.isArray(existingCreditNote.payment_snapshot)
+              ? existingCreditNote.payment_snapshot.map((payment: any) => ({
+                  method: String(payment.method),
+                  amount: String(payment.amount),
+                  referenceCode: payment.referenceCode ?? null,
+                }))
+              : [],
             creditNoteId: existingCreditNote.id,
             creditNoteNumber: existingCreditNote.document_number,
             idempotent: true,
@@ -401,7 +452,7 @@ router.post('/', async (req, res) => {
         }
       }
 
-      const createdBy = await resolveActingStaffId(tx, req)
+      const createdBy = actingStaffId
       const creditRefundTotal = parsed.data.refundPayments
         .filter((entry) => entry.method === 'credit')
         .reduce((sum, entry) => sum.plus(new Prisma.Decimal(entry.amount)), ZERO)
@@ -504,6 +555,11 @@ router.post('/', async (req, res) => {
             refundAmount: l.refundAmount.toString(),
           })),
           refundTotal: expectedRefundTotal.toString(),
+          refundPayments: createdPayments.map((payment) => ({
+            method: String(payment.method),
+            amount: new Prisma.Decimal(payment.amount).toString(),
+            referenceCode: payment.reference_code ?? null,
+          })),
           creditNoteId: creditNoteResult.document.id,
           creditNoteNumber: creditNoteResult.document.documentNumber,
           idempotent: false,

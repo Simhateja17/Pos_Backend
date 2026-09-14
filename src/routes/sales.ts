@@ -132,9 +132,9 @@ export function effectiveLinePercent(
   return ZERO
 }
 
-async function resolveActingStaffId(client: any, req: import('express').Request): Promise<string | null> {
+async function resolveActingStaffId(client: any, req: import('express').Request, storeId?: string): Promise<string | null> {
   if (req.actingStaff?.id) return req.actingStaff.id
-  const staff = await client.staff_members.findFirst({ where: { user_id: req.user!.id, is_active: true } })
+  const staff = await client.staff_members.findFirst({ where: { user_id: req.user!.id, is_active: true, ...(storeId ? { store_id: storeId } : {}) } })
   return staff?.id ?? null
 }
 
@@ -355,10 +355,10 @@ async function invoiceNumbersForSales(
  * status. Tenant-scoped through forTenant(), so a client_sale_id minted by
  * another tenant can never resolve here.
  */
-async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string, storeId?: string, knownSale?: any) {
+async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string, storeId?: string, knownSale?: any, createdBy?: string) {
   const client = forTenant(tenantId) as any
   const sale = knownSale ?? await client.sales.findFirst({
-    where: { client_sale_id: clientSaleId, ...(storeId ? { store_id: storeId } : {}) },
+    where: { client_sale_id: clientSaleId, ...(storeId ? { store_id: storeId } : {}), ...(createdBy ? { created_by: createdBy } : {}) },
   })
   if (!sale || (storeId && sale.store_id !== storeId)) return null
 
@@ -429,6 +429,19 @@ async function enqueueHardwareOutputs(input: {
  * forTenantTransaction (CR-02) — a mid-transaction failure rolls back
  * everything.
  */
+/** Read-only recovery authority. A 404 proves this tenant/store has not committed the client key. */
+router.get('/recovery/:clientSaleId', async (req, res) => {
+  if (!z.string().uuid().safeParse(req.params.clientSaleId).success) return res.status(400).json({ code: 'INVALID_OPERATION_ID', error: 'Invalid sale recovery ID.' })
+  let storeId: string
+  try { storeId = activeStoreId(req) } catch { return res.status(400).json({ code: 'STORE_REQUIRED', error: 'Choose a store before checking a sale.' }) }
+  const client = forTenant(req.user!.tenantId) as any
+  const staffId = await resolveActingStaffId(client, req, storeId)
+  if (!staffId) return res.status(403).json({ code: 'OPERATOR_INVALID', error: 'The active operator is unavailable.' })
+  const sale = await loadSaleByClientSaleId(req.user!.tenantId, req.params.clientSaleId, storeId, undefined, staffId)
+  if (!sale) return res.status(404).json({ code: 'OPERATION_NOT_COMMITTED', error: 'No completed sale uses this recovery ID.' })
+  return res.json(sale)
+})
+
 router.post('/', async (req, res) => {
   const parsed = CreateSaleSchema.safeParse(req.body)
   if (!parsed.success) {
@@ -451,6 +464,8 @@ router.post('/', async (req, res) => {
     const deviceClient = forTenant(tenantId) as any
     const pairedTerminal = await findPairedTerminal(deviceClient, req)
     const actingRole = req.actingStaff?.role ?? req.user!.role
+    const actingStaffId = await resolveActingStaffId(deviceClient, req, storeId)
+    if (!actingStaffId) return res.status(409).json({ code: 'OPERATOR_INVALID', error: 'The active operator is unavailable.' })
 
     // OFFLINE-01 fast path. The unique database index remains the exactly-once
     // authority under concurrency; request_hash additionally prevents the
@@ -462,6 +477,15 @@ router.post('/', async (req, res) => {
     if (replayAuthority) {
       if (replayAuthority.store_id !== storeId) {
         return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This sale ID was already used by a different store.' })
+      }
+      if (replayAuthority.created_by !== actingStaffId) {
+        return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This sale ID belongs to a different operator.' })
+      }
+      if (pairedTerminal) {
+        const replayShift = await deviceClient.shifts.findFirst({ where: { id: replayAuthority.shift_id, store_id: storeId } })
+        if (!replayShift || replayShift.terminal_id !== pairedTerminal.id) {
+          return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This sale ID belongs to a different counter.' })
+        }
       }
       // Null is retained only for legacy/import-created rows from before 0086.
       if (replayAuthority.request_hash && replayAuthority.request_hash !== requestHash) {
@@ -675,7 +699,7 @@ router.post('/', async (req, res) => {
       const { cashPayment, cashReceived, changeDue } = cashTender
 
       const customer = await findOrCreateCustomer(tx, tenantId, parsed.data.customer)
-      const createdBy = await resolveActingStaffId(tx, req)
+      const createdBy = actingStaffId
 
       if (creditAmount.greaterThan(0)) {
         if (!customer) {

@@ -30,7 +30,7 @@ const tx = {
 }
 
 vi.mock('../../src/db/tenantClient', () => ({
-  forTenant: vi.fn(() => ({})),
+  forTenant: vi.fn(() => tx),
   forTenantTransaction: vi.fn(async (_tenantId: string, action: (client: typeof tx) => Promise<unknown>) => action(tx)),
 }))
 
@@ -65,6 +65,59 @@ describe('return submission store scope', () => {
     creditCreateMock.mockReset()
     staffFindFirstMock.mockReset().mockResolvedValue({ id: '61111111-1111-4111-8111-111111111111' })
     createCreditNoteForReturnMock.mockReset()
+  })
+
+  it('returns a complete operator-scoped recovery response', async () => {
+    taxDocumentsFindFirstMock.mockResolvedValue({
+      id: '51111111-1111-4111-8111-111111111111',
+      sale_id: '31111111-1111-4111-8111-111111111111',
+      grand_total: { toString: () => '35.00' },
+      document_number: 'CN-1',
+      payment_snapshot: [{ method: 'cash', amount: '35.00', referenceCode: null }],
+    })
+    taxDocumentLinesFindManyMock.mockResolvedValue([{
+      sale_line_item_id: '41111111-1111-4111-8111-111111111111',
+      quantity: { toString: () => '1' },
+      line_total: { toString: () => '35.00' },
+    }])
+
+    const { default: returnsRouter } = await import('../../src/routes/returns')
+    const app = express()
+    app.use((req, _res, next) => {
+      req.user = { id: 'user-1', tenantId: 'tenant-1', storeId: 'store-s2', role: 'owner' }
+      req.storeContext = { scope: 'store', activeStoreId: 'store-s2', actingRemotely: false }
+      next()
+    })
+    app.use('/returns', returnsRouter)
+
+    const response = await request(app).get('/returns/recovery/11111111-1111-4111-8111-111111111111')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      returnReferenceId: '11111111-1111-4111-8111-111111111111',
+      refundTotal: '35.00',
+      refundPayments: [{ method: 'cash', amount: '35.00', referenceCode: null }],
+      refundedLines: [{ saleLineItemId: '41111111-1111-4111-8111-111111111111', quantity: 1, refundAmount: '35.00' }],
+    })
+    expect(taxDocumentsFindFirstMock).toHaveBeenCalledWith({ where: expect.objectContaining({
+      store_id: 'store-s2', created_by: '61111111-1111-4111-8111-111111111111',
+    }) })
+  })
+
+  it('uses scoped 404 to prove a return reference was not committed', async () => {
+    taxDocumentsFindFirstMock.mockResolvedValue(null)
+    const { default: returnsRouter } = await import('../../src/routes/returns')
+    const app = express()
+    app.use((req, _res, next) => {
+      req.user = { id: 'user-1', tenantId: 'tenant-1', storeId: 'store-s2', role: 'owner' }
+      req.storeContext = { scope: 'store', activeStoreId: 'store-s2', actingRemotely: false }
+      next()
+    })
+    app.use('/returns', returnsRouter)
+
+    const response = await request(app).get('/returns/recovery/11111111-1111-4111-8111-111111111111')
+    expect(response.status).toBe(404)
+    expect(response.body.code).toBe('OPERATION_NOT_COMMITTED')
   })
 
   it('does not resolve a sale from another store', async () => {
@@ -130,6 +183,7 @@ describe('return submission store scope', () => {
     taxDocumentsFindFirstMock.mockResolvedValueOnce({
       id: '51111111-1111-4111-8111-111111111111',
       sale_id: saleId,
+      created_by: '61111111-1111-4111-8111-111111111111',
       request_hash: '0'.repeat(64),
     })
 
@@ -152,6 +206,33 @@ describe('return submission store scope', () => {
       refundPayments: [{ method: 'cash', amount: '35.00' }],
     })
 
+    expect(response.status).toBe(409)
+    expect(response.body.code).toBe('IDEMPOTENCY_CONFLICT')
+    expect(saleLineItemsFindFirstMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses idempotent replay under a different operator', async () => {
+    const saleId = '31111111-1111-4111-8111-111111111111'
+    salesFindFirstMock.mockResolvedValue({ id: saleId, status: 'completed' })
+    taxDocumentsFindFirstMock.mockResolvedValueOnce({
+      id: '51111111-1111-4111-8111-111111111111', sale_id: saleId,
+      created_by: 'different-operator', request_hash: null,
+    })
+    const { default: returnsRouter } = await import('../../src/routes/returns')
+    const app = express()
+    app.use(express.json())
+    app.use((req, _res, next) => {
+      req.user = { id: 'user-1', tenantId: 'tenant-1', storeId: 'store-s2', role: 'owner' }
+      req.storeContext = { scope: 'store', activeStoreId: 'store-s2', actingRemotely: false }
+      next()
+    })
+    app.use('/returns', returnsRouter)
+    const response = await request(app).post('/returns').send({
+      returnReferenceId: '11111111-1111-4111-8111-111111111111', saleId,
+      shiftId: '21111111-1111-4111-8111-111111111111', reason: 'Wrong size',
+      lines: [{ saleLineItemId: '41111111-1111-4111-8111-111111111111', quantity: 1 }],
+      refundPayments: [{ method: 'cash', amount: '35.00' }],
+    })
     expect(response.status).toBe(409)
     expect(response.body.code).toBe('IDEMPOTENCY_CONFLICT')
     expect(saleLineItemsFindFirstMock).not.toHaveBeenCalled()

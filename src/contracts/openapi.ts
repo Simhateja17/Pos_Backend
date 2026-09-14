@@ -852,6 +852,17 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'get',
+  path: '/sales/recovery/{clientSaleId}',
+  description: 'Read-only recovery lookup by the immutable client sale ID. A scoped 404 proves no sale was committed for this key.',
+  request: { params: z.object({ clientSaleId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Authoritative completed sale', content: { 'application/json': { schema: SaleSchema } } },
+    404: { description: 'No committed sale for this tenant and store' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
   path: '/sales/{saleId}',
   description: 'Get a single sale with its line items and payments.',
   request: { params: z.object({ saleId: z.string().uuid() }) },
@@ -871,6 +882,17 @@ registry.registerPath({
     400: { description: 'Invalid quantities or store selection' },
     404: { description: 'Sale or line item not found' },
     409: { description: 'Sale is not returnable or the server snapshot cannot be built' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/returns/recovery/{returnReferenceId}',
+  description: 'Read-only recovery lookup by the immutable payload-bound return reference. A scoped 404 proves no return was committed for this key.',
+  request: { params: z.object({ returnReferenceId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Authoritative completed return', content: { 'application/json': { schema: ReturnResponseSchema } } },
+    404: { description: 'No committed return for this tenant and store' },
   },
 })
 
@@ -1077,6 +1099,17 @@ registry.registerPath({
     404: { description: 'Sale not found' },
     429: { description: 'Receipt resend cooldown or tenant email budget exceeded' },
     502: { description: 'Email delivery failed' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/shifts/recovery/{clientShiftId}',
+  description: 'Read-only recovery lookup by the immutable client shift ID. A scoped 404 proves no opening was committed for this operator and store.',
+  request: { params: z.object({ clientShiftId: z.string().uuid() }) },
+  responses: {
+    200: { description: 'Authoritative shift opening', content: { 'application/json': { schema: ShiftSchema } } },
+    404: { description: 'No committed shift opening for this operator and store' },
   },
 })
 

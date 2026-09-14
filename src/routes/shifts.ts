@@ -23,9 +23,9 @@ async function cashierCanAccessShift(client: any, req: import('express').Request
 
 // Copied verbatim from stockMovements.ts (per plan interfaces note) — resolves
 // the acting staff member's id for `staff_id`/`created_by` attribution.
-async function resolveActingStaffId(client: any, req: import('express').Request): Promise<string | null> {
+async function resolveActingStaffId(client: any, req: import('express').Request, storeId?: string): Promise<string | null> {
   if (req.actingStaff?.id) return req.actingStaff.id
-  const staff = await client.staff_members.findFirst({ where: { user_id: req.user!.id, is_active: true } })
+  const staff = await client.staff_members.findFirst({ where: { user_id: req.user!.id, is_active: true, ...(storeId ? { store_id: storeId } : {}) } })
   return staff?.id ?? null
 }
 
@@ -173,6 +173,20 @@ router.get('/', async (req, res) => {
   )
 })
 
+/** Read-only recovery authority for payload-bound shift openings. */
+router.get('/recovery/:clientShiftId', async (req, res) => {
+  if (!z.string().uuid().safeParse(req.params.clientShiftId).success) return res.status(400).json({ code: 'INVALID_OPERATION_ID', error: 'Invalid shift recovery ID.' })
+  const client = forTenant(req.user!.tenantId) as any
+  const storeScope = storeScopeWhere(req)
+  const staffId = await resolveActingStaffId(client, req, storeScope.store_id)
+  if (!staffId) return res.status(403).json({ code: 'OPERATOR_INVALID', error: 'The active operator is unavailable.' })
+  const shift = await client.shifts.findFirst({ where: { ...storeScope, client_shift_id: req.params.clientShiftId, staff_id: staffId } })
+  if (!shift) return res.status(404).json({ code: 'OPERATION_NOT_COMMITTED', error: 'No completed shift opening uses this recovery ID.' })
+  const staff = await client.staff_members.findFirst({ where: { id: shift.staff_id, ...storeScope }, select: { name: true } })
+  const terminal = shift.terminal_id ? await client.terminals.findFirst({ where: { id: shift.terminal_id, ...storeScope }, select: { name: true } }) : null
+  return res.json({ ...toShiftJson(shift), staffName: staff?.name ?? null, terminalName: terminal?.name ?? null, replayed: true })
+})
+
 /** The one shift that belongs to this paired counter, irrespective of which
  * cashier most recently entered their PIN. */
 router.get('/current', async (req, res) => {
@@ -237,6 +251,9 @@ router.post('/', async (req, res) => {
       where: { store_id: storeId, client_shift_id: parsed.data.clientShiftId },
     })
     if (replay) {
+      if (replay.staff_id !== staffId || replay.terminal_id !== terminal.id) {
+        return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This opening ID belongs to a different operator or counter.' })
+      }
       if (replay.request_hash !== requestHash) {
         return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This opening ID was already used for different shift data.' })
       }

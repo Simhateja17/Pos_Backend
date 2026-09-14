@@ -4848,6 +4848,30 @@
               ]
             }
           },
+          "refundPayments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "string"
+                },
+                "referenceCode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "method",
+                "amount"
+              ]
+            }
+          },
           "refundTotal": {
             "type": "string"
           },
@@ -6207,34 +6231,6 @@
           }
         }
       },
-      "ShiftHistoryEntry": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Shift"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "staffName": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "terminalName": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "staffName",
-              "terminalName"
-            ]
-          }
-        ]
-      },
       "Shift": {
         "type": "object",
         "properties": {
@@ -6297,6 +6293,34 @@
           "countedCash",
           "variance",
           "closedAt"
+        ]
+      },
+      "ShiftHistoryEntry": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Shift"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "staffName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "terminalName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "staffName",
+              "terminalName"
+            ]
+          }
         ]
       },
       "CurrentShift": {
@@ -12290,6 +12314,37 @@
         }
       }
     },
+    "/sales/recovery/{clientSaleId}": {
+      "get": {
+        "description": "Read-only recovery lookup by the immutable client sale ID. A scoped 404 proves no sale was committed for this key.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "clientSaleId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative completed sale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sale"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No committed sale for this tenant and store"
+          }
+        }
+      }
+    },
     "/sales/{saleId}": {
       "get": {
         "description": "Get a single sale with its line items and payments.",
@@ -12352,6 +12407,37 @@
           },
           "409": {
             "description": "Sale is not returnable or the server snapshot cannot be built"
+          }
+        }
+      }
+    },
+    "/returns/recovery/{returnReferenceId}": {
+      "get": {
+        "description": "Read-only recovery lookup by the immutable payload-bound return reference. A scoped 404 proves no return was committed for this key.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "returnReferenceId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative completed return",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No committed return for this tenant and store"
           }
         }
       }
@@ -13081,6 +13167,37 @@
           },
           "502": {
             "description": "Email delivery failed"
+          }
+        }
+      }
+    },
+    "/shifts/recovery/{clientShiftId}": {
+      "get": {
+        "description": "Read-only recovery lookup by the immutable client shift ID. A scoped 404 proves no opening was committed for this operator and store.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "clientShiftId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative shift opening",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Shift"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No committed shift opening for this operator and store"
           }
         }
       }

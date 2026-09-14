@@ -35,11 +35,16 @@ export const ReturnResponseSchema = z
   .object({
     saleId: z.string().uuid(),
     returnReferenceId: z.string().uuid(),
-    refundedLines: z.array(z.object({
-      saleLineItemId: z.string().uuid(),
-      quantity: z.number(),
-      refundAmount: z.string(),
-    })).optional(),
+  refundedLines: z.array(z.object({
+    saleLineItemId: z.string().uuid(),
+    quantity: z.number(),
+    refundAmount: z.string(),
+  })).optional(),
+  refundPayments: z.array(z.object({
+    method: z.string(),
+    amount: z.string(),
+    referenceCode: z.string().nullable().optional(),
+  })).optional(),
     refundTotal: z.string(),
     creditNoteId: z.string().uuid(),
     creditNoteNumber: z.string(),
