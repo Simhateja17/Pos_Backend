@@ -1,6 +1,8 @@
 import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
+import { Prisma } from '@prisma/client'
+import { createHash } from 'node:crypto'
 import {
   CreatePurchaseOrderSchema,
   ReceivePurchaseOrderSchema,
@@ -16,16 +18,16 @@ function decimalToString(value: unknown): string {
   return (value as { toString(): string }).toString()
 }
 
-function toPurchaseOrderJson(po: any) {
+function toPurchaseOrderJson(po: any, replayed?: boolean) {
   const lines = (po.purchase_order_lines ?? []).map((line: any) => ({
     id: line.id,
     variantId: line.variant_id,
     sku: line.variants?.sku ?? '',
     productName: line.variants?.products?.name ?? '',
-    quantityOrdered: Number(line.quantity_ordered),
-    quantityReceived: Number(line.quantity_received),
+    quantityOrdered: decimalToString(line.quantity_ordered),
+    quantityReceived: decimalToString(line.quantity_received),
     unitCost: decimalToString(line.unit_cost),
-    lineTotal: (Number(line.unit_cost) * Number(line.quantity_ordered)).toFixed(2),
+    lineTotal: new Prisma.Decimal(decimalToString(line.unit_cost)).mul(decimalToString(line.quantity_ordered)).toFixed(2),
   }))
 
   return {
@@ -36,9 +38,11 @@ function toPurchaseOrderJson(po: any) {
     status: po.status,
     expectedDate: po.expected_date ? po.expected_date.toISOString().slice(0, 10) : null,
     notes: po.notes,
-    totalCost: lines.reduce((sum: number, l: any) => sum + Number(l.lineTotal), 0).toFixed(2),
+    totalCost: lines.reduce((sum: Prisma.Decimal, l: any) => sum.add(l.lineTotal), new Prisma.Decimal(0)).toFixed(2),
     lines,
     createdAt: po.created_at.toISOString(),
+    ...(po.client_purchase_order_id !== undefined ? { clientPurchaseOrderId: po.client_purchase_order_id } : {}),
+    ...(replayed !== undefined ? { replayed } : {}),
   }
 }
 
@@ -99,8 +103,24 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Choose a store before creating a purchase order.' })
   }
 
+  const requestHash = parsed.data.clientPurchaseOrderId
+    ? createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex')
+    : null
   try {
     const po = await forTenantTransaction(tenantId, async (tx) => {
+      if (parsed.data.clientPurchaseOrderId) {
+        const replay = await tx.purchase_orders.findFirst({
+          where: { store_id: storeId, client_purchase_order_id: parsed.data.clientPurchaseOrderId },
+          include: PO_INCLUDE,
+        })
+        if (replay) {
+          if (replay.request_hash !== requestHash) {
+            throw Object.assign(new Error('This operation ID was already used for different purchase order data.'), { status: 409, code: 'IDEMPOTENCY_CONFLICT' })
+          }
+          return { order: replay, replayed: true }
+        }
+      }
+
       const supplier = await tx.suppliers.findFirst({ where: { id: parsed.data.supplierId } })
       if (!supplier) throw Object.assign(new Error('Supplier not found'), { status: 404 })
 
@@ -122,10 +142,14 @@ router.post('/', async (req, res) => {
               status: 'draft',
               expected_date: parsed.data.expectedDate ? new Date(parsed.data.expectedDate) : null,
               notes: parsed.data.notes ?? null,
+              client_purchase_order_id: parsed.data.clientPurchaseOrderId ?? null,
+              request_hash: requestHash,
             },
           })
         } catch (err: any) {
           if (err.code !== 'P2002') throw err
+          const target = String(err.meta?.target ?? '')
+          if (!target.includes('po_number')) throw err
         }
       }
       if (!created) throw Object.assign(new Error('Could not allocate a purchase order number'), { status: 409 })
@@ -142,11 +166,23 @@ router.post('/', async (req, res) => {
         })
       }
 
-      return tx.purchase_orders.findFirst({ where: { id: created.id }, include: PO_INCLUDE })
+      return { order: await tx.purchase_orders.findFirst({ where: { id: created.id }, include: PO_INCLUDE }), replayed: false }
     })
 
-    return res.status(201).json(toPurchaseOrderJson(po))
+    return res.status(po.replayed ? 200 : 201).json(toPurchaseOrderJson(po.order, po.replayed))
   } catch (err: any) {
+    if (err.code === 'P2002' && parsed.data.clientPurchaseOrderId) {
+      const winner = await (forTenant(tenantId) as any).purchase_orders.findFirst({
+        where: { store_id: storeId, client_purchase_order_id: parsed.data.clientPurchaseOrderId },
+        include: PO_INCLUDE,
+      })
+      if (winner) {
+        if (winner.request_hash !== requestHash) {
+          return res.status(409).json({ error: { code: 'IDEMPOTENCY_CONFLICT', message: 'This operation ID was already used for different purchase order data.' } })
+        }
+        return res.status(200).json(toPurchaseOrderJson(winner, true))
+      }
+    }
     const status = Number.isInteger(err?.status) ? err.status : 500
     return res.status(status).json({
       error: status >= 500 ? 'Could not create purchase order' : err.message ?? 'Could not create purchase order',
@@ -287,13 +323,13 @@ router.post('/:poId/receive', async (req, res) => {
         // reported back rather than silently accepted.
         // quantity_received is a Prisma Decimal since 0031 — `+` on it would
         // concatenate strings rather than add, so coerce before arithmetic.
-        const receivedAfter = Number(poLine.quantity_received) + input.quantityReceived
-        if (receivedAfter > Number(poLine.quantity_ordered)) {
+        const receivedAfter = new Prisma.Decimal(poLine.quantity_received).add(input.quantityReceived)
+        if (receivedAfter.gt(poLine.quantity_ordered)) {
           overReceived.push({
             purchaseOrderLineId: poLine.id,
             sku: poLine.variants?.sku ?? '',
-            quantityOrdered: Number(poLine.quantity_ordered),
-            quantityReceived: receivedAfter,
+            quantityOrdered: decimalToString(poLine.quantity_ordered),
+            quantityReceived: receivedAfter.toString(),
           })
         }
       }

@@ -1,11 +1,13 @@
 import { Router, type Request } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
+import { createHash } from 'node:crypto'
 import {
   CreateProductSchema,
   ProductRecordsQuerySchema,
   UpdateProductSchema,
   UpdateVariantSchema,
+  CreateProductWithOpeningStockSchema,
 } from '../contracts/schemas/product'
 import { stockByVariant as stockLevelsFor, stockForVariant } from '../lib/stockLevels'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
@@ -134,6 +136,30 @@ async function generateSku(client: any, tenantId: string, productName: string, e
  * inventory screens all render the full list and have no paging UI.
  */
 const SEARCH_RESULT_LIMIT = 50
+
+async function loadOpeningOperation(client: any, req: Request, operation: any, replayed: boolean) {
+  const product = await client.products.findFirst({ where: { id: operation.product_id } })
+  if (!product) throw Object.assign(new Error('Created product is unavailable'), { status: 500 })
+  const variants = await client.variants.findMany({ where: { product_id: product.id }, orderBy: { created_at: 'asc' } })
+  const movements = await client.stock_movements.findMany({
+    where: { reference_id: product.id, store_id: operation.store_id, movement_type: 'receive' },
+    orderBy: { created_at: 'asc' },
+  })
+  const stock = await stockLevelsFor(client, req, variants.map((variant: any) => variant.id))
+  return {
+    product: toProductJson(
+      product,
+      variants.map((variant: VariantRow) => toVariantJson(variant, Number(stock.get(variant.id) ?? 0))),
+      await categoryNames(client),
+    ),
+    openingStock: movements.map((movement: any) => ({
+      movementId: movement.id,
+      variantId: movement.variant_id,
+      quantityReceived: movement.quantity_delta.toString(),
+    })),
+    replayed,
+  }
+}
 
 /**
  * Resolves a search string to the product ids it should return, exact match
@@ -308,6 +334,110 @@ router.get('/records', async (req, res) => {
     total,
     nextCursor: hasMore ? page[page.length - 1].created_at.toISOString() : null,
   })
+})
+
+router.post('/with-opening-stock', requireRole('manager'), async (req, res) => {
+  const parsed = CreateProductWithOpeningStockSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json(errorEnvelope('INVALID_REQUEST', parsed.error.issues[0]?.message ?? 'Invalid request.'))
+
+  const tenantId = req.user!.tenantId
+  const storeId = activeStoreId(req)
+  const requestHash = createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex')
+  const explicitSkus = parsed.data.product.variants.map((variant) => variant.sku).filter((value): value is string => !!value)
+  const barcodes = parsed.data.product.variants.map((variant) => variant.barcode).filter((value): value is string => !!value)
+  if (new Set(explicitSkus).size !== explicitSkus.length || new Set(barcodes).size !== barcodes.length) {
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Every explicit SKU and barcode must be unique within the request.'))
+  }
+
+  try {
+    const result = await forTenantTransaction(tenantId, async (tx: any) => {
+      const replay = await tx.catalog_opening_operations.findFirst({
+        where: { store_id: storeId, client_operation_id: parsed.data.clientOperationId },
+      })
+      if (replay) {
+        if (replay.request_hash !== requestHash) throw Object.assign(new Error('This operation ID was already used for different product data.'), { status: 409, code: 'IDEMPOTENCY_CONFLICT' })
+        return { operation: replay, replayed: true as const }
+      }
+
+      const [tenant, store] = await Promise.all([
+        tx.tenants.findFirst({ where: { id: tenantId }, select: { country: true } }),
+        tx.stores.findFirst({ where: { id: storeId, is_active: true }, select: { id: true } }),
+      ])
+      if (!tenant || !store) throw Object.assign(new Error(!tenant ? 'Tenant not found' : 'Store not found'), { status: 404 })
+      if (tenant.country === 'IN' && parsed.data.product.variants.some((variant) => variant.mrp === undefined)) {
+        throw Object.assign(new Error('MRP is required for India products'), { status: 400 })
+      }
+
+      let categoryId: string | null = parsed.data.product.categoryId ?? null
+      if (!categoryId && parsed.data.product.categoryName?.trim()) {
+        const wanted = parsed.data.product.categoryName.trim()
+        const existing = await tx.categories.findFirst({ where: { name: { equals: wanted, mode: 'insensitive' } }, select: { id: true } })
+        categoryId = existing?.id ?? (await tx.categories.create({ data: { tenant_id: tenantId, name: wanted }, select: { id: true } })).id
+      }
+      const masterItem = parsed.data.product.masterItemId
+        ? await tx.master_items.findFirst({ where: { id: parsed.data.product.masterItemId, region: tenant.country === 'IN' ? 'IN' : 'INTL', is_active: true } })
+        : null
+      if (parsed.data.product.masterItemId && !masterItem) throw Object.assign(new Error('Master item is not available in this region'), { status: 400 })
+
+      const product = await tx.products.create({ data: {
+        tenant_id: tenantId, name: parsed.data.product.name, category_id: categoryId,
+        master_item_id: masterItem?.id ?? null, brand: parsed.data.product.brand ?? masterItem?.brand ?? null,
+        description: parsed.data.product.description ?? null, internal_notes: parsed.data.product.internalNotes ?? null,
+      } })
+      const createdBy = req.actingStaff?.id ?? (await tx.staff_members.findFirst({
+        where: { user_id: req.user!.id, is_active: true }, select: { id: true },
+      }))?.id ?? null
+      const variants: VariantRow[] = []
+      const movements: any[] = []
+      for (let index = 0; index < parsed.data.product.variants.length; index++) {
+        const input = parsed.data.product.variants[index]
+        const variant = await tx.variants.create({ data: {
+          tenant_id: tenantId, product_id: product.id,
+          sku: input.sku ?? await generateSku(tx, tenantId, parsed.data.product.name, variants.length, index),
+          barcode: input.barcode ?? null, unit_of_measure: input.unitOfMeasure,
+          size: input.size ?? null, color: input.color ?? null, material: input.material ?? null,
+          price: input.price, mrp: input.mrp ?? null, list_price: input.listPrice ?? null,
+          moving_average_cost: input.initialCostPrice ?? null, hsn_sac: input.hsnSac ?? null,
+          purchase_unit: input.purchaseUnit ?? null, purchase_pack_size: input.purchasePackSize ?? null,
+          track_inventory: input.trackInventory, allow_negative_stock: false,
+          expiry_date: input.expiryDate ? new Date(`${input.expiryDate}T00:00:00.000Z`) : null,
+          tax_rate: new Prisma.Decimal(input.taxRatePercent).dividedBy(100),
+          reorder_threshold: input.reorderThreshold ?? 4,
+        } })
+        variants.push(variant)
+        const opening = parsed.data.openingStock.find((line) => line.variantIndex === index)
+        if (opening) movements.push(await tx.stock_movements.create({ data: {
+          tenant_id: tenantId, store_id: storeId, variant_id: variant.id, movement_type: 'receive',
+          quantity_delta: opening.quantityReceived, reference_id: product.id, created_by: createdBy,
+        } }))
+      }
+      const operation = await tx.catalog_opening_operations.create({ data: {
+        tenant_id: tenantId, store_id: storeId, client_operation_id: parsed.data.clientOperationId,
+        request_hash: requestHash, product_id: product.id, created_by: createdBy,
+      } })
+      return { operation, replayed: false as const, product, variants, movements }
+    })
+
+    if (result.replayed) return res.status(200).json(await loadOpeningOperation(forTenant(tenantId) as any, req, result.operation, true))
+    const categories = await categoryNames(forTenant(tenantId) as any)
+    return res.status(201).json({
+      product: toProductJson(result.product, result.variants.map((variant: VariantRow) => toVariantJson(variant, Number(result.movements.find((movement: any) => movement.variant_id === variant.id)?.quantity_delta ?? 0))), categories),
+      openingStock: result.movements.map((movement: any) => ({ movementId: movement.id, variantId: movement.variant_id, quantityReceived: movement.quantity_delta.toString() })),
+      replayed: false,
+    })
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      const client = forTenant(tenantId) as any
+      const winner = await client.catalog_opening_operations.findFirst({ where: { store_id: storeId, client_operation_id: parsed.data.clientOperationId } })
+      if (winner) {
+        if (winner.request_hash !== requestHash) return res.status(409).json(errorEnvelope('IDEMPOTENCY_CONFLICT', 'This operation ID was already used for different product data.'))
+        return res.status(200).json(await loadOpeningOperation(client, req, winner, true))
+      }
+    }
+    const status = Number.isInteger(error?.status) ? error.status : 500
+    const code = error?.code === 'IDEMPOTENCY_CONFLICT' ? 'IDEMPOTENCY_CONFLICT' : status === 409 ? 'CONFLICT' : status === 400 ? 'INVALID_REQUEST' : status === 404 ? 'NOT_FOUND' : 'SERVICE_UNAVAILABLE'
+    return res.status(status).json(errorEnvelope(code, status >= 500 ? 'Could not create product and opening stock.' : error.message))
+  }
 })
 
 /**

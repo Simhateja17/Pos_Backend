@@ -1,6 +1,8 @@
 import { Router } from 'express'
+import { z } from 'zod'
 import { forTenant } from '../db/tenantClient'
 import { requireRole } from '../middleware/requireRole'
+import { errorEnvelope } from '../contracts/schemas/error'
 import {
   CreateCategorySchema,
   STARTER_CATEGORIES,
@@ -9,6 +11,7 @@ import {
 } from '../contracts/schemas/category'
 
 const router = Router()
+const categoryIdSchema = z.string().uuid()
 
 function toCategoryJson(row: any, productCount: number) {
   return {
@@ -41,7 +44,7 @@ router.get('/', async (req, res) => {
 router.post('/', requireRole('owner'), async (req, res) => {
   const parsed = CreateCategorySchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Enter a category name.' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Enter a category name.'))
   }
 
   const client = forTenant(req.user!.tenantId) as any
@@ -58,23 +61,26 @@ router.post('/', requireRole('owner'), async (req, res) => {
     // 0032's case-insensitive unique index — this is the guard that stops
     // "Dairy" and "dairy" both existing.
     if (err.code === 'P2002') {
-      return res.status(409).json({ error: 'You already have a category with that name' })
+      return res.status(409).json(errorEnvelope('CATEGORY_CONFLICT', 'You already have a category with that name.'))
     }
-    return res.status(500).json({ error: 'Could not create that category' })
+    return res.status(500).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not create that category.'))
   }
 })
 
 router.patch('/:categoryId', requireRole('owner'), async (req, res) => {
+  if (!categoryIdSchema.safeParse(req.params.categoryId).success) {
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid category.'))
+  }
   const parsed = UpdateCategorySchema.safeParse(req.body)
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Invalid request' })
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid category update.'))
   }
 
   const client = forTenant(req.user!.tenantId) as any
   // RLS-scoped read first so another tenant's id cannot be renamed by guessing.
   const existing = await client.categories.findFirst({ where: { id: req.params.categoryId } })
   if (!existing) {
-    return res.status(404).json({ error: 'Category not found' })
+    return res.status(404).json(errorEnvelope('CATEGORY_NOT_FOUND', 'Category not found.'))
   }
 
   try {
@@ -94,9 +100,9 @@ router.patch('/:categoryId', requireRole('owner'), async (req, res) => {
     return res.json(toCategoryJson(updated, products.length))
   } catch (err: any) {
     if (err.code === 'P2002') {
-      return res.status(409).json({ error: 'You already have a category with that name' })
+      return res.status(409).json(errorEnvelope('CATEGORY_CONFLICT', 'You already have a category with that name.'))
     }
-    return res.status(500).json({ error: 'Could not update that category' })
+    return res.status(500).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not update that category.'))
   }
 })
 
@@ -106,10 +112,13 @@ router.patch('/:categoryId', requireRole('owner'), async (req, res) => {
  * the response so the owner is not guessing what happened to their stock.
  */
 router.delete('/:categoryId', requireRole('owner'), async (req, res) => {
+  if (!categoryIdSchema.safeParse(req.params.categoryId).success) {
+    return res.status(400).json(errorEnvelope('INVALID_REQUEST', 'Invalid category.'))
+  }
   const client = forTenant(req.user!.tenantId) as any
   const existing = await client.categories.findFirst({ where: { id: req.params.categoryId } })
   if (!existing) {
-    return res.status(404).json({ error: 'Category not found' })
+    return res.status(404).json(errorEnvelope('CATEGORY_NOT_FOUND', 'Category not found.'))
   }
 
   const affected = await client.products.findMany({

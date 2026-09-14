@@ -3,6 +3,10 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 
 extendZodWithOpenApi(z)
 
+const QuantityDecimalSchema = z.string().regex(/^(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,3})?$/)
+const PositiveQuantityDecimalSchema = QuantityDecimalSchema.refine((value) => Number(value) > 0, 'Must be positive')
+const MoneyDecimalSchema = z.string().regex(/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,2})?$/)
+
 export const PurchaseOrderStatusSchema = z
   .enum(['draft', 'sent', 'partial', 'received', 'cancelled'])
   .openapi('PurchaseOrderStatus')
@@ -13,8 +17,8 @@ export const PurchaseOrderLineSchema = z
     variantId: z.string().uuid(),
     sku: z.string(),
     productName: z.string(),
-    quantityOrdered: z.number(),
-    quantityReceived: z.number(),
+    quantityOrdered: QuantityDecimalSchema,
+    quantityReceived: QuantityDecimalSchema,
     unitCost: z.string(),
     lineTotal: z.string(),
   })
@@ -32,11 +36,16 @@ export const PurchaseOrderSchema = z
     totalCost: z.string(),
     lines: z.array(PurchaseOrderLineSchema),
     createdAt: z.string(),
+    clientPurchaseOrderId: z.string().uuid().nullable().optional(),
+    replayed: z.boolean().optional(),
   })
   .openapi('PurchaseOrder')
 
 export const CreatePurchaseOrderSchema = z
   .object({
+    // Optional only for temporary deployed-web compatibility. New clients,
+    // including mobile, must always send this stable retry key.
+    clientPurchaseOrderId: z.string().uuid().optional(),
     supplierId: z.string().uuid(),
     expectedDate: z.string().date().optional(),
     notes: z.string().max(1000).optional(),
@@ -44,8 +53,8 @@ export const CreatePurchaseOrderSchema = z
       .array(
         z.object({
           variantId: z.string().uuid(),
-          quantityOrdered: z.number().positive(),
-          unitCost: z.number().nonnegative(),
+          quantityOrdered: PositiveQuantityDecimalSchema,
+          unitCost: MoneyDecimalSchema,
         }),
       )
       .min(1),
@@ -76,10 +85,10 @@ export const ReceivePurchaseOrderSchema = z
       .array(
         z.object({
           purchaseOrderLineId: z.string().uuid(),
-          quantityReceived: z.number().positive(),
+          quantityReceived: PositiveQuantityDecimalSchema,
           // Optional: falls back to the line's ordered unit cost when the
           // delivery charged the price the PO expected.
-          unitCost: z.number().nonnegative().optional(),
+          unitCost: MoneyDecimalSchema.optional(),
         }),
       )
       .min(1),
@@ -96,8 +105,8 @@ export const ReceiptResultSchema = z
       z.object({
         purchaseOrderLineId: z.string().uuid(),
         sku: z.string(),
-        quantityOrdered: z.number(),
-        quantityReceived: z.number(),
+        quantityOrdered: QuantityDecimalSchema,
+        quantityReceived: QuantityDecimalSchema,
       }),
     ),
     purchaseOrder: PurchaseOrderSchema,

@@ -1,5 +1,7 @@
 import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
+import { Prisma } from '@prisma/client'
+import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { CreateStockMovementSchema } from '../contracts/schemas/stockMovement'
 import { allowsFractionalQuantity } from '../contracts/schemas/product'
@@ -27,11 +29,12 @@ function toMovementJson(row: MovementRow) {
     id: row.id,
     variantId: row.variant_id,
     movementType: row.movement_type,
-    quantityDelta: Number(row.quantity_delta),
+    quantityDelta: String(row.quantity_delta),
     reasonCode: row.reason_code,
     reasonNote: row.reason_note,
     createdBy: row.created_by,
     createdAt: row.created_at.toISOString(),
+    ...(Object.prototype.hasOwnProperty.call(row, 'client_movement_id') ? { clientMovementId: (row as any).client_movement_id } : {}),
   }
 }
 
@@ -68,6 +71,25 @@ router.post('/', async (req, res) => {
   }
 
   const client = forTenant(req.user!.tenantId) as any
+  const storeId = activeStoreId(req)
+  const requestHash = parsed.data.clientMovementId
+    ? createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex')
+    : null
+
+  // Replay must be resolved before mutable variant/stock validation. The
+  // original committed result remains authoritative even if stock or catalog
+  // policy changed after the first request.
+  if (parsed.data.clientMovementId) {
+    const replay = await client.stock_movements.findFirst({
+      where: { store_id: storeId, client_movement_id: parsed.data.clientMovementId },
+    })
+    if (replay) {
+      if (replay.request_hash !== requestHash) {
+        return res.status(409).json(errorEnvelope('IDEMPOTENCY_CONFLICT', 'This operation ID was already used for a different stock movement.'))
+      }
+      return res.status(200).json({ ...toMovementJson(replay), replayed: true })
+    }
+  }
 
   // CR-01: the variants FK only constrains variant_id to *some* row in
   // public.variants, not one owned by the caller's tenant, and
@@ -90,7 +112,7 @@ router.post('/', async (req, res) => {
   // never does, and a fractional piece is a typo the ledger should refuse.
   if (
     !allowsFractionalQuantity(variant.unit_of_measure) &&
-    !Number.isInteger(parsed.data.quantityDelta)
+    !new Prisma.Decimal(parsed.data.quantityDelta).isInteger()
   ) {
     return res.status(400).json({
       error: `Quantity must be a whole number for a variant measured in ${variant.unit_of_measure}`,
@@ -98,8 +120,8 @@ router.post('/', async (req, res) => {
   }
 
   const currentStock = await stockForVariant(client, req, parsed.data.variantId)
-  const projectedStock = currentStock + parsed.data.quantityDelta
-  if (!Number.isFinite(projectedStock) || Math.abs(projectedStock) > MAX_STOCK_QUANTITY) {
+  const projectedStock = new Prisma.Decimal(currentStock).add(parsed.data.quantityDelta)
+  if (projectedStock.abs().gt(MAX_STOCK_QUANTITY)) {
     return res.status(400).json({
       error: `Quantity is outside the supported range. Current stock is ${currentStock}.`,
     })
@@ -111,17 +133,30 @@ router.post('/', async (req, res) => {
     const movement = await client.stock_movements.create({
       data: {
         tenant_id: req.user!.tenantId,
-        store_id: activeStoreId(req),
+        store_id: storeId,
         variant_id: parsed.data.variantId,
         movement_type: parsed.data.movementType,
         quantity_delta: parsed.data.quantityDelta,
         reason_code: parsed.data.reasonCode ?? null,
         reason_note: parsed.data.reasonNote ?? null,
         created_by: createdBy,
+        client_movement_id: parsed.data.clientMovementId ?? null,
+        request_hash: requestHash,
       },
     })
-    return res.status(201).json(toMovementJson(movement))
-  } catch {
+    return res.status(201).json({ ...toMovementJson(movement), replayed: false })
+  } catch (error: any) {
+    if (error.code === 'P2002' && parsed.data.clientMovementId) {
+      const winner = await client.stock_movements.findFirst({
+        where: { store_id: storeId, client_movement_id: parsed.data.clientMovementId },
+      })
+      if (winner) {
+        if (winner.request_hash !== requestHash) {
+          return res.status(409).json(errorEnvelope('IDEMPOTENCY_CONFLICT', 'This operation ID was already used for a different stock movement.'))
+        }
+        return res.status(200).json({ ...toMovementJson(winner), replayed: true })
+      }
+    }
     return res.status(400).json({ error: 'Could not record stock movement' })
   }
 })

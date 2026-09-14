@@ -2,6 +2,7 @@ import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
+import { createHash } from 'node:crypto'
 import { OpenShiftSchema, CloseShiftSchema } from '../contracts/schemas/shift'
 import { forTenant } from '../db/tenantClient'
 import { findPairedTerminal } from '../lib/counterDevice'
@@ -38,6 +39,7 @@ function toShiftJson(row: any) {
     countedCash: row.counted_cash ? row.counted_cash.toString() : null,
     variance: row.variance ? row.variance.toString() : null,
     closedAt: row.closed_at ? row.closed_at.toISOString() : null,
+    ...(row.client_shift_id !== undefined ? { clientShiftId: row.client_shift_id } : {}),
   }
 }
 
@@ -223,6 +225,21 @@ router.post('/', async (req, res) => {
     return res.status(409).json({ error: 'That counter is turned off. Pick another, or turn it back on in Settings.' })
   }
 
+  const requestHash = parsed.data.clientShiftId
+    ? createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex')
+    : null
+  if (parsed.data.clientShiftId) {
+    const replay = await client.shifts.findFirst({
+      where: { store_id: storeId, client_shift_id: parsed.data.clientShiftId },
+    })
+    if (replay) {
+      if (replay.request_hash !== requestHash) {
+        return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This opening ID was already used for different shift data.' })
+      }
+      return res.status(200).json({ ...toShiftJson(replay), replayed: true })
+    }
+  }
+
   const openOnTerminal = await client.shifts.findFirst({
     where: { store_id: storeId, terminal_id: terminal.id, closed_at: null },
   })
@@ -253,6 +270,8 @@ router.post('/', async (req, res) => {
         staff_id: staffId,
         terminal_id: terminal.id,
         starting_cash: startingCash,
+        client_shift_id: parsed.data.clientShiftId ?? null,
+        request_hash: requestHash,
       },
     })
     if (req.actingStaff?.sessionId) {
@@ -261,9 +280,18 @@ router.post('/', async (req, res) => {
         data: { shift_id: shift.id, last_seen_at: new Date() },
       })
     }
-    return res.status(201).json(toShiftJson(shift))
+    return res.status(201).json({ ...toShiftJson(shift), replayed: false })
   } catch (err: any) {
     // The partial unique index caught a race the check above could not.
+    if (err.code === 'P2002' && parsed.data.clientShiftId) {
+      const winner = await client.shifts.findFirst({ where: { store_id: storeId, client_shift_id: parsed.data.clientShiftId } })
+      if (winner) {
+        if (winner.request_hash !== requestHash) {
+          return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This opening ID was already used for different shift data.' })
+        }
+        return res.status(200).json({ ...toShiftJson(winner), replayed: true })
+      }
+    }
     if (err.code === 'P2002') {
       return res.status(409).json({ error: `${terminal.name} already has a shift open. Close it before opening another.` })
     }

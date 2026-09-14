@@ -3,6 +3,7 @@ import express from 'express'
 import request from 'supertest'
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 
 process.env.SUPABASE_URL = 'http://localhost:54321'
 process.env.SUPABASE_ANON_KEY = 'anon-key'
@@ -15,6 +16,7 @@ vi.mock('@supabase/supabase-js', () => ({
 
 const stockMovementsCreateMock = vi.fn()
 const stockMovementsFindManyMock = vi.fn()
+const stockMovementsFindFirstMock = vi.fn()
 const staffMembersFindFirstMock = vi.fn()
 const membershipFindFirstMock = vi.fn()
 const variantsFindFirstMock = vi.fn()
@@ -25,6 +27,7 @@ vi.mock('../../src/db/tenantClient', () => ({
     stock_movements: {
       create: stockMovementsCreateMock,
       findMany: stockMovementsFindManyMock,
+      findFirst: stockMovementsFindFirstMock,
     },
     staff_members: {
       findFirst: (args: { where?: { role?: string } }) =>
@@ -62,6 +65,7 @@ describe('stock-movements routes (INV-01)', () => {
     getUserMock.mockReset()
     stockMovementsCreateMock.mockReset()
     stockMovementsFindManyMock.mockReset()
+    stockMovementsFindFirstMock.mockReset().mockResolvedValue(null)
     staffMembersFindFirstMock.mockReset()
     membershipFindFirstMock.mockReset().mockImplementation(({ where }: { where: { role?: string } }) => ({
       role: where.role,
@@ -77,16 +81,21 @@ describe('stock-movements routes (INV-01)', () => {
     // CR-01: the caller's tenant-scoped variant lookup finds the variant by
     // default; individual tests override to null to simulate a cross-tenant
     // (not found) variant.
-    variantsFindFirstMock.mockResolvedValue({ id: '11111111-1111-4111-8111-111111111111' })
+    variantsFindFirstMock.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      track_inventory: true,
+      unit_of_measure: 'kg',
+    })
   })
 
   async function buildApp() {
     const { authMiddleware } = await import('../../src/middleware/auth')
     const { storeContextMiddleware } = await import('../../src/middleware/storeContext')
     const { default: stockMovementsRouter } = await import('../../src/routes/stockMovements')
+    const { requireRole } = await import('../../src/middleware/requireRole')
     const app = express()
     app.use(express.json())
-    app.use('/stock-movements', authMiddleware, storeContextMiddleware, stockMovementsRouter)
+    app.use('/stock-movements', authMiddleware, storeContextMiddleware, requireRole('manager'), stockMovementsRouter)
     return app
   }
 
@@ -119,7 +128,7 @@ describe('stock-movements routes (INV-01)', () => {
     expect(managerRes.body.movementType).toBe('adjustment')
   })
 
-  it('Test 2: POST /stock-movements receive with cashier JWT returns 201 (D-13 only gates adjustment)', async () => {
+  it('Test 2: runtime manager gate rejects direct receiving by a cashier', async () => {
     stockMovementsCreateMock.mockResolvedValue({
       id: 'move-2',
       variant_id: '11111111-1111-4111-8111-111111111111',
@@ -137,8 +146,8 @@ describe('stock-movements routes (INV-01)', () => {
       .set('Authorization', `Bearer ${tokenFor('cashier')}`)
       .send({ variantId: '11111111-1111-4111-8111-111111111111', movementType: 'receive', quantityDelta: 10 })
 
-    expect(res.status).toBe(201)
-    expect(stockMovementsCreateMock).toHaveBeenCalled()
+    expect(res.status).toBe(403)
+    expect(stockMovementsCreateMock).not.toHaveBeenCalled()
   })
 
   it('Test 2b: POST /stock-movements adjustment with no reasonCode returns 400', async () => {
@@ -220,7 +229,7 @@ describe('stock-movements routes (INV-01)', () => {
         id: 'move-3',
         variantId: '11111111-1111-4111-8111-111111111111',
         movementType: 'receive',
-        quantityDelta: 10,
+        quantityDelta: '10',
         reasonCode: null,
         reasonNote: null,
         createdBy: 'staff-1',
@@ -236,6 +245,45 @@ describe('stock-movements routes (INV-01)', () => {
         orderBy: { created_at: 'desc' },
       }),
     )
+  })
+
+  it('returns an exact keyed replay without inserting another movement', async () => {
+    const body = {
+      clientMovementId: '33333333-3333-4333-8333-333333333333',
+      variantId: '11111111-1111-4111-8111-111111111111',
+      movementType: 'receive',
+      quantityDelta: '10.500',
+    }
+    const requestHash = createHash('sha256').update(JSON.stringify(body)).digest('hex')
+    stockMovementsFindFirstMock.mockResolvedValue({
+      id: 'move-original', variant_id: body.variantId, movement_type: 'receive', quantity_delta: '10.500',
+      reason_code: null, reason_note: null, created_by: 'staff-1', created_at: new Date('2026-01-03T00:00:00Z'),
+      client_movement_id: body.clientMovementId, request_hash: requestHash,
+    })
+
+    const res = await request(await buildApp())
+      .post('/stock-movements')
+      .set('Authorization', `Bearer ${tokenFor('manager')}`)
+      .send(body)
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual(expect.objectContaining({ id: 'move-original', quantityDelta: '10.500', replayed: true }))
+    expect(stockMovementsCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects changed data that reuses a direct-movement operation ID', async () => {
+    stockMovementsFindFirstMock.mockResolvedValue({ request_hash: 'a'.repeat(64) })
+    const res = await request(await buildApp())
+      .post('/stock-movements')
+      .set('Authorization', `Bearer ${tokenFor('manager')}`)
+      .send({
+        clientMovementId: '33333333-3333-4333-8333-333333333333',
+        variantId: '11111111-1111-4111-8111-111111111111', movementType: 'receive', quantityDelta: '11',
+      })
+
+    expect(res.status).toBe(409)
+    expect(res.body.code).toBe('IDEMPOTENCY_CONFLICT')
+    expect(stockMovementsCreateMock).not.toHaveBeenCalled()
   })
 
   it('Test 5 (CR-01): POST /stock-movements with a variantId that does not resolve within the caller\'s own tenant returns 404 and never inserts', async () => {

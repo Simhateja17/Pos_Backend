@@ -3204,6 +3204,15 @@
           "litre",
           "ml",
           "metre",
+          "lb",
+          "oz",
+          "gallon",
+          "quart",
+          "pint",
+          "floz",
+          "yard",
+          "foot",
+          "inch",
           "box",
           "pack",
           "set",
@@ -3426,6 +3435,203 @@
           "variants"
         ]
       },
+      "ProductWithOpeningStockResult": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "$ref": "#/components/schemas/Product"
+          },
+          "openingStock": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpeningStockResult"
+            }
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "product",
+          "openingStock",
+          "replayed"
+        ]
+      },
+      "OpeningStockResult": {
+        "type": "object",
+        "properties": {
+          "movementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantityReceived": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "movementId",
+          "variantId",
+          "quantityReceived"
+        ]
+      },
+      "CreateProductWithOpeningStockRequest": {
+        "type": "object",
+        "properties": {
+          "clientOperationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "product": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CreateProductRequest"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "variants": {
+                    "type": "array",
+                    "items": {
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "sku": {
+                              "type": "string",
+                              "maxLength": 40,
+                              "pattern": "^[A-Za-z0-9-]+$"
+                            },
+                            "barcode": {
+                              "type": "string",
+                              "pattern": "^\\d{8,14}$"
+                            },
+                            "unitOfMeasure": {
+                              "$ref": "#/components/schemas/UnitOfMeasure"
+                            },
+                            "size": {
+                              "type": "string",
+                              "maxLength": 50
+                            },
+                            "color": {
+                              "type": "string",
+                              "maxLength": 50
+                            },
+                            "material": {
+                              "type": "string",
+                              "maxLength": 50
+                            },
+                            "price": {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            "mrp": {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            "listPrice": {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            "initialCostPrice": {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            "hsnSac": {
+                              "type": "string",
+                              "pattern": "^[0-9]{4,8}$"
+                            },
+                            "purchaseUnit": {
+                              "type": "string",
+                              "maxLength": 40
+                            },
+                            "purchasePackSize": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "trackInventory": {
+                              "type": "boolean",
+                              "default": true
+                            },
+                            "allowNegativeStock": {
+                              "type": "boolean",
+                              "default": false
+                            },
+                            "expiryDate": {
+                              "type": "string",
+                              "format": "date"
+                            },
+                            "taxRatePercent": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 100
+                            },
+                            "reorderThreshold": {
+                              "type": "number",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "price",
+                            "taxRatePercent"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "trackInventory": {
+                              "type": "boolean"
+                            },
+                            "allowNegativeStock": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "trackInventory",
+                            "allowNegativeStock"
+                          ]
+                        }
+                      ]
+                    },
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          },
+          "openingStock": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpeningStockInput"
+            }
+          }
+        },
+        "required": [
+          "clientOperationId",
+          "product",
+          "openingStock"
+        ]
+      },
+      "OpeningStockInput": {
+        "type": "object",
+        "properties": {
+          "variantIndex": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "quantityReceived": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,3})?$"
+          }
+        },
+        "required": [
+          "variantIndex",
+          "quantityReceived"
+        ]
+      },
       "UpdateProductRequest": {
         "type": "object",
         "properties": {
@@ -3572,7 +3778,7 @@
             ]
           },
           "quantityDelta": {
-            "type": "number"
+            "type": "string"
           },
           "reasonCode": {
             "type": [
@@ -3602,6 +3808,16 @@
           },
           "createdAt": {
             "type": "string"
+          },
+          "clientMovementId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "replayed": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -3618,6 +3834,10 @@
       "CreateStockMovementRequest": {
         "type": "object",
         "properties": {
+          "clientMovementId": {
+            "type": "string",
+            "format": "uuid"
+          },
           "variantId": {
             "type": "string",
             "format": "uuid"
@@ -3631,7 +3851,15 @@
             ]
           },
           "quantityDelta": {
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,3})?$"
+              },
+              {
+                "type": "number"
+              }
+            ]
           },
           "reasonCode": {
             "type": "string",
@@ -5887,6 +6115,16 @@
               "string",
               "null"
             ]
+          },
+          "clientShiftId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "replayed": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -6003,6 +6241,10 @@
       "OpenShiftRequest": {
         "type": "object",
         "properties": {
+          "clientShiftId": {
+            "type": "string",
+            "format": "uuid"
+          },
           "startingCash": {
             "type": "string",
             "pattern": "^\\d+\\.\\d{2}$"
@@ -7607,6 +7849,16 @@
           },
           "createdAt": {
             "type": "string"
+          },
+          "clientPurchaseOrderId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "replayed": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -7650,10 +7902,12 @@
             "type": "string"
           },
           "quantityOrdered": {
-            "type": "number"
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,3})?$"
           },
           "quantityReceived": {
-            "type": "number"
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,3})?$"
           },
           "unitCost": {
             "type": "string"
@@ -7676,6 +7930,10 @@
       "CreatePurchaseOrderRequest": {
         "type": "object",
         "properties": {
+          "clientPurchaseOrderId": {
+            "type": "string",
+            "format": "uuid"
+          },
           "supplierId": {
             "type": "string",
             "format": "uuid"
@@ -7698,12 +7956,12 @@
                   "format": "uuid"
                 },
                 "quantityOrdered": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,3})?$"
                 },
                 "unitCost": {
-                  "type": "number",
-                  "minimum": 0
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
                 }
               },
               "required": [
@@ -7763,10 +8021,12 @@
                   "type": "string"
                 },
                 "quantityOrdered": {
-                  "type": "number"
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,3})?$"
                 },
                 "quantityReceived": {
-                  "type": "number"
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,3})?$"
                 }
               },
               "required": [
@@ -7809,12 +8069,12 @@
                   "format": "uuid"
                 },
                 "quantityReceived": {
-                  "type": "number",
-                  "exclusiveMinimum": 0
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,3})?$"
                 },
                 "unitCost": {
-                  "type": "number",
-                  "minimum": 0
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,2})?$"
                 }
               },
               "required": [
@@ -10931,6 +11191,51 @@
         }
       }
     },
+    "/products/with-opening-stock": {
+      "post": {
+        "description": "Atomically create a product, its tracked variants, and positive opening receive movements with store-scoped idempotency.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductWithOpeningStockRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Original result replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductWithOpeningStockResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Product and opening stock created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductWithOpeningStockResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid product or opening stock request"
+          },
+          "404": {
+            "description": "Store or referenced catalog value not found"
+          },
+          "409": {
+            "description": "Idempotency, SKU, or barcode conflict"
+          }
+        }
+      }
+    },
     "/products/{productId}": {
       "get": {
         "description": "Get a single product with its variants and current stock.",
@@ -12581,7 +12886,7 @@
         }
       },
       "post": {
-        "description": "Open a shift with a starting cash count on a named counter (D-14, 0034). One counter holds at most one open shift.",
+        "description": "Open a shift with a starting cash count on a named counter (D-14, 0034). A clientShiftId makes a timeout retry replay-safe; one counter holds at most one open shift.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -13226,10 +13531,54 @@
             }
           },
           "400": {
-            "description": "Invalid request"
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Owner role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
           },
           "409": {
-            "description": "A category with that name already exists"
+            "description": "A category with that name already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Category creation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -13268,11 +13617,65 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid request or category id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Owner role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Category not found"
+            "description": "Category not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
           },
           "409": {
-            "description": "A category with that name already exists"
+            "description": "A category with that name already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Category update failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
           }
         }
       },
@@ -13312,8 +13715,45 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid category id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Owner role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Category not found"
+            "description": "Category not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }

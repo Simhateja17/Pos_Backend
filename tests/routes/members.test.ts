@@ -252,7 +252,7 @@ describe('members routes', () => {
       .send({ role: 'manager' })
 
     expect(res.status).toBe(409)
-    expect(res.body).toEqual({ error: 'Cannot remove the last owner' })
+    expect(res.body).toEqual({ code: 'MEMBER_CONFLICT', message: 'Cannot remove the last owner' })
     expect(staffMembersUpdateMock).not.toHaveBeenCalled()
   })
 
@@ -295,7 +295,7 @@ describe('members routes', () => {
       .set('Authorization', `Bearer ${tokenFor('owner')}`)
 
     expect(res.status).toBe(409)
-    expect(res.body).toEqual({ error: 'Cannot remove the last owner' })
+    expect(res.body).toEqual({ code: 'MEMBER_CONFLICT', message: 'Cannot remove the last owner' })
     expect(staffMembersUpdateMock).not.toHaveBeenCalled()
   })
 

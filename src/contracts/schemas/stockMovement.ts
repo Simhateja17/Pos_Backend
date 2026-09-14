@@ -5,17 +5,30 @@ import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 // z instance) — safe to call again here, same pattern as schemas/product.ts.
 extendZodWithOpenApi(z)
 
+const SignedQuantityStringSchema = z
+  .string()
+  .regex(/^-?(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,3})?$/)
+  .refine((value) => Number(value) !== 0, 'quantityDelta must not be zero')
+
+// Number support is temporary compatibility for the deployed web client.
+// New clients must send strings so decimal text is not rounded in JavaScript.
+const QuantityInputSchema = z
+  .union([SignedQuantityStringSchema, z.number().finite().transform((value) => String(value))])
+  .pipe(SignedQuantityStringSchema)
+
 export const StockMovementSchema = z
   .object({
     id: z.string().uuid(),
     variantId: z.string().uuid(),
     movementType: z.enum(['sale', 'receive', 'adjustment', 'return', 'transfer']),
     // numeric(12,3) since 0031 — a kg variant moves 2.5, not 2.
-    quantityDelta: z.number(),
+    quantityDelta: z.string(),
     reasonCode: z.enum(['damage', 'shrinkage_theft', 'count_correction', 'other']).nullable(),
     reasonNote: z.string().nullable(),
     createdBy: z.string().uuid().nullable(),
     createdAt: z.string(),
+    clientMovementId: z.string().uuid().nullable().optional(),
+    replayed: z.boolean().optional(),
   })
   .openapi('StockMovement')
 
@@ -24,11 +37,12 @@ export const StockMovementSchema = z
 // this endpoint deliberately does not accept those two values yet).
 export const CreateStockMovementSchema = z
   .object({
+    clientMovementId: z.string().uuid().optional(),
     variantId: z.string().uuid(),
     movementType: z.enum(['receive', 'adjustment', 'transfer']),
     // Whole-vs-fractional is decided by the VARIANT's unit, which this schema
     // cannot see, so the route re-checks it against the loaded variant.
-    quantityDelta: z.number().refine((n) => n !== 0, 'quantityDelta must not be zero'),
+    quantityDelta: QuantityInputSchema,
     reasonCode: z.enum(['damage', 'shrinkage_theft', 'count_correction', 'other']).optional(),
     reasonNote: z.string().max(500).optional(),
   })
@@ -41,7 +55,7 @@ export const CreateStockMovementSchema = z
     path: ['reasonNote'],
   })
   .refine(
-    (data) => !['damage', 'shrinkage_theft'].includes(data.reasonCode ?? '') || data.quantityDelta < 0,
+    (data) => !['damage', 'shrinkage_theft'].includes(data.reasonCode ?? '') || Number(data.quantityDelta) < 0,
     {
       message: 'Damage and shrinkage/theft adjustments must decrease stock',
       path: ['quantityDelta'],

@@ -6,6 +6,8 @@ extendZodWithOpenApi(z)
 
 export const OpenShiftSchema = z
   .object({
+    /** Stable retry key. Optional only while older deployed web clients are upgraded. */
+    clientShiftId: z.string().uuid().optional(),
     startingCash: z.string().regex(/^\d+\.\d{2}$/).optional(),
     /** Which counter this drawer belongs to (0034). */
     terminalId: z.string().uuid().optional(),
@@ -29,6 +31,8 @@ export const ShiftSchema = z
     countedCash: z.string().nullable(),
     variance: z.string().nullable(),
     closedAt: z.string().nullable(),
+    clientShiftId: z.string().uuid().nullable().optional(),
+    replayed: z.boolean().optional(),
   })
   .openapi('Shift')
 

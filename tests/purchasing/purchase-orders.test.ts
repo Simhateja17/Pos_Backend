@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import express from 'express'
 import request from 'supertest'
+import { createHash } from 'node:crypto'
 
 const poFindFirstMock = vi.fn()
 const poFindManyMock = vi.fn()
@@ -44,6 +45,7 @@ const PO_ID = '22222222-2222-4222-8222-222222222222'
 const LINE_ID = '33333333-3333-4333-8333-333333333333'
 const VARIANT_ID = '44444444-4444-4444-8444-444444444444'
 const RECEIPT_KEY = '55555555-5555-4555-8555-555555555555'
+const CREATE_KEY = '77777777-7777-4777-8777-777777777777'
 
 const poRow = {
   id: PO_ID,
@@ -94,6 +96,80 @@ describe('purchase order routes', () => {
     return app
   }
 
+  const keyedCreateBody = {
+    clientPurchaseOrderId: CREATE_KEY,
+    supplierId: '66666666-6666-4666-8666-666666666666',
+    lines: [{ variantId: VARIANT_ID, quantityOrdered: '5', unitCost: '100.00' }],
+  }
+
+  it('returns the original order without writes for an exact keyed replay', async () => {
+    const requestHash = createHash('sha256').update(JSON.stringify(keyedCreateBody)).digest('hex')
+    poFindFirstMock.mockResolvedValue({ ...poRow, request_hash: requestHash })
+    const res = await request(await buildApp())
+      .post('/purchase-orders')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(keyedCreateBody)
+
+    expect(res.status).toBe(200)
+    expect(res.body.replayed).toBe(true)
+    expect(supplierFindFirstMock).not.toHaveBeenCalled()
+    expect(poCreateMock).not.toHaveBeenCalled()
+    expect(lineCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('persists the stable creation key and request hash before returning server data', async () => {
+    poFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce(poRow)
+    supplierFindFirstMock.mockResolvedValue({ id: keyedCreateBody.supplierId })
+    variantFindManyMock.mockResolvedValue([{ id: VARIANT_ID }])
+    poCountMock.mockResolvedValue(0)
+    poCreateMock.mockResolvedValue({ id: PO_ID })
+    lineCreateMock.mockResolvedValue({})
+
+    const res = await request(await buildApp())
+      .post('/purchase-orders')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(keyedCreateBody)
+
+    expect(res.status).toBe(201)
+    expect(res.body.replayed).toBe(false)
+    expect(poCreateMock).toHaveBeenCalledWith({ data: expect.objectContaining({
+      client_purchase_order_id: CREATE_KEY,
+      request_hash: createHash('sha256').update(JSON.stringify(keyedCreateBody)).digest('hex'),
+    }) })
+    expect(lineCreateMock).toHaveBeenCalledWith({ data: expect.objectContaining({
+      quantity_ordered: '5', unit_cost: '100.00',
+    }) })
+  })
+
+  it('rejects reuse of a creation key with changed purchase-order data', async () => {
+    poFindFirstMock.mockResolvedValue({ ...poRow, request_hash: 'a'.repeat(64) })
+    const res = await request(await buildApp())
+      .post('/purchase-orders')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(keyedCreateBody)
+
+    expect(res.status).toBe(409)
+    expect(poCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('loads the committed winner when concurrent keyed creation loses the unique-index race', async () => {
+    const requestHash = createHash('sha256').update(JSON.stringify(keyedCreateBody)).digest('hex')
+    poFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({ ...poRow, request_hash: requestHash })
+    supplierFindFirstMock.mockResolvedValue({ id: keyedCreateBody.supplierId })
+    variantFindManyMock.mockResolvedValue([{ id: VARIANT_ID }])
+    poCountMock.mockResolvedValue(0)
+    poCreateMock.mockRejectedValue({ code: 'P2002', meta: { target: 'uq_purchase_orders_client_operation' } })
+
+    const res = await request(await buildApp())
+      .post('/purchase-orders')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send(keyedCreateBody)
+
+    expect(res.status).toBe(200)
+    expect(res.body.replayed).toBe(true)
+    expect(lineCreateMock).not.toHaveBeenCalled()
+  })
+
   it('Test 1: POST / rejects the same variant appearing twice on one order', async () => {
     const app = await buildApp()
     const res = await request(app)
@@ -102,8 +178,8 @@ describe('purchase order routes', () => {
       .send({
         supplierId: '66666666-6666-4666-8666-666666666666',
         lines: [
-          { variantId: VARIANT_ID, quantityOrdered: 5, unitCost: 100 },
-          { variantId: VARIANT_ID, quantityOrdered: 3, unitCost: 100 },
+          { variantId: VARIANT_ID, quantityOrdered: '5', unitCost: '100.00' },
+          { variantId: VARIANT_ID, quantityOrdered: '3', unitCost: '100.00' },
         ],
       })
 
@@ -111,8 +187,22 @@ describe('purchase order routes', () => {
     expect(poCreateMock).not.toHaveBeenCalled()
   })
 
+  it('requires quantity and money inputs as decimal strings', async () => {
+    const app = await buildApp()
+    const res = await request(app)
+      .post('/purchase-orders')
+      .set('Authorization', `Bearer ${tokenFor()}`)
+      .send({
+        supplierId: '66666666-6666-4666-8666-666666666666',
+        lines: [{ variantId: VARIANT_ID, quantityOrdered: 5, unitCost: 100 }],
+      })
+
+    expect(res.status).toBe(400)
+    expect(poCreateMock).not.toHaveBeenCalled()
+  })
+
   it('GET / lists only purchase orders from the active store', async () => {
-    poFindManyMock.mockResolvedValue([])
+    poFindManyMock.mockResolvedValue([poRow])
     const app = await buildApp()
 
     const res = await request(app)
@@ -121,6 +211,9 @@ describe('purchase order routes', () => {
       .set('Authorization', `Bearer ${tokenFor()}`)
 
     expect(res.status).toBe(200)
+    expect(res.body[0].lines[0]).toEqual(expect.objectContaining({
+      quantityOrdered: '100', quantityReceived: '40', unitCost: '520.00', lineTotal: '52000.00',
+    }))
     expect(poFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
       where: { status: 'sent', store_id: 'store-1' },
     }))
@@ -133,7 +226,7 @@ describe('purchase order routes', () => {
     const res = await request(app)
       .post(`/purchase-orders/${PO_ID}/receive`)
       .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: 10 }] })
+      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: '10' }] })
 
     expect(res.status).toBe(409)
     expect(receiptCreateMock).not.toHaveBeenCalled()
@@ -150,12 +243,12 @@ describe('purchase order routes', () => {
     const res = await request(app)
       .post(`/purchase-orders/${PO_ID}/receive`)
       .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: 25 }] })
+      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: '25' }] })
 
     expect(res.status).toBe(201)
     expect(res.body.replayed).toBe(false)
     expect(receiptLineCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ quantity_received: 25 }) }),
+      expect.objectContaining({ data: expect.objectContaining({ quantity_received: '25' }) }),
     )
     // Cost falls back to the line's ordered unit cost when the delivery
     // charged what the PO expected.
@@ -172,7 +265,7 @@ describe('purchase order routes', () => {
     const res = await request(app)
       .post(`/purchase-orders/${PO_ID}/receive`)
       .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: 25 }] })
+      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: '25' }] })
 
     expect(res.status).toBe(200)
     expect(res.body.replayed).toBe(true)
@@ -193,12 +286,12 @@ describe('purchase order routes', () => {
     const res = await request(app)
       .post(`/purchase-orders/${PO_ID}/receive`)
       .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: 70 }] })
+      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: '70' }] })
 
     expect(res.status).toBe(201)
     expect(receiptLineCreateMock).toHaveBeenCalled()
     expect(res.body.overReceived).toEqual([
-      { purchaseOrderLineId: LINE_ID, sku: 'SKU-1', quantityOrdered: 100, quantityReceived: 110 },
+      { purchaseOrderLineId: LINE_ID, sku: 'SKU-1', quantityOrdered: '100', quantityReceived: '110' },
     ])
   })
 
@@ -212,7 +305,7 @@ describe('purchase order routes', () => {
     const res = await request(app)
       .post(`/purchase-orders/${PO_ID}/receive`)
       .set('Authorization', `Bearer ${tokenFor()}`)
-      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: 5 }] })
+      .send({ clientReceiptId: RECEIPT_KEY, lines: [{ purchaseOrderLineId: LINE_ID, quantityReceived: '5' }] })
 
     expect(res.status).toBe(400)
     expect(receiptCreateMock).not.toHaveBeenCalled()

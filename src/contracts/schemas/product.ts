@@ -13,13 +13,26 @@ extendZodWithOpenApi(z)
  * both forms of the same commodity — loose rice (kg, priced per kg, no
  * barcode) and a pre-packed bag (piece, priced per packet, maker's EAN) are
  * just two ordinary variants.
+ *
+ * The metric units (kg/gram/litre/ml/metre) are what India's catalog offers;
+ * the US-customary units (lb/oz/gallon/quart/pint/floz/yard/foot/inch) are
+ * what the international edition offers alongside them — one shared column
+ * and enum across regions, with the frontend picking which subset to show
+ * per `useAppRegion()`. See frontend/lib/units.ts.
  */
 export const UnitOfMeasureSchema = z
-  .enum(['piece', 'kg', 'gram', 'litre', 'ml', 'metre', 'box', 'pack', 'set', 'pair'])
+  .enum([
+    'piece', 'kg', 'gram', 'litre', 'ml', 'metre',
+    'lb', 'oz', 'gallon', 'quart', 'pint', 'floz', 'yard', 'foot', 'inch',
+    'box', 'pack', 'set', 'pair',
+  ])
   .openapi('UnitOfMeasure')
 
 /** Units whose quantities may be fractional. A piece/box/pair cannot be sold as 2.5. */
-export const FRACTIONAL_UNITS = ['kg', 'gram', 'litre', 'ml', 'metre'] as const
+export const FRACTIONAL_UNITS = [
+  'kg', 'gram', 'litre', 'ml', 'metre',
+  'lb', 'oz', 'gallon', 'quart', 'pint', 'floz', 'yard', 'foot', 'inch',
+] as const
 
 export function allowsFractionalQuantity(unit: z.infer<typeof UnitOfMeasureSchema>): boolean {
   return (FRACTIONAL_UNITS as readonly string[]).includes(unit)
@@ -179,11 +192,63 @@ export const UpdateProductSchema = z.object({
   isActive: z.boolean().optional(),
 }).openapi('UpdateProductRequest')
 
+export const OpeningStockInputSchema = z.object({
+  variantIndex: z.number().int().nonnegative(),
+  quantityReceived: z.string().regex(/^(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,3})?$/),
+}).openapi('OpeningStockInput')
+
+const ExplicitInventoryVariantSchema = z.intersection(
+  CreateVariantInputSchema,
+  z.object({ trackInventory: z.boolean(), allowNegativeStock: z.boolean() }),
+)
+
+export const CreateProductWithOpeningStockSchema = z.object({
+  clientOperationId: z.string().uuid(),
+  product: CreateProductSchema.extend({ variants: z.array(ExplicitInventoryVariantSchema).min(1) }),
+  openingStock: z.array(OpeningStockInputSchema),
+}).superRefine((value, ctx) => {
+  const indexes = value.openingStock.map((line) => line.variantIndex)
+  if (new Set(indexes).size !== indexes.length) {
+    ctx.addIssue({ code: 'custom', path: ['openingStock'], message: 'A variant can have only one opening quantity' })
+  }
+  for (const [index, variant] of value.product.variants.entries()) {
+    const line = value.openingStock.find((candidate) => candidate.variantIndex === index)
+    if (variant.trackInventory && (!line || Number(line.quantityReceived) <= 0)) {
+      ctx.addIssue({ code: 'custom', path: ['openingStock'], message: `Tracked variant ${index} requires a positive opening quantity` })
+    }
+    if (!variant.trackInventory && line) {
+      ctx.addIssue({ code: 'custom', path: ['openingStock'], message: `Untracked variant ${index} cannot have opening stock` })
+    }
+    if (variant.trackInventory && variant.allowNegativeStock) {
+      ctx.addIssue({ code: 'custom', path: ['product', 'variants', index, 'allowNegativeStock'], message: 'Opening-stock creation requires negative stock to be off' })
+    }
+    if (line && !allowsFractionalQuantity(variant.unitOfMeasure) && !Number.isInteger(Number(line.quantityReceived))) {
+      ctx.addIssue({ code: 'custom', path: ['openingStock'], message: `Variant ${index} requires a whole opening quantity` })
+    }
+  }
+  if (indexes.some((index) => index >= value.product.variants.length)) {
+    ctx.addIssue({ code: 'custom', path: ['openingStock'], message: 'Opening stock references an unknown variant index' })
+  }
+}).openapi('CreateProductWithOpeningStockRequest')
+
+export const OpeningStockResultSchema = z.object({
+  movementId: z.string().uuid(),
+  variantId: z.string().uuid(),
+  quantityReceived: z.string(),
+}).openapi('OpeningStockResult')
+
+export const ProductWithOpeningStockResultSchema = z.object({
+  product: ProductSchema,
+  openingStock: z.array(OpeningStockResultSchema),
+  replayed: z.boolean(),
+}).openapi('ProductWithOpeningStockResult')
+
 export type Product = z.infer<typeof ProductSchema>
 export type Variant = z.infer<typeof VariantSchema>
 export type CreateProductInput = z.infer<typeof CreateProductSchema>
 export type UpdateVariantInput = z.infer<typeof UpdateVariantSchema>
 export type UpdateProductInput = z.infer<typeof UpdateProductSchema>
+export type CreateProductWithOpeningStockInput = z.infer<typeof CreateProductWithOpeningStockSchema>
 
 /** Read-only catalog page used by mobile and other non-checkout clients. */
 export const ProductRecordsQuerySchema = z

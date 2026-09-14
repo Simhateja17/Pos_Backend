@@ -37,6 +37,8 @@ import {
   VariantSchema,
   UpdateProductSchema,
   UpdateVariantSchema,
+  CreateProductWithOpeningStockSchema,
+  ProductWithOpeningStockResultSchema,
 } from './schemas/product'
 import { MasterItemListSchema, MasterItemSearchSchema } from './schemas/masterItem'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
@@ -623,6 +625,20 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: 'post',
+  path: '/products/with-opening-stock',
+  description: 'Atomically create a product, its tracked variants, and positive opening receive movements with store-scoped idempotency.',
+  request: { body: { content: { 'application/json': { schema: CreateProductWithOpeningStockSchema } } } },
+  responses: {
+    201: { description: 'Product and opening stock created', content: { 'application/json': { schema: ProductWithOpeningStockResultSchema } } },
+    200: { description: 'Original result replayed', content: { 'application/json': { schema: ProductWithOpeningStockResultSchema } } },
+    400: { description: 'Invalid product or opening stock request' },
+    404: { description: 'Store or referenced catalog value not found' },
+    409: { description: 'Idempotency, SKU, or barcode conflict' },
+  },
+})
+
+registry.registerPath({
   method: 'get',
   path: '/products/{productId}',
   description: 'Get a single product with its variants and current stock.',
@@ -1075,7 +1091,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/shifts',
-  description: 'Open a shift with a starting cash count on a named counter (D-14, 0034). One counter holds at most one open shift.',
+  description: 'Open a shift with a starting cash count on a named counter (D-14, 0034). A clientShiftId makes a timeout retry replay-safe; one counter holds at most one open shift.',
   request: { body: { content: { 'application/json': { schema: OpenShiftSchema } } } },
   responses: {
     201: { description: 'Shift opened', content: { 'application/json': { schema: ShiftSchema } } },
@@ -1326,8 +1342,11 @@ registry.registerPath({
   request: { body: { content: { 'application/json': { schema: CreateCategorySchema } } } },
   responses: {
     201: { description: 'Category created', content: { 'application/json': { schema: CategorySchema } } },
-    400: { description: 'Invalid request' },
-    409: { description: 'A category with that name already exists' },
+    400: apiError('Invalid request'),
+    401: apiError('Unauthenticated'),
+    403: apiError('Owner role required'),
+    409: apiError('A category with that name already exists'),
+    500: apiError('Category creation failed'),
   },
 })
 
@@ -1341,8 +1360,12 @@ registry.registerPath({
   },
   responses: {
     200: { description: 'Category updated', content: { 'application/json': { schema: CategorySchema } } },
-    404: { description: 'Category not found' },
-    409: { description: 'A category with that name already exists' },
+    400: apiError('Invalid request or category id'),
+    401: apiError('Unauthenticated'),
+    403: apiError('Owner role required'),
+    404: apiError('Category not found'),
+    409: apiError('A category with that name already exists'),
+    500: apiError('Category update failed'),
   },
 })
 
@@ -1360,7 +1383,10 @@ registry.registerPath({
         },
       },
     },
-    404: { description: 'Category not found' },
+    400: apiError('Invalid category id'),
+    401: apiError('Unauthenticated'),
+    403: apiError('Owner role required'),
+    404: apiError('Category not found'),
   },
 })
 
