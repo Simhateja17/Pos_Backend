@@ -73,6 +73,7 @@ function transactionRow(overrides: Record<string, unknown> = {}) {
     type: 'credit_sale',
     amount: new Prisma.Decimal('100.00'),
     sale_id: saleId,
+    return_reference_id: null,
     recorded_by: staffId,
     note: null,
     created_at: new Date('2026-08-03T10:00:00.000Z'),
@@ -137,19 +138,22 @@ describe('customer credit routes', () => {
     customerFindFirstMock.mockResolvedValue(customerRow({ credit_limit: new Prisma.Decimal('500.00') }))
     creditGroupByMock.mockResolvedValue([
       { customer_id: customerId, type: 'credit_sale', _sum: { amount: new Prisma.Decimal('125.00') }, _max: { created_at: new Date('2026-08-03T10:00:00.000Z') } },
+      { customer_id: customerId, type: 'credit_refund', _sum: { amount: new Prisma.Decimal('10.00') }, _max: { created_at: new Date('2026-08-03T12:00:00.000Z') } },
       { customer_id: customerId, type: 'repayment', _sum: { amount: new Prisma.Decimal('25.00') }, _max: { created_at: new Date('2026-08-04T10:00:00.000Z') } },
     ])
     creditFindManyMock.mockResolvedValue([
       transactionRow({ store_id: storeA, amount: new Prisma.Decimal('125.00') }),
+      transactionRow({ store_id: storeA, type: 'credit_refund', amount: new Prisma.Decimal('10.00'), return_reference_id: '77777777-7777-4777-8777-777777777777' }),
       transactionRow({ store_id: storeB, type: 'repayment', amount: new Prisma.Decimal('25.00'), sale_id: null }),
     ])
 
     const response = await request(app).get(`/customers/${customerId}/credit`)
 
     expect(response.status).toBe(200)
-    expect(response.body).toMatchObject({ customerId, balance: '100.00', creditLimit: '500.00' })
+    expect(response.body).toMatchObject({ customerId, balance: '90.00', creditLimit: '500.00' })
     expect(response.body.transactions).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'credit_sale', amount: '125.00', storeId: storeA, storeName: 'Main shop' }),
+      expect.objectContaining({ type: 'credit_refund', amount: '10.00', returnReferenceId: '77777777-7777-4777-8777-777777777777' }),
       expect.objectContaining({ type: 'repayment', amount: '25.00', storeId: storeB, storeName: 'Second shop', saleId: null }),
     ]))
     expect(creditGroupByMock).toHaveBeenCalledWith(expect.objectContaining({

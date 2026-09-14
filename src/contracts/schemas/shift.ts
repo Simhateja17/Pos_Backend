@@ -61,6 +61,7 @@ export const XReportSchema = z
     cardSalesTotal: z.string(),
     upiSalesTotal: z.string(),
     checkSalesTotal: z.string(),
+    creditSalesTotal: z.string(),
     refundsTotal: z.string(),
     saleCount: z.number().int(),
   })

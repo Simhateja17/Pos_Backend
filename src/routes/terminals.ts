@@ -212,7 +212,7 @@ router.post('/:terminalId/pair', requireOperatorOnPairedDevice, requireRole('man
     where: { terminal_id: paired.id, store_id: paired.store_id, closed_at: null },
     select: { id: true },
   })
-  return res.json(toTerminalJson(paired, Boolean(openShift), newHash, null))
+  return res.json({ ...toTerminalJson(paired, Boolean(openShift), newHash, null), deviceToken: newToken })
 })
 
 router.patch('/:terminalId', requireOperatorOnPairedDevice, requireRole('manager'), async (req, res) => {

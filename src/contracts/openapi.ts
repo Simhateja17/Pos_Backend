@@ -43,7 +43,7 @@ import {
 import { MasterItemListSchema, MasterItemSearchSchema } from './schemas/masterItem'
 import { StockMovementSchema, CreateStockMovementSchema, LowStockVariantSchema } from './schemas/stockMovement'
 import { CreateSaleSchema, SaleSchema, SaleListQuerySchema, SaleListSchema, ResendReceiptInputSchema, ResendReceiptResponseSchema, SaleQuoteRequestSchema, SaleQuoteSchema } from './schemas/sale'
-import { CreateReturnSchema, ReturnResponseSchema } from './schemas/return'
+import { CreateReturnSchema, ReturnResponseSchema, ReturnQuoteRequestSchema, ReturnQuoteSchema } from './schemas/return'
 import {
   CreateCustomerInputSchema,
   CustomerListQuerySchema,
@@ -79,7 +79,7 @@ import {
   XReportSchema,
   ZReportSchema,
 } from './schemas/shift'
-import { TerminalSchema, CreateTerminalSchema, UpdateTerminalSchema } from './schemas/terminal'
+import { TerminalSchema, PairedTerminalSchema, CreateTerminalSchema, UpdateTerminalSchema } from './schemas/terminal'
 import { StoreSchema, CreateStoreSchema, UpdateStoreSchema, StoreListSchema } from './schemas/store'
 import { VariantAvailabilitySchema } from './schemas/availability'
 import {
@@ -790,7 +790,7 @@ registry.registerPath({
 
 registry.registerPath({
   method: 'post', path: '/sales/quote',
-  description: 'Read-only online total for whole-quantity carts without discounts. No reservation; POST /sales revalidates all state.',
+  description: 'Read-only online total for a cart with server-owned prices, reviewed line/cart discounts, measured quantities and stock-floor checks. No reservation or write; POST /sales revalidates all state.',
   request: { body: { content: { 'application/json': { schema: SaleQuoteRequestSchema } } } },
   responses: {
     200: { description: 'Server total', content: { 'application/json': { schema: SaleQuoteSchema } } },
@@ -858,6 +858,19 @@ registry.registerPath({
   responses: {
     200: { description: 'Sale', content: { 'application/json': { schema: SaleSchema } } },
     404: { description: 'Sale not found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/returns/quote',
+  description: 'Read-only server refund preview for selected sale lines. Uses the persisted tax snapshot or the same pure tax builder for legacy/International sales and never writes stock, payments, or document numbers.',
+  request: { body: { content: { 'application/json': { schema: ReturnQuoteRequestSchema } } } },
+  responses: {
+    200: { description: 'Authoritative refund preview', content: { 'application/json': { schema: ReturnQuoteSchema } } },
+    400: { description: 'Invalid quantities or store selection' },
+    404: { description: 'Sale or line item not found' },
+    409: { description: 'Sale is not returnable or the server snapshot cannot be built' },
   },
 })
 
@@ -1284,10 +1297,10 @@ registry.registerPath({
 registry.registerPath({
   method: 'post',
   path: '/terminals/{terminalId}/pair',
-  description: 'Pair or reassign this browser/device to a counter. Manager/owner only.',
+  description: 'Pair or reassign this browser/native device to a counter. Manager/owner only. Native clients persist deviceToken securely and send it as X-Counter-Device-Token.',
   request: { params: z.object({ terminalId: z.string().uuid() }) },
   responses: {
-    200: { description: 'Device paired', content: { 'application/json': { schema: TerminalSchema } } },
+    200: { description: 'Device paired', content: { 'application/json': { schema: PairedTerminalSchema } } },
     404: { description: 'Counter not found' },
     409: { description: 'Counter is turned off' },
   },

@@ -2,8 +2,10 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { Request, Response } from 'express'
 
 export const COUNTER_DEVICE_COOKIE = 'couture_counter_device'
+export const COUNTER_DEVICE_HEADER = 'x-counter-device-token'
 export const REGISTER_LOCK_COOKIE = 'couture_register_locked'
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 60_000
+const COUNTER_DEVICE_TOKEN_PATTERN = /^[0-9a-f]{64}$/i
 
 function positiveEnvInt(name: string, fallback: number): number {
   const value = Number.parseInt(process.env[name] ?? '', 10)
@@ -30,7 +32,15 @@ function parseCookies(header: string | undefined): Record<string, string> {
 }
 
 export function getCounterDeviceToken(req: Request): string | undefined {
-  return parseCookies(req.headers.cookie)[COUNTER_DEVICE_COOKIE]
+  const cookie = parseCookies(req.headers.cookie)[COUNTER_DEVICE_COOKIE]
+  const rawHeader = req.headers[COUNTER_DEVICE_HEADER]
+  const header = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader
+  // A request presenting two different device identities is unpaired. This
+  // prevents a stale browser cookie from being silently overridden while
+  // allowing native clients to use the explicit header without cookie state.
+  if (cookie && header && cookie !== header) return undefined
+  const token = header ?? cookie
+  return token && COUNTER_DEVICE_TOKEN_PATTERN.test(token) ? token : undefined
 }
 
 export function isRegisterLocked(req: Request, tenantId: string): boolean {

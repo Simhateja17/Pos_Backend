@@ -94,7 +94,7 @@ describe('resolveRequestAccess', () => {
     const resolved = await resolveRequestAccess(
       requestWith({
         'x-operator-token': token,
-        cookie: 'couture_counter_device=device-token',
+        cookie: `couture_counter_device=${'a'.repeat(64)}`,
       }),
       identity,
     )

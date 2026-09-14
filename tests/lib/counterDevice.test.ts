@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Request, Response } from 'express'
 import {
+  getCounterDeviceToken,
   isRegisterLocked,
   setCounterDeviceCookie,
   setRegisterLockedCookie,
@@ -35,5 +36,19 @@ describe('counter device cookies', () => {
       expect(header).toContain('Secure')
     }
     expect(headers[1]).toContain('couture_register_locked=tenant-a')
+  })
+
+  it('accepts the explicit native device header without browser cookies', () => {
+    const token = 'a'.repeat(64)
+    const req = { headers: { 'x-counter-device-token': token } } as unknown as Request
+    expect(getCounterDeviceToken(req)).toBe(token)
+  })
+
+  it('rejects malformed or conflicting device identities', () => {
+    const token = 'a'.repeat(64)
+    expect(getCounterDeviceToken({ headers: { 'x-counter-device-token': 'not-a-token' } } as unknown as Request)).toBeUndefined()
+    expect(getCounterDeviceToken({
+      headers: { cookie: `couture_counter_device=${token}`, 'x-counter-device-token': 'b'.repeat(64) },
+    } as unknown as Request)).toBeUndefined()
   })
 })

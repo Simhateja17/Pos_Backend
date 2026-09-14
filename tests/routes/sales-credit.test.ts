@@ -182,11 +182,14 @@ describe('POST /sales customer-credit checkout path', () => {
   })
 
   it('records a split cash plus credit payment and one matching credit-sale ledger row atomically', async () => {
-    const app = await buildApp('cashier')
+    const app = await buildApp('owner')
     const response = await request(app).post('/sales').send(splitTenderBody)
 
     expect(response.status).toBe(201)
     expect(response.body.totalAmount).toBe('118.00')
+    expect(salesCreateMock).toHaveBeenCalledWith({
+      data: expect.objectContaining({ request_hash: expect.stringMatching(/^[0-9a-f]{64}$/) }),
+    })
     expect(paymentsCreateMock).toHaveBeenCalledTimes(2)
     expect(paymentsCreateMock.mock.calls.map(([call]) => call.data.method)).toEqual(['cash', 'credit'])
     expect(creditCreateMock).toHaveBeenCalledWith({
@@ -201,6 +204,50 @@ describe('POST /sales customer-credit checkout path', () => {
       }),
     })
     expect(creditCreateMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects changed sale data when a client sale id has already been committed', async () => {
+    const app = await buildApp('owner')
+    salesFindFirstMock.mockResolvedValueOnce({
+      id: saleId,
+      tenant_id: 'tenant-a',
+      store_id: storeId,
+      client_sale_id: splitTenderBody.clientSaleId,
+      request_hash: '0'.repeat(64),
+    })
+
+    const response = await request(app).post('/sales').send(splitTenderBody)
+
+    expect(response.status).toBe(409)
+    expect(response.body.code).toBe('IDEMPOTENCY_CONFLICT')
+    expect(salesCreateMock).not.toHaveBeenCalled()
+    expect(paymentsCreateMock).not.toHaveBeenCalled()
+    expect(stockCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('returns a permanent stock rejection when the database wins a concurrent checkout race', async () => {
+    const app = await buildApp('owner')
+    variantsFindFirstMock.mockResolvedValue({
+      id: variantId,
+      unit_of_measure: 'piece',
+      is_taxable: true,
+      tax_rate: new Prisma.Decimal('0.18'),
+      track_inventory: true,
+      allow_negative_stock: false,
+      products: { name: 'Cotton shirt', is_active: true },
+    })
+    variantStockFindFirstMock.mockResolvedValue({ quantity: new Prisma.Decimal('1') })
+    stockCreateMock.mockRejectedValueOnce(new Error(
+      'Stock movement would take variant 22222222-2222-4222-8222-222222222222 at store 66666666-6666-4666-8666-666666666666 below zero',
+    ))
+
+    const response = await request(app).post('/sales').send({
+      ...splitTenderBody,
+      clientSaleId: '12121212-1212-4212-8212-121212121212',
+    })
+
+    expect(response.status).toBe(409)
+    expect(response.body.code).toBe('INSUFFICIENT_STOCK')
   })
 
   it('warns a cashier at the credit limit and does not write the sale or ledger', async () => {
@@ -243,5 +290,69 @@ describe('POST /sales customer-credit checkout path', () => {
     expect(response.body.error).toContain('another payment method')
     expect(salesCreateMock).not.toHaveBeenCalled()
     expect(creditCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a tender that is not enabled for the tenant region before any sale write', async () => {
+    const app = await buildApp('cashier')
+    tenantsFindFirstMock.mockResolvedValue({
+      id: 'tenant-a',
+      country: 'US',
+      discount_threshold_percent: new Prisma.Decimal('15.00'),
+      business_name: 'Ambel Test Shop',
+      gst_status: 'unregistered',
+    })
+
+    const response = await request(app).post('/sales').send({
+      ...splitTenderBody,
+      clientSaleId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      payments: [{ method: 'credit', amount: '118.00' }],
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.code).toBe('UNSUPPORTED_TENDER')
+    expect(salesCreateMock).not.toHaveBeenCalled()
+    expect(paymentsCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a cheque in the India edition before any sale write', async () => {
+    const app = await buildApp('cashier')
+    const response = await request(app).post('/sales').send({
+      ...splitTenderBody,
+      clientSaleId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      payments: [{ method: 'check', amount: '118.00' }],
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.code).toBe('UNSUPPORTED_TENDER')
+    expect(salesCreateMock).not.toHaveBeenCalled()
+    expect(paymentsCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a zero-total or zero-allocation payment before the payments table constraint fires', async () => {
+    const app = await buildApp('owner')
+    const response = await request(app).post('/sales').send({
+      ...splitTenderBody,
+      clientSaleId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      cartDiscountPercent: '100.00',
+      payments: [{ method: 'cash', amount: '0.00' }],
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.code).toBe('ZERO_TOTAL_UNSUPPORTED')
+    expect(salesCreateMock).not.toHaveBeenCalled()
+    expect(paymentsCreateMock).not.toHaveBeenCalled()
+
+    const positiveTotal = await request(app).post('/sales').send({
+      ...splitTenderBody,
+      clientSaleId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      payments: [
+        { method: 'cash', amount: '0.00' },
+        { method: 'credit', amount: '118.00' },
+      ],
+    })
+
+    expect(positiveTotal.status).toBe(400)
+    expect(positiveTotal.body.code).toBe('INVALID_PAYMENT_AMOUNT')
+    expect(salesCreateMock).not.toHaveBeenCalled()
   })
 })

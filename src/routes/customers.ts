@@ -73,6 +73,7 @@ function toCreditTransactionJson(row: any, storeById: Map<string, { id: string; 
     type: row.type,
     amount: moneyString(row.amount),
     saleId: row.sale_id ?? null,
+    returnReferenceId: row.return_reference_id ?? null,
     recordedBy: row.recorded_by,
     note: row.note ?? null,
     createdAt: iso(row.created_at),

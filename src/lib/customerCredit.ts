@@ -5,6 +5,7 @@ const ZERO = new Prisma.Decimal(0)
 
 export type CreditTotals = {
   creditSales: Prisma.Decimal
+  creditRefunds: Prisma.Decimal
   repayments: Prisma.Decimal
   balance: Prisma.Decimal
   recentActivityAt: Date | null
@@ -33,6 +34,7 @@ export async function isIndiaTenant(client: any, tenantId: string): Promise<bool
 function emptyTotals(): CreditTotals {
   return {
     creditSales: ZERO,
+    creditRefunds: ZERO,
     repayments: ZERO,
     balance: ZERO,
     recentActivityAt: null,
@@ -70,10 +72,11 @@ export async function getCustomerCreditTotals(
     const current = result.get(row.customer_id) ?? emptyTotals()
     const amount = new Prisma.Decimal(row._sum?.amount ?? 0)
     if (row.type === 'credit_sale') current.creditSales = current.creditSales.plus(amount)
+    if (row.type === 'credit_refund') current.creditRefunds = current.creditRefunds.plus(amount)
     if (row.type === 'repayment') current.repayments = current.repayments.plus(amount)
     const activity = dateValue(row._max?.created_at)
     if (activity && (!current.recentActivityAt || activity > current.recentActivityAt)) current.recentActivityAt = activity
-    current.balance = current.creditSales.minus(current.repayments)
+    current.balance = current.creditSales.minus(current.creditRefunds).minus(current.repayments)
     result.set(row.customer_id, current)
   }
 

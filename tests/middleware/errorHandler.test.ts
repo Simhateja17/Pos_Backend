@@ -14,7 +14,7 @@ describe('errorHandler', () => {
     const response = await request(app).get('/broken')
 
     expect(response.status).toBe(500)
-    expect(response.body.error).toBe('Internal server error')
+    expect(response.body).toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: 'Internal server error' })
     expect(response.body.requestId).toEqual(expect.any(String))
     expect(JSON.stringify(response.body)).not.toContain('p.category')
     expect(JSON.stringify(response.body)).not.toContain('42703')
@@ -30,6 +30,6 @@ describe('errorHandler', () => {
     const response = await request(app).get('/invalid')
 
     expect(response.status).toBe(400)
-    expect(response.body.error).toBe('That report is not available.')
+    expect(response.body).toMatchObject({ code: 'REQUEST_FAILED', message: 'That report is not available.' })
   })
 })

@@ -6,7 +6,7 @@ extendZodWithOpenApi(z)
 const exactMoney = z.string().regex(/^\d{1,10}\.\d{2}$/, 'Use an amount with two decimal places')
 const positiveExactMoney = exactMoney.refine((value) => Number(value) > 0, 'Amount must be greater than zero')
 
-export const CreditTransactionTypeSchema = z.enum(['credit_sale', 'repayment']).openapi('CustomerCreditTransactionType')
+export const CreditTransactionTypeSchema = z.enum(['credit_sale', 'credit_refund', 'repayment']).openapi('CustomerCreditTransactionType')
 
 export const CreditTransactionSchema = z
   .object({
@@ -17,6 +17,7 @@ export const CreditTransactionSchema = z
     type: CreditTransactionTypeSchema,
     amount: z.string(),
     saleId: z.string().uuid().nullable(),
+    returnReferenceId: z.string().uuid().nullable(),
     recordedBy: z.string().uuid(),
     note: z.string().nullable(),
     createdAt: z.string(),

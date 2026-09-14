@@ -25,13 +25,14 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
    * `variantId` because they assert a running balance across each other; the
    * sequence/concurrency tests below must not perturb it.
    */
-  async function freshVariant(): Promise<string> {
+  async function freshVariant(options: { allowNegativeStock?: boolean } = {}): Promise<string> {
     const variant = await superClient.variants.create({
       data: {
         tenant_id: seed.tenantA.id,
         product_id: productId,
         sku: `TRG-${randomUUID().slice(0, 8)}`,
         price: 10.0,
+        allow_negative_stock: options.allowNegativeStock ?? false,
       },
     })
     return variant.id
@@ -231,14 +232,15 @@ describe('Stock ledger trigger + append-only enforcement (real Supabase project,
     expect(ledger).toBe(80)
   }, 60000)
 
-  // Tests 8-10 cover the two floor-guard defects found while verifying INV-02
-  // and fixed in 0019_stock_floor_guard_direction.sql. See
+  // Tests 8-10 cover the floor-guard invariants found while verifying INV-02
+  // and fixed in 0019_stock_floor_guard_direction.sql / Phase 5's explicit
+  // negative-stock policy. See
   // docs/reference/known-issues-phase-02.md entries 02-06 and 02-07.
 
   it('Test 8 (02-06): a stock-increasing `receive` is accepted even when the balance is still negative afterwards', async () => {
-    const vId = await freshVariant()
+    const vId = await freshVariant({ allowNegativeStock: true })
     await addMovement(vId, 'receive', 10)
-    await addMovement(vId, 'sale', -60) // D-17: sale may push negative
+    await addMovement(vId, 'sale', -60) // explicit negative-stock opt-in
     // -50 + 20 = -30: still negative, but a receipt ADDS stock and must never be
     // refused. Partial receipt against an oversold variant is the normal case.
     await addMovement(vId, 'receive', 20)

@@ -16,4 +16,31 @@ describe('sale discount request contract', () => {
   it('rejects a percentage above 100', () => {
     expect(CreateSaleSchema.safeParse({ ...base, cartDiscountPercent: '100.01' }).success).toBe(false)
   })
+
+  it('accepts at most two distinct tender methods', () => {
+    expect(CreateSaleSchema.safeParse({
+      ...base,
+      payments: [
+        { method: 'cash', amount: '5.00' },
+        { method: 'card', amount: '5.00', referenceCode: 'terminal-1' },
+      ],
+    }).success).toBe(true)
+
+    expect(CreateSaleSchema.safeParse({
+      ...base,
+      payments: [
+        { method: 'cash', amount: '5.00' },
+        { method: 'cash', amount: '5.00' },
+      ],
+    }).success).toBe(false)
+
+    expect(CreateSaleSchema.safeParse({
+      ...base,
+      payments: [
+        { method: 'cash', amount: '4.00' },
+        { method: 'card', amount: '3.00', referenceCode: 'terminal-1' },
+        { method: 'upi', amount: '3.00', referenceCode: 'upi-1' },
+      ],
+    }).success).toBe(false)
+  })
 })

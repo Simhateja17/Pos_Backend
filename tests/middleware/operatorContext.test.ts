@@ -65,7 +65,7 @@ describe('operatorContext', () => {
 
     expect(next).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(401)
-    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid operator session' })
+    expect(res.json).toHaveBeenCalledWith({ code: 'OPERATOR_INVALID', message: 'The operator session is no longer valid.' })
   })
 
   it('CR-01 regression: an operator token minted for tenant A is REJECTED (401) when presented alongside a req.user session whose tenantId is tenant B — prevents cross-tenant privilege escalation via token replay', () => {
@@ -82,7 +82,7 @@ describe('operatorContext', () => {
     expect(req.actingStaff).toBeUndefined()
     expect(next).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(401)
-    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid operator session' })
+    expect(res.json).toHaveBeenCalledWith({ code: 'OPERATOR_INVALID', message: 'The operator session is no longer valid.' })
   })
 
   it('CR-01 regression: a valid, tenant-matching operator token is still rejected if req.user is missing (operatorContext must run after authMiddleware)', () => {
@@ -95,6 +95,6 @@ describe('operatorContext', () => {
 
     expect(next).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(401)
-    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid operator session' })
+    expect(res.json).toHaveBeenCalledWith({ code: 'OPERATOR_INVALID', message: 'The operator session is no longer valid.' })
   })
 })

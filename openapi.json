@@ -4089,6 +4089,9 @@
           "subtotal": {
             "type": "string"
           },
+          "discountAmount": {
+            "type": "string"
+          },
           "taxAmount": {
             "type": "string"
           },
@@ -4127,6 +4130,7 @@
           "storeId",
           "currency",
           "subtotal",
+          "discountAmount",
           "taxAmount",
           "totalAmount",
           "lines"
@@ -4145,9 +4149,17 @@
                   "format": "uuid"
                 },
                 "quantity": {
-                  "type": "integer",
+                  "type": "number",
                   "exclusiveMinimum": 0,
-                  "maximum": 1000000
+                  "maximum": 999999999.999
+                },
+                "discountPercent": {
+                  "type": "string",
+                  "pattern": "^(?:\\d{1,2}(?:\\.\\d{1,2})?|100(?:\\.0{1,2})?)$"
+                },
+                "discountAmount": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d{2}$"
                 }
               },
               "required": [
@@ -4158,6 +4170,14 @@
             },
             "minItems": 1,
             "maxItems": 200
+          },
+          "cartDiscountPercent": {
+            "type": "string",
+            "pattern": "^(?:\\d{1,2}(?:\\.\\d{1,2})?|100(?:\\.0{1,2})?)$"
+          },
+          "cartDiscountAmount": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d{2}$"
           }
         },
         "required": [
@@ -4475,7 +4495,8 @@
                 },
                 "quantity": {
                   "type": "number",
-                  "exclusiveMinimum": 0
+                  "exclusiveMinimum": 0,
+                  "maximum": 999999999.999
                 },
                 "discountPercent": {
                   "type": "string",
@@ -4489,7 +4510,8 @@
               "required": [
                 "variantId",
                 "quantity"
-              ]
+              ],
+              "additionalProperties": false
             },
             "minItems": 1
           },
@@ -4506,7 +4528,8 @@
             "items": {
               "$ref": "#/components/schemas/PaymentInput"
             },
-            "minItems": 1
+            "minItems": 1,
+            "maxItems": 2
           },
           "cashReceived": {
             "type": "string",
@@ -4664,6 +4687,133 @@
           }
         ]
       },
+      "ReturnQuote": {
+        "type": "object",
+        "properties": {
+          "saleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "refundTotal": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "saleLineItemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "variantId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "productName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "requestedQuantity": {
+                  "type": "number"
+                },
+                "remainingQuantity": {
+                  "type": "number"
+                },
+                "refundAmount": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "saleLineItemId",
+                "variantId",
+                "productName",
+                "requestedQuantity",
+                "remainingQuantity",
+                "refundAmount"
+              ]
+            }
+          },
+          "originalPayments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "cash",
+                    "card",
+                    "check",
+                    "upi",
+                    "credit"
+                  ]
+                },
+                "amount": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "method",
+                "amount"
+              ]
+            }
+          }
+        },
+        "required": [
+          "saleId",
+          "storeId",
+          "currency",
+          "refundTotal",
+          "lines",
+          "originalPayments"
+        ]
+      },
+      "ReturnQuoteRequest": {
+        "type": "object",
+        "properties": {
+          "saleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "saleLineItemId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantity": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 999999999.999
+                }
+              },
+              "required": [
+                "saleLineItemId",
+                "quantity"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "saleId",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
       "ReturnResponse": {
         "type": "object",
         "properties": {
@@ -4752,7 +4902,8 @@
                 },
                 "quantity": {
                   "type": "number",
-                  "exclusiveMinimum": 0
+                  "exclusiveMinimum": 0,
+                  "maximum": 999999999.999
                 }
               },
               "required": [
@@ -4767,7 +4918,8 @@
             "items": {
               "$ref": "#/components/schemas/PaymentInput"
             },
-            "minItems": 1
+            "minItems": 1,
+            "maxItems": 2
           }
         },
         "required": [
@@ -5865,6 +6017,13 @@
             ],
             "format": "uuid"
           },
+          "returnReferenceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
           "recordedBy": {
             "type": "string",
             "format": "uuid"
@@ -5887,6 +6046,7 @@
           "type",
           "amount",
           "saleId",
+          "returnReferenceId",
           "recordedBy",
           "note",
           "createdAt"
@@ -5896,6 +6056,7 @@
         "type": "string",
         "enum": [
           "credit_sale",
+          "credit_refund",
           "repayment"
         ]
       },
@@ -6277,6 +6438,9 @@
           "checkSalesTotal": {
             "type": "string"
           },
+          "creditSalesTotal": {
+            "type": "string"
+          },
           "refundsTotal": {
             "type": "string"
           },
@@ -6291,6 +6455,7 @@
           "cardSalesTotal",
           "upiSalesTotal",
           "checkSalesTotal",
+          "creditSalesTotal",
           "refundsTotal",
           "saleCount"
         ]
@@ -6888,6 +7053,25 @@
           "name"
         ],
         "additionalProperties": false
+      },
+      "PairedTerminal": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Terminal"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "deviceToken": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$/i"
+              }
+            },
+            "required": [
+              "deviceToken"
+            ]
+          }
+        ]
       },
       "UpdateTerminalRequest": {
         "type": "object",
@@ -11770,7 +11954,7 @@
     },
     "/sales/quote": {
       "post": {
-        "description": "Read-only online total for whole-quantity carts without discounts. No reservation; POST /sales revalidates all state.",
+        "description": "Read-only online total for a cart with server-owned prices, reviewed line/cart discounts, measured quantities and stock-floor checks. No reservation or write; POST /sales revalidates all state.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12133,6 +12317,41 @@
           },
           "404": {
             "description": "Sale not found"
+          }
+        }
+      }
+    },
+    "/returns/quote": {
+      "post": {
+        "description": "Read-only server refund preview for selected sale lines. Uses the persisted tax snapshot or the same pure tax builder for legacy/International sales and never writes stock, payments, or document numbers.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnQuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative refund preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnQuote"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid quantities or store selection"
+          },
+          "404": {
+            "description": "Sale or line item not found"
+          },
+          "409": {
+            "description": "Sale is not returnable or the server snapshot cannot be built"
           }
         }
       }
@@ -13374,7 +13593,7 @@
     },
     "/terminals/{terminalId}/pair": {
       "post": {
-        "description": "Pair or reassign this browser/device to a counter. Manager/owner only.",
+        "description": "Pair or reassign this browser/native device to a counter. Manager/owner only. Native clients persist deviceToken securely and send it as X-Counter-Device-Token.",
         "parameters": [
           {
             "schema": {
@@ -13392,7 +13611,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Terminal"
+                  "$ref": "#/components/schemas/PairedTerminal"
                 }
               }
             }

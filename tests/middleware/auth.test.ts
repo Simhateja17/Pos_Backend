@@ -105,7 +105,7 @@ describe('authMiddleware', () => {
     const res = await request(app).get('/whoami')
 
     expect(res.status).toBe(401)
-    expect(res.body).toEqual({ error: 'Unauthorized' })
+    expect(res.body).toEqual({ code: 'UNAUTHENTICATED', message: 'Authentication is required.' })
     expect(getUserMock).not.toHaveBeenCalled()
   })
 
@@ -117,7 +117,7 @@ describe('authMiddleware', () => {
     const res = await request(app).get('/whoami').set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(401)
-    expect(res.body).toEqual({ error: 'Unauthorized' })
+    expect(res.body).toEqual({ code: 'UNAUTHENTICATED', message: 'Your secure session is not valid.' })
   })
 
   it('never rotates a legacy refresh-token cookie when the browser session is unavailable', async () => {
@@ -132,7 +132,7 @@ describe('authMiddleware', () => {
       ])
 
     expect(res.status).toBe(401)
-    expect(res.body).toEqual({ error: 'Unauthorized' })
+    expect(res.body).toEqual({ code: 'UNAUTHENTICATED', message: 'Authentication is required.' })
     expect(setSessionMock).not.toHaveBeenCalled()
   })
 
@@ -158,7 +158,7 @@ describe('authMiddleware', () => {
     const res = await request(app).get('/whoami').set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(403)
-    expect(res.body).toEqual({ error: 'No tenant membership found' })
+    expect(res.body).toEqual({ code: 'NO_MEMBERSHIP', message: 'This account has no store membership.' })
   })
 
   it('does not treat Supabase role=authenticated as a Couture staff role', async () => {
@@ -169,7 +169,7 @@ describe('authMiddleware', () => {
     const res = await request(app).get('/whoami').set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(403)
-    expect(res.body).toEqual({ error: 'No tenant membership found' })
+    expect(res.body).toEqual({ code: 'NO_MEMBERSHIP', message: 'This account has no store membership.' })
   })
 
   it('rejects a previously issued token after the current membership no longer matches its role', async () => {
@@ -181,6 +181,6 @@ describe('authMiddleware', () => {
     const res = await request(app).get('/whoami').set('Authorization', `Bearer ${token}`)
 
     expect(res.status).toBe(403)
-    expect(res.body).toEqual({ error: 'No tenant membership found' })
+    expect(res.body).toEqual({ code: 'NO_MEMBERSHIP', message: 'This account has no store membership.' })
   })
 })

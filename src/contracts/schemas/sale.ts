@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 import { PaymentInputSchema, PaymentSchema } from './payment'
+import { TransactionQuantitySchema } from './product'
 
 extendZodWithOpenApi(z)
 
@@ -15,10 +16,11 @@ export const SaleLineInputSchema = z
   .object({
     variantId: z.string().uuid(),
     // numeric(12,3) since 0031 — the route rejects a fraction for a discrete unit.
-    quantity: z.number().positive(),
+    quantity: TransactionQuantitySchema,
     discountPercent: DiscountPercentSchema.optional(),
     discountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
   })
+  .strict()
   .refine((l) => !(l.discountPercent && l.discountAmount), {
     message: 'Provide discountPercent or discountAmount, not both',
     path: ['discountAmount'],
@@ -31,7 +33,7 @@ export const CreateSaleSchema = z
     lines: z.array(SaleLineInputSchema).min(1),
     cartDiscountPercent: DiscountPercentSchema.optional(),
     cartDiscountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
-    payments: z.array(PaymentInputSchema).min(1),
+    payments: z.array(PaymentInputSchema).min(1).max(2),
     // Amount of physical cash handed over. Payment rows continue to record
     // only the amount allocated to the bill; this separate value lets the
     // server calculate change without inflating revenue or tender totals.
@@ -54,6 +56,10 @@ export const CreateSaleSchema = z
   .refine((data) => !(data.cartDiscountPercent && data.cartDiscountAmount), {
     message: 'Provide cartDiscountPercent or cartDiscountAmount, not both',
     path: ['cartDiscountAmount'],
+  })
+  .refine((data) => new Set(data.payments.map((payment) => payment.method)).size === data.payments.length, {
+    message: 'Split tender payments must use distinct methods',
+    path: ['payments'],
   })
   .openapi('CreateSaleRequest')
 
@@ -178,16 +184,19 @@ export type ResendReceiptResponse = z.infer<typeof ResendReceiptResponseSchema>
 
 /** Online preview only. Final checkout rechecks stock, price, tax and shift. */
 export const SaleQuoteRequestSchema = z.object({
-  lines: z.array(z.object({
-    variantId: z.string().uuid(),
-    quantity: z.number().int().positive().max(1000000),
-  }).strict()).min(1).max(200),
+  lines: z.array(SaleLineInputSchema).min(1).max(200),
+  cartDiscountPercent: DiscountPercentSchema.optional(),
+  cartDiscountAmount: z.string().regex(/^\d+\.\d{2}$/).optional(),
+}).refine((data) => !(data.cartDiscountPercent && data.cartDiscountAmount), {
+  message: 'Provide cartDiscountPercent or cartDiscountAmount, not both',
+  path: ['cartDiscountAmount'],
 }).strict().openapi('SaleQuoteRequest')
 
 export const SaleQuoteSchema = z.object({
   storeId: z.string().uuid(),
   currency: z.string(),
   subtotal: z.string(),
+  discountAmount: z.string(),
   taxAmount: z.string(),
   totalAmount: z.string(),
   lines: z.array(z.object({

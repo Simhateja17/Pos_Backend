@@ -5,11 +5,11 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { seedTwoTenants, cleanupSeed, type SeedResult } from '../fixtures/seed'
 
 /**
- * Real-Supabase proof of D-17: "sale" stock movements are allowed to push
- * variant_stock_levels.quantity negative (never blocking a paying customer),
- * while "adjustment"/"transfer" movements remain floor-guarded exactly as
- * migration 0009 originally shipped (migration 0010 scopes the guard to
- * non-sale movement types only). Same bare-PrismaClient-against-
+ * Real-Supabase proof of the explicit negative-stock opt-in: a `sale`
+ * movement may push variant_stock_levels.quantity negative only when the
+ * merchant has set allow_negative_stock=true. Tracked variants with that flag
+ * off are rejected by the database trigger, while "adjustment"/"transfer"
+ * movements remain floor-guarded. Same bare-PrismaClient-against-
  * RLS_DATABASE_URL pattern as tests/inventory/stock-trigger.test.ts — a
  * mocked test can only prove the route calls stock_movements.create, not
  * that the DB trigger itself actually carves out `sale`.
@@ -19,12 +19,13 @@ import { seedTwoTenants, cleanupSeed, type SeedResult } from '../fixtures/seed'
  * but must be run from an unrestricted-network environment to confirm pass/
  * fail against the real live Supabase project.
  */
-describe('D-17 stock-floor-guard sale carve-out (real Supabase project, app_runtime role)', () => {
+describe('stock-floor policy (real Supabase project, app_runtime role)', () => {
   let seed: SeedResult
   let client: PrismaClient
   let superClient: PrismaClient
   let productId: string
   let variantId: string
+  let strictVariantId: string | undefined
 
   beforeAll(async () => {
     seed = await seedTwoTenants()
@@ -38,19 +39,26 @@ describe('D-17 stock-floor-guard sale carve-out (real Supabase project, app_runt
     })
     productId = product.id
     const variant = await superClient.variants.create({
-      data: { tenant_id: seed.tenantA.id, product_id: productId, sku: `FLR-${randomUUID().slice(0, 8)}`, price: 10.0 },
+      data: {
+        tenant_id: seed.tenantA.id,
+        product_id: productId,
+        sku: `FLR-${randomUUID().slice(0, 8)}`,
+        price: 10.0,
+        allow_negative_stock: true,
+      },
     })
     variantId = variant.id
   }, 60000)
 
   afterAll(async () => {
     await client.$disconnect()
+    if (strictVariantId) await superClient.variants.delete({ where: { id: strictVariantId } }).catch(() => {})
     await superClient.products.delete({ where: { id: productId } }).catch(() => {})
     await superClient.$disconnect()
     await cleanupSeed(seed)
   }, 60000)
 
-  it('Test 1: a `sale` movement on a variant with 0 recorded stock succeeds and pushes quantity negative', async () => {
+  it('Test 1: an opted-in `sale` movement on a variant with 0 recorded stock pushes quantity negative', async () => {
     await client.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`
       await tx.stock_movements.create({
@@ -72,7 +80,35 @@ describe('D-17 stock-floor-guard sale carve-out (real Supabase project, app_runt
     expect(Number(level?.quantity)).toBe(-1)
   })
 
-  it('Test 2: an `adjustment` movement that would take the same variant further negative is still rejected by the floor guard', async () => {
+  it('Test 2: a tracked sale with negative stock disabled is rejected by the database floor guard', async () => {
+    const strictVariant = await superClient.variants.create({
+      data: {
+        tenant_id: seed.tenantA.id,
+        product_id: productId,
+        sku: `FLR-STRICT-${randomUUID().slice(0, 8)}`,
+        price: 10.0,
+        allow_negative_stock: false,
+      },
+    })
+    strictVariantId = strictVariant.id
+
+    await expect(
+      client.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`
+        await tx.stock_movements.create({
+          data: {
+            tenant_id: seed.tenantA.id,
+            store_id: seed.tenantA.storeId,
+            variant_id: strictVariant.id,
+            movement_type: 'sale',
+            quantity_delta: -1,
+          },
+        })
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('Test 3: an `adjustment` movement that would take the same variant further negative is still rejected by the floor guard', async () => {
     await expect(
       client.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${seed.tenantA.id}, true)`

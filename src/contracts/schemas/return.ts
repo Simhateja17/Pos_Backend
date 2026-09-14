@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi'
 import { PaymentInputSchema } from './payment'
+import { TransactionQuantitySchema } from './product'
 
 extendZodWithOpenApi(z)
 
@@ -9,7 +10,7 @@ extendZodWithOpenApi(z)
 // non-zero refine via a plain positive-int constraint here.
 export const ReturnLineInputSchema = z.object({
   saleLineItemId: z.string().uuid(),
-  quantity: z.number().positive(),
+  quantity: TransactionQuantitySchema,
 })
 
 export const CreateReturnSchema = z
@@ -22,7 +23,11 @@ export const CreateReturnSchema = z
     shiftId: z.string().uuid(),
     reason: z.string().trim().min(2).max(500),
     lines: z.array(ReturnLineInputSchema).min(1),
-    refundPayments: z.array(PaymentInputSchema).min(1),
+    refundPayments: z.array(PaymentInputSchema).min(1).max(2),
+  })
+  .refine((data) => new Set(data.refundPayments.map((payment) => payment.method)).size === data.refundPayments.length, {
+    message: 'Split refunds must use distinct original tender methods',
+    path: ['refundPayments'],
   })
   .openapi('CreateReturnRequest')
 
@@ -41,5 +46,28 @@ export const ReturnResponseSchema = z
     idempotent: z.boolean(),
   })
   .openapi('ReturnResponse')
+
+/** Read-only server refund preview. It never allocates a credit-note number,
+ * writes stock, or records a payment. */
+export const ReturnQuoteRequestSchema = z.object({
+  saleId: z.string().uuid(),
+  lines: z.array(ReturnLineInputSchema).min(1),
+}).strict().openapi('ReturnQuoteRequest')
+
+export const ReturnQuoteSchema = z.object({
+  saleId: z.string().uuid(),
+  storeId: z.string().uuid(),
+  currency: z.string(),
+  refundTotal: z.string(),
+  lines: z.array(z.object({
+    saleLineItemId: z.string().uuid(),
+    variantId: z.string().uuid(),
+    productName: z.string().nullable(),
+    requestedQuantity: z.number(),
+    remainingQuantity: z.number(),
+    refundAmount: z.string(),
+  })),
+  originalPayments: z.array(z.object({ method: PaymentInputSchema.shape.method, amount: z.string() })),
+}).openapi('ReturnQuote')
 
 export type CreateReturnInput = z.infer<typeof CreateReturnSchema>

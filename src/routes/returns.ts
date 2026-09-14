@@ -1,14 +1,149 @@
 import { activeStoreId } from '../middleware/storeContext'
 import { Router } from 'express'
 import { Prisma } from '@prisma/client'
-import { CreateReturnSchema } from '../contracts/schemas/return'
+import { createHash } from 'node:crypto'
+import { CreateReturnSchema, ReturnQuoteRequestSchema } from '../contracts/schemas/return'
+import { allowsFractionalQuantity } from '../contracts/schemas/product'
+import { unsupportedTenderMethods } from '../lib/tenderRules'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
 import { findPairedTerminal } from '../lib/counterDevice'
-import { createCreditNoteForReturn, ensureTaxInvoice, lockTaxInvoiceSale } from '../services/taxDocuments'
+import { createCreditNoteForReturn, lockTaxInvoiceSale, previewTaxInvoice } from '../services/taxDocuments'
 
 const router = Router()
 
 const ZERO = new Prisma.Decimal(0)
+
+/** Credit-note lines are the line-specific return ledger. Stock movements are
+ * variant-scoped and cannot distinguish two sale lines for the same variant
+ * that had different discounts or tax snapshots. */
+async function returnedQuantitiesBySaleLine(
+  tx: any,
+  tenantId: string,
+  saleId: string,
+  saleLineItemIds: string[],
+): Promise<Map<string, Prisma.Decimal>> {
+  const result = new Map<string, Prisma.Decimal>()
+  if (saleLineItemIds.length === 0) return result
+  const creditNotes = await tx.tax_documents.findMany({
+    where: { tenant_id: tenantId, sale_id: saleId, document_type: 'credit_note' },
+    select: { id: true },
+  })
+  if (creditNotes.length === 0) return result
+  const lines = await tx.tax_document_lines.findMany({
+    where: {
+      tenant_id: tenantId,
+      document_id: { in: creditNotes.map((document: any) => document.id) },
+      sale_line_item_id: { in: saleLineItemIds },
+    },
+    select: { sale_line_item_id: true, quantity: true },
+  })
+  for (const line of lines) {
+    if (!line.sale_line_item_id) continue
+    result.set(
+      line.sale_line_item_id,
+      (result.get(line.sale_line_item_id) ?? ZERO).plus(new Prisma.Decimal(line.quantity)),
+    )
+  }
+  return result
+}
+
+/**
+ * Read-only refund preview. A tax snapshot must already exist: calling
+ * ensureTaxInvoice here would allocate a document number and violate the
+ * quote's no-write contract. When a persisted tax invoice is absent (for
+ * example, a legacy or International sale), the route uses the same pure
+ * tax-source builder in memory; the action route will persist that snapshot
+ * only after all return and payment checks pass.
+ */
+router.post('/quote', async (req, res) => {
+  const parsed = ReturnQuoteRequestSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ code: 'INVALID_REQUEST', message: 'Choose at least one return quantity.' })
+  let storeId: string
+  try { storeId = activeStoreId(req) } catch { return res.status(400).json({ code: 'STORE_REQUIRED', message: 'Choose a store before previewing a return.' }) }
+  try {
+    const result = await forTenantTransaction(req.user!.tenantId, async (tx) => {
+      const sale = await tx.sales.findFirst({ where: { id: parsed.data.saleId, store_id: storeId } })
+      if (!sale) return { status: 404, body: { code: 'SALE_NOT_FOUND', message: 'Sale not found.' } }
+      if (sale.status !== 'completed') return { status: 409, body: { code: 'SALE_NOT_RETURNABLE', message: 'Only completed sales can be returned.' } }
+      const invoice = await tx.tax_documents.findFirst({
+        where: { tenant_id: req.user!.tenantId, sale_id: sale.id, document_type: 'tax_invoice' },
+      })
+      const invoicePreview = invoice ? null : await previewTaxInvoice(tx, req.user!.tenantId, sale.id)
+      const tenant = await tx.tenants.findFirst({ where: { id: req.user!.tenantId }, select: { country: true } })
+      const saleLines = await tx.sale_line_items.findMany({
+        where: { sale_id: sale.id, tenant_id: req.user!.tenantId },
+        include: { variants: { include: { products: { select: { name: true } } } } },
+      })
+      const invoiceLines = invoice
+        ? await tx.tax_document_lines.findMany({ where: { document_id: invoice.id, tenant_id: req.user!.tenantId } })
+        : invoicePreview!.lines.map((line) => ({
+            sale_line_item_id: line.saleLineItemId,
+            quantity: new Prisma.Decimal(line.quantity),
+            line_total: new Prisma.Decimal(line.lineTotal),
+          }))
+      const invoiceBySaleLine = new Map<string, any>(invoiceLines.filter((line: any) => line.sale_line_item_id).map((line: any) => [line.sale_line_item_id, line] as [string, any]))
+      const requestedIds = new Set<string>()
+      const selectedLines: Array<{ request: (typeof parsed.data.lines)[number]; saleLine: any }> = []
+      for (const line of parsed.data.lines) {
+        if (requestedIds.has(line.saleLineItemId)) return { status: 400, body: { code: 'DUPLICATE_RETURN_LINE', message: 'Choose each sale line only once.' } }
+        requestedIds.add(line.saleLineItemId)
+        const saleLine = saleLines.find((candidate: any) => candidate.id === line.saleLineItemId)
+        if (!saleLine) return { status: 404, body: { code: 'SALE_LINE_NOT_FOUND', message: 'A selected line is not on this sale.' } }
+        if (!allowsFractionalQuantity(saleLine.variants?.unit_of_measure ?? 'piece') && !Number.isInteger(line.quantity)) {
+          return { status: 400, body: { code: 'INVALID_QUANTITY', message: 'Return quantity must be a whole number for variants sold by piece.' } }
+        }
+        selectedLines.push({ request: line, saleLine })
+      }
+      const returnedByLine = await returnedQuantitiesBySaleLine(
+        tx,
+        req.user!.tenantId,
+        sale.id,
+        selectedLines.map(({ saleLine }) => saleLine.id),
+      )
+      const output: any[] = []
+      for (const { request: line, saleLine } of selectedLines) {
+        const remaining = new Prisma.Decimal(saleLine.quantity).minus(returnedByLine.get(saleLine.id) ?? ZERO)
+        if (new Prisma.Decimal(line.quantity).greaterThan(remaining)) return { status: 400, body: { code: 'OVER_RETURN', message: `Only ${remaining.toString()} remain returnable for this line.` } }
+        const invoiceLine = invoiceBySaleLine.get(saleLine.id)
+        if (!invoiceLine) return { status: 409, body: { code: 'RETURN_PREVIEW_UNAVAILABLE', message: 'The tax snapshot is missing a selected line.' } }
+        const refundAmount = new Prisma.Decimal(invoiceLine.line_total)
+          .dividedBy(new Prisma.Decimal(invoiceLine.quantity))
+          .times(line.quantity)
+          .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+        output.push({
+          saleLineItemId: saleLine.id,
+          variantId: saleLine.variant_id,
+          productName: saleLine.variants?.products?.name ?? null,
+          requestedQuantity: line.quantity,
+          remainingQuantity: remaining.toNumber(),
+          refundAmount: refundAmount.toFixed(2),
+        })
+      }
+      const payments = await tx.payments.findMany({ where: { sale_id: sale.id, tenant_id: req.user!.tenantId }, orderBy: { created_at: 'asc' } })
+      const remainingByMethod = new Map<string, Prisma.Decimal>()
+      for (const payment of payments) {
+        const signed = new Prisma.Decimal(payment.amount).times(payment.direction === 'refund' ? -1 : 1)
+        remainingByMethod.set(payment.method, (remainingByMethod.get(payment.method) ?? ZERO).plus(signed))
+      }
+      return {
+        status: 200,
+        body: {
+          saleId: sale.id,
+          storeId,
+          currency: String(tenant?.country).toUpperCase() === 'IN' ? 'INR' : 'USD',
+          refundTotal: output.reduce((sum, line) => sum.plus(new Prisma.Decimal(line.refundAmount)), ZERO).toFixed(2),
+          lines: output,
+          originalPayments: [...remainingByMethod.entries()]
+            .filter(([, amount]) => amount.greaterThan(ZERO))
+            .map(([method, amount]) => ({ method, amount: amount.toFixed(2) })),
+        },
+      }
+    })
+    return res.status(result.status).json(result.body)
+  } catch {
+    return res.status(500).json({ code: 'RETURN_QUOTE_FAILED', message: 'Could not calculate the server refund preview.' })
+  }
+})
 
 async function resolveActingStaffId(client: any, req: import('express').Request): Promise<string | null> {
   if (req.actingStaff?.id) return req.actingStaff.id
@@ -41,6 +176,7 @@ router.post('/', async (req, res) => {
   try {
     const pairedTerminal = await findPairedTerminal(forTenant(tenantId) as any, req)
     const actingRole = req.actingStaff?.role ?? req.user!.role
+    const requestHash = createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex')
     if (actingRole === 'cashier' && !pairedTerminal) {
       return res.status(409).json({ error: 'This device is not paired to a counter.' })
     }
@@ -68,6 +204,11 @@ router.post('/', async (req, res) => {
       if (!sale) {
         return { status: 404, body: { error: 'Sale not found' } }
       }
+      if (sale.status !== 'completed') {
+        return { status: 409, body: { code: 'SALE_NOT_RETURNABLE', error: 'Only completed sales can be returned.' } }
+      }
+      const tenant = await tx.tenants.findFirst({ where: { id: tenantId }, select: { country: true } })
+      if (!tenant) return { status: 404, body: { error: 'Tenant not found' } }
 
       // Serialize retries for the same sale before checking the idempotency
       // record. Without this lock, two concurrent requests could both pass the
@@ -93,6 +234,11 @@ router.post('/', async (req, res) => {
         if (existingCreditNote.sale_id !== sale.id) {
           return { status: 409, body: { error: 'Return reference has already been used for another sale.' } }
         }
+        // Null is retained only for credit notes created before 0087. Every
+        // new mobile return binds its reference to the exact immutable body.
+        if (existingCreditNote.request_hash && existingCreditNote.request_hash !== requestHash) {
+          return { status: 409, body: { code: 'IDEMPOTENCY_CONFLICT', error: 'This return reference was already used for different return data.' } }
+        }
         return {
           status: 200,
           body: {
@@ -106,63 +252,82 @@ router.post('/', async (req, res) => {
         }
       }
 
+      // Use a persisted invoice when one exists. Legacy/International sales
+      // may not have one yet, so build the same tax snapshot in memory. This
+      // read-only fallback is important: rejected returns must not allocate a
+      // document number just to discover their refund amount.
+      const persistedInvoice = await tx.tax_documents.findFirst({
+        where: { tenant_id: tenantId, sale_id: sale.id, document_type: 'tax_invoice' },
+      })
+      const invoicePreview = persistedInvoice ? null : await previewTaxInvoice(tx, tenantId, sale.id)
+      const invoiceLines = persistedInvoice
+        ? await tx.tax_document_lines.findMany({ where: { document_id: persistedInvoice.id, tenant_id: tenantId } })
+        : invoicePreview!.lines.map((line) => ({
+            sale_line_item_id: line.saleLineItemId,
+            quantity: new Prisma.Decimal(line.quantity),
+            line_total: new Prisma.Decimal(line.lineTotal),
+          }))
+      const invoiceLineBySaleLine = new Map<string, any>(
+        invoiceLines
+          .filter((line: any) => !!line.sale_line_item_id)
+          .map((line: any) => [line.sale_line_item_id, line] as [string, any]),
+      )
+
       // T-03-10: each line must actually belong to the claimed sale, and
       // T-03-11: over-return (returning more than remains returnable) is
       // rejected before any write.
       const refundLines: { saleLineItem: any; quantity: number; refundAmount: Prisma.Decimal }[] = []
+      const requestedLineIds = new Set<string>()
+      const selectedLines: Array<{ request: (typeof parsed.data.lines)[number]; saleLineItem: any }> = []
       for (const line of parsed.data.lines) {
+        if (requestedLineIds.has(line.saleLineItemId)) {
+          return { status: 400, body: { error: 'Choose each sale line only once.', code: 'DUPLICATE_RETURN_LINE' } }
+        }
+        requestedLineIds.add(line.saleLineItemId)
         const saleLineItem = await tx.sale_line_items.findFirst({
           where: { id: line.saleLineItemId, sale_id: sale.id },
+          include: { variants: { select: { unit_of_measure: true } } },
         })
         if (!saleLineItem) {
           return { status: 404, body: { error: `Sale line item ${line.saleLineItemId} not found on this sale` } }
         }
 
-        const priorReturns = await tx.stock_movements.findMany({
-          where: { movement_type: 'return', reference_id: sale.id, variant_id: saleLineItem.variant_id },
-        })
-        // quantity_delta is a Prisma Decimal since 0031; `sum + m.quantity_delta`
-        // would concatenate strings, silently inflating the returned total.
-        const alreadyReturned = priorReturns.reduce((sum: number, m: any) => sum + Number(m.quantity_delta), 0)
-        const remainingReturnable = Number(saleLineItem.quantity) - alreadyReturned
-        if (line.quantity > remainingReturnable) {
+        if (!allowsFractionalQuantity(saleLineItem.variants?.unit_of_measure ?? 'piece') && !Number.isInteger(line.quantity)) {
+          return {
+            status: 400,
+            body: { error: 'Return quantity must be a whole number for variants sold by piece.', code: 'INVALID_QUANTITY' },
+          }
+        }
+
+        selectedLines.push({ request: line, saleLineItem })
+      }
+
+      const returnedByLine = await returnedQuantitiesBySaleLine(
+        tx,
+        tenantId,
+        sale.id,
+        selectedLines.map(({ saleLineItem }) => saleLineItem.id),
+      )
+      for (const { request: line, saleLineItem } of selectedLines) {
+        const remainingReturnable = new Prisma.Decimal(saleLineItem.quantity)
+          .minus(returnedByLine.get(saleLineItem.id) ?? ZERO)
+        if (new Prisma.Decimal(line.quantity).greaterThan(remainingReturnable)) {
           return {
             status: 400,
             body: {
-              error: `Cannot return ${line.quantity} of line ${line.saleLineItemId}; only ${remainingReturnable} remain returnable.`,
+              error: `Cannot return ${line.quantity} of line ${line.saleLineItemId}; only ${remainingReturnable.toString()} remain returnable.`,
             },
           }
         }
 
-        const refundAmount = saleLineItem.line_total
-          .dividedBy(Number(saleLineItem.quantity))
+        const invoiceLine = invoiceLineBySaleLine.get(saleLineItem.id)
+        if (!invoiceLine) return { status: 409, body: { error: 'Tax invoice line snapshot is incomplete' } }
+        const refundAmount = new Prisma.Decimal(invoiceLine.line_total)
+          .dividedBy(new Prisma.Decimal(invoiceLine.quantity))
           .times(line.quantity)
+          .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
 
         refundLines.push({ saleLineItem, quantity: line.quantity, refundAmount })
-      }
-
-      // Existing sale_line_items store the pre-tax line amount. A GST credit
-      // note must reverse the tax snapshot as well, so use the immutable
-      // invoice line total for the refund amount. Tax-zero legacy sales keep
-      // exactly the old amount.
-      const invoice = await ensureTaxInvoice(tx, {
-        tenantId,
-        saleId: sale.id,
-        createdBy: await resolveActingStaffId(tx, req),
-      })
-      if (!invoice) return { status: 404, body: { error: 'Tax invoice not found' } }
-      const invoiceLineBySaleLine = new Map(
-        invoice.lines
-          .filter((line) => !!line.saleLineItemId)
-          .map((line) => [line.saleLineItemId!, line]),
-      )
-      for (const refundLine of refundLines) {
-        const invoiceLine = invoiceLineBySaleLine.get(refundLine.saleLineItem.id)
-        if (!invoiceLine) return { status: 409, body: { error: 'Tax invoice line snapshot is incomplete' } }
-        refundLine.refundAmount = new Prisma.Decimal(invoiceLine.lineTotal)
-          .dividedBy(new Prisma.Decimal(invoiceLine.quantity))
-          .times(refundLine.quantity)
-          .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
       }
 
       const expectedRefundTotal = refundLines.reduce((sum, l) => sum.plus(l.refundAmount), ZERO)
@@ -179,12 +344,26 @@ router.post('/', async (req, res) => {
         }
       }
 
+      if (expectedRefundTotal.greaterThan(ZERO) && parsed.data.refundPayments.some((payment) => new Prisma.Decimal(payment.amount).lessThanOrEqualTo(ZERO))) {
+        return {
+          status: 400,
+          body: { error: 'Refund payment amounts must be greater than zero.', code: 'INVALID_PAYMENT_AMOUNT' },
+        }
+      }
+
       // D-10: the refund must go back to whichever method(s) actually paid
       // for the original sale — never a method that was never used, and
       // never a store-credit path. This is a data-integrity check, applies
       // regardless of the acting staff member's role (no manager-approval
       // carve-out, unlike D-05's discount gate).
       const originalPayments = await tx.payments.findMany({ where: { sale_id: sale.id, direction: 'payment' } })
+      const unsupportedMethods = unsupportedTenderMethods(tenant.country, parsed.data.refundPayments.map((payment) => payment.method))
+      if (unsupportedMethods.length > 0) {
+        return {
+          status: 400,
+          body: { error: `Refund tender method(s) ${unsupportedMethods.join(', ')} are not available for this store's region.`, code: 'UNSUPPORTED_TENDER' },
+        }
+      }
       const originalPaymentMethods = new Set(originalPayments.map((p: any) => p.method))
       for (const entry of parsed.data.refundPayments) {
         if (!originalPaymentMethods.has(entry.method)) {
@@ -196,8 +375,45 @@ router.post('/', async (req, res) => {
           }
         }
       }
+      const priorRefundPayments = await tx.payments.findMany({ where: { sale_id: sale.id, direction: 'refund' } })
+      const paidByMethod = new Map<string, Prisma.Decimal>()
+      const refundedByMethod = new Map<string, Prisma.Decimal>()
+      const requestedByMethod = new Map<string, Prisma.Decimal>()
+      for (const payment of originalPayments) {
+        paidByMethod.set(payment.method, (paidByMethod.get(payment.method) ?? ZERO).plus(new Prisma.Decimal(payment.amount)))
+      }
+      for (const payment of priorRefundPayments) {
+        refundedByMethod.set(payment.method, (refundedByMethod.get(payment.method) ?? ZERO).plus(new Prisma.Decimal(payment.amount)))
+      }
+      for (const payment of parsed.data.refundPayments) {
+        requestedByMethod.set(payment.method, (requestedByMethod.get(payment.method) ?? ZERO).plus(new Prisma.Decimal(payment.amount)))
+      }
+      for (const [method, requested] of requestedByMethod) {
+        const remainingOnMethod = (paidByMethod.get(method) ?? ZERO).minus(refundedByMethod.get(method) ?? ZERO)
+        if (requested.greaterThan(remainingOnMethod)) {
+          return {
+            status: 400,
+            body: {
+              code: 'REFUND_TENDER_EXCEEDS_PAYMENT',
+              error: `Refund to '${method}' exceeds the amount still returnable to that original tender.`,
+            },
+          }
+        }
+      }
 
       const createdBy = await resolveActingStaffId(tx, req)
+      const creditRefundTotal = parsed.data.refundPayments
+        .filter((entry) => entry.method === 'credit')
+        .reduce((sum, entry) => sum.plus(new Prisma.Decimal(entry.amount)), ZERO)
+      if (creditRefundTotal.greaterThan(ZERO) && (!sale.customer_id || !createdBy)) {
+        return {
+          status: 409,
+          body: {
+            code: 'CREDIT_REFUND_UNAVAILABLE',
+            error: 'Customer credit can only be refunded to the saved customer by an active operator.',
+          },
+        }
+      }
 
       const createdMovements: any[] = []
       for (const refundLine of refundLines) {
@@ -238,10 +454,27 @@ router.post('/', async (req, res) => {
         createdPayments.push(payment)
       }
 
+      if (creditRefundTotal.greaterThan(ZERO)) {
+        await tx.customer_credit_transactions.create({
+          data: {
+            tenant_id: tenantId,
+            customer_id: sale.customer_id,
+            store_id: storeId,
+            type: 'credit_refund',
+            amount: creditRefundTotal.toFixed(2),
+            sale_id: sale.id,
+            return_reference_id: parsed.data.returnReferenceId,
+            recorded_by: createdBy,
+            note: `Return ${parsed.data.returnReferenceId}`,
+          },
+        })
+      }
+
       const creditNoteResult = await createCreditNoteForReturn(tx, {
         tenantId,
         saleId: sale.id,
         returnReferenceId: parsed.data.returnReferenceId,
+        requestHash,
         returnedLines: refundLines.map((line) => ({
           saleLineItemId: line.saleLineItem.id,
           quantity: new Prisma.Decimal(line.quantity),

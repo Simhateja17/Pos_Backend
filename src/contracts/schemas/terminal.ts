@@ -23,6 +23,12 @@ export const TerminalSchema = z
   })
   .openapi('Terminal')
 
+/** Returned only by the explicit pairing mutation. Native clients persist
+ * this secret in platform secure storage and send it as a device header. */
+export const PairedTerminalSchema = TerminalSchema.extend({
+  deviceToken: z.string().regex(/^[0-9a-f]{64}$/i),
+}).openapi('PairedTerminal')
+
 export const CreateTerminalSchema = z
   .object({
     name: z.string().trim().min(1).max(60),

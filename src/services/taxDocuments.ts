@@ -673,6 +673,24 @@ async function loadSaleSource(tx: any, tenantId: string, saleId: string): Promis
   }
 }
 
+/**
+ * Build the immutable tax/receipt line snapshot for a sale without allocating
+ * a document number or writing a tax document. This is the read-only source
+ * used by return previews when a legacy or International sale has not yet
+ * needed a persisted tax invoice. The action route still calls
+ * ensureTaxInvoice(), so its eventual credit note uses the same pure builder
+ * and cannot drift from the preview.
+ */
+export async function previewTaxInvoice(tx: any, tenantId: string, saleId: string): Promise<TaxDocumentSnapshot> {
+  const source = await loadSaleSource(tx, tenantId, saleId)
+  return buildTaxInvoiceSnapshot({
+    source,
+    financialYear: financialYearFor(source.documentDate, source.timezone),
+    sequenceNumber: BigInt(0),
+    documentNumber: 'PREVIEW',
+  })
+}
+
 function jsonSnapshot(snapshot: TaxDocumentSnapshot) {
   return {
     seller_snapshot: snapshot.seller,
@@ -696,7 +714,12 @@ async function allocateSequence(tx: any, source: TaxSaleSource, type: TaxDocumen
   return BigInt(String(rows[0].sequence_number))
 }
 
-async function insertSnapshot(tx: any, snapshot: TaxDocumentSnapshot, createdBy: string | null) {
+async function insertSnapshot(
+  tx: any,
+  snapshot: TaxDocumentSnapshot,
+  createdBy: string | null,
+  requestHash: string | null = null,
+) {
   const created = await tx.tax_documents.create({
     data: {
       tenant_id: snapshot.tenantId,
@@ -709,6 +732,7 @@ async function insertSnapshot(tx: any, snapshot: TaxDocumentSnapshot, createdBy:
       sale_id: snapshot.saleId,
       customer_id: snapshot.customerId,
       return_reference_id: snapshot.returnReferenceId,
+      request_hash: requestHash,
       original_document_id: snapshot.originalDocumentId,
       ...jsonSnapshot(snapshot),
       subtotal: snapshot.subtotal.toString(),
@@ -868,6 +892,7 @@ export async function createCreditNoteForReturn(tx: any, input: {
   tenantId: string
   saleId: string
   returnReferenceId: string
+  requestHash: string
   returnedLines: ReturnedTaxLine[]
   refundPayments: TaxPaymentSnapshot[]
   createdBy?: string | null
@@ -902,6 +927,6 @@ export async function createCreditNoteForReturn(tx: any, input: {
     returnReferenceId: input.returnReferenceId,
     refundPayments: input.refundPayments,
   })
-  const created = await insertSnapshot(tx, snapshot, input.createdBy ?? null)
+  const created = await insertSnapshot(tx, snapshot, input.createdBy ?? null, input.requestHash)
   return { document: created, idempotent: false }
 }

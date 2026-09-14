@@ -114,6 +114,9 @@ export async function computeXReport(client: any, shift: any) {
   const checkSalesTotal = sumBy(payments, (p: any) =>
     p.direction === 'payment' && p.method === 'check' ? new Prisma.Decimal(p.amount) : ZERO,
   )
+  const creditSalesTotal = sumBy(payments, (p: any) =>
+    p.direction === 'payment' && p.method === 'credit' ? new Prisma.Decimal(p.amount) : ZERO,
+  )
   // Only cash refunds affect the physical drawer.
   const refundsTotal = sumBy(payments, (p: any) =>
     p.direction === 'refund' && p.method === 'cash' ? new Prisma.Decimal(p.amount).abs() : ZERO,
@@ -128,6 +131,7 @@ export async function computeXReport(client: any, shift: any) {
     cardSalesTotal: cardSalesTotal.toString(),
     upiSalesTotal: upiSalesTotal.toString(),
     checkSalesTotal: checkSalesTotal.toString(),
+    creditSalesTotal: creditSalesTotal.toString(),
     refundsTotal: refundsTotal.toString(),
     saleCount: sales.length,
     _expectedCashDecimal: expectedCash,

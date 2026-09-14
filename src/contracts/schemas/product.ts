@@ -38,6 +38,22 @@ export function allowsFractionalQuantity(unit: z.infer<typeof UnitOfMeasureSchem
   return (FRACTIONAL_UNITS as readonly string[]).includes(unit)
 }
 
+/**
+ * Sale/return quantities are persisted in numeric(12,3) columns. Reject a
+ * fourth decimal place at the API boundary instead of letting PostgreSQL
+ * round it after the server has already calculated a different total or
+ * stock movement. The unit-specific whole-vs-fractional rule is applied only
+ * after the route has loaded the authoritative variant.
+ */
+export const TransactionQuantitySchema = z
+  .number()
+  .finite()
+  .positive()
+  .max(999_999_999.999)
+  .refine((value) => Number(value.toFixed(3)) === value, {
+    message: 'Quantity supports at most three decimal places',
+  })
+
 // EAN-8/12/13/14 and UPC — externally assigned, digits only. Deliberately NOT
 // validated against a check digit: real shelf stock includes in-house and
 // regional codes that are structurally valid but not GS1-issued.

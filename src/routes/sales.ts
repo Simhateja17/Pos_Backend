@@ -2,6 +2,7 @@ import { activeStoreId, storeScopeWhere } from '../middleware/storeContext'
 import { Router } from 'express'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
+import { createHash } from 'node:crypto'
 import { CreateSaleSchema, ResendReceiptInputSchema, SaleListQuerySchema } from '../contracts/schemas/sale'
 import { PaymentReadQuerySchema } from '../contracts/schemas/payment'
 import { allowsFractionalQuantity } from '../contracts/schemas/product'
@@ -19,6 +20,7 @@ import { findPairedTerminal } from '../lib/counterDevice'
 import { consumeRateLimit } from '../lib/rateLimit'
 import { effectivePricesForVariants } from '../lib/storePricing'
 import { calculateCashChange } from '../lib/cashTender'
+import { unsupportedTenderMethods } from '../lib/tenderRules'
 import {
   creditLimitString,
   getCustomerCreditTotalsForCustomer,
@@ -147,6 +149,19 @@ function toPaymentJson(row: any) {
     createdBy: row.created_by,
     createdAt: row.created_at.toISOString(),
   }
+}
+
+/** Prisma's PostgreSQL adapter can wrap a trigger exception at different
+ * levels. Match only the stock-floor trigger's own diagnostic, never every
+ * generic check-constraint failure. */
+function isStockFloorViolation(error: any): boolean {
+  const diagnostic = [
+    error?.message,
+    error?.cause?.message,
+    error?.meta?.message,
+    error?.meta?.database_error,
+  ].filter(Boolean).map(String).join(' ')
+  return diagnostic.includes('Stock movement would take variant') && diagnostic.includes('below zero')
 }
 
 function toLineJson(row: any) {
@@ -340,21 +355,34 @@ async function invoiceNumbersForSales(
  * status. Tenant-scoped through forTenant(), so a client_sale_id minted by
  * another tenant can never resolve here.
  */
-async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string, storeId?: string) {
+async function loadSaleByClientSaleId(tenantId: string, clientSaleId: string, storeId?: string, knownSale?: any) {
   const client = forTenant(tenantId) as any
-  const sale = await client.sales.findFirst({
+  const sale = knownSale ?? await client.sales.findFirst({
     where: { client_sale_id: clientSaleId, ...(storeId ? { store_id: storeId } : {}) },
   })
-  if (!sale) return null
+  if (!sale || (storeId && sale.store_id !== storeId)) return null
 
-  const [lines, payments, tenant, partiesBySaleId] = await Promise.all([
+  const [lines, payments, tenant, partiesBySaleId, invoice] = await Promise.all([
     client.sale_line_items.findMany({ where: { sale_id: sale.id }, include: SALE_LINE_INCLUDE }),
     client.payments.findMany({ where: { sale_id: sale.id, direction: 'payment' } }),
     client.tenants.findFirst({ where: { id: tenantId } }),
     loadSaleParties(client, tenantId, [sale]),
+    typeof client.tax_documents?.findFirst === 'function'
+      ? client.tax_documents.findFirst({
+          where: { tenant_id: tenantId, sale_id: sale.id, document_type: 'tax_invoice' },
+          select: { document_number: true },
+        })
+      : null,
   ])
 
-  return toSaleJson(sale, lines, payments, tenant?.business_name ?? null, undefined, partiesBySaleId.get(sale.id))
+  return toSaleJson(
+    sale,
+    lines,
+    payments,
+    tenant?.business_name ?? null,
+    invoice?.document_number,
+    partiesBySaleId.get(sale.id),
+  )
 }
 
 async function enqueueHardwareOutputs(input: {
@@ -417,22 +445,32 @@ router.post('/', async (req, res) => {
   } catch {
     return res.status(400).json({ error: 'Choose a store before completing a sale.' })
   }
+  const requestHash = createHash('sha256').update(JSON.stringify(parsed.data)).digest('hex')
 
   try {
     const deviceClient = forTenant(tenantId) as any
     const pairedTerminal = await findPairedTerminal(deviceClient, req)
     const actingRole = req.actingStaff?.role ?? req.user!.role
 
-    // OFFLINE-01 fast path. A retried or queue-redelivered sale must record
-    // exactly once, so a client_sale_id we have already committed short-circuits
-    // before any recompute or write. This is an optimisation and a nicety, NOT
-    // the guarantee — the guarantee is the unique index from migration 0017,
-    // which is what actually holds under concurrency. The catch block below
-    // handles the race this lookup cannot.
-    const replayed = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId, storeId)
-    if (replayed) {
+    // OFFLINE-01 fast path. The unique database index remains the exactly-once
+    // authority under concurrency; request_hash additionally prevents the
+    // same key from silently accepting changed cart, tender, shift or customer
+    // data after a timeout or process restart.
+    const replayAuthority = await deviceClient.sales.findFirst({
+      where: { client_sale_id: parsed.data.clientSaleId },
+    })
+    if (replayAuthority) {
+      if (replayAuthority.store_id !== storeId) {
+        return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This sale ID was already used by a different store.' })
+      }
+      // Null is retained only for legacy/import-created rows from before 0086.
+      if (replayAuthority.request_hash && replayAuthority.request_hash !== requestHash) {
+        return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This sale ID was already used for different sale data.' })
+      }
+      const replayed = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId, storeId, replayAuthority)
+      if (!replayed) throw new Error('Committed sale could not be reloaded')
       // 200 rather than 201: nothing was created by THIS request. The body is
-      // byte-identical to the original 201 so a retrying client needs no
+      // contract-identical to the original 201 so a retrying client needs no
       // special-casing. No receipt email is re-sent — that already happened.
       return res.status(200).json(replayed)
     }
@@ -504,6 +542,17 @@ router.post('/', async (req, res) => {
       const store = await tx.stores.findFirst({ where: { id: storeId, is_active: true } })
       if (!tenant || !store) {
         return { status: 404, body: { error: !tenant ? 'Tenant not found' : 'Store not found' } }
+      }
+
+      const unsupportedMethods = unsupportedTenderMethods(tenant.country, parsed.data.payments.map((payment) => payment.method))
+      if (unsupportedMethods.length > 0) {
+        return {
+          status: 400,
+          body: {
+            code: 'UNSUPPORTED_TENDER',
+            error: `Tender method(s) ${unsupportedMethods.join(', ')} are not available for this store's region.`,
+          },
+        }
       }
 
 
@@ -592,6 +641,25 @@ router.post('/', async (req, res) => {
         }
       }
 
+      // The payments table has a strict amount > 0 constraint. Reject a zero
+      // or negative row here, before any customer/stock/sale write, rather
+      // than turning a fully discounted bill or a malformed split into a
+      // generic database error. A zero-total sale has no tender to record and
+      // is outside the cashier contract until a non-payment settlement path
+      // exists.
+      if (total.isZero()) {
+        return {
+          status: 400,
+          body: { error: 'A sale total must be greater than zero before it can be charged.', code: 'ZERO_TOTAL_UNSUPPORTED' },
+        }
+      }
+      if (parsed.data.payments.some((payment) => new Prisma.Decimal(payment.amount).lessThanOrEqualTo(ZERO))) {
+        return {
+          status: 400,
+          body: { error: 'Payment amounts must be greater than zero.', code: 'INVALID_PAYMENT_AMOUNT' },
+        }
+      }
+
       const creditAmount = parsed.data.payments
         .filter((payment) => payment.method === 'credit')
         .reduce((sum, payment) => sum.plus(new Prisma.Decimal(payment.amount)), ZERO)
@@ -644,6 +712,7 @@ router.post('/', async (req, res) => {
           tenant_id: tenantId,
           store_id: storeId,
           client_sale_id: parsed.data.clientSaleId,
+          request_hash: requestHash,
           shift_id: parsed.data.shiftId,
           customer_id: customer?.id ?? null,
           subtotal: subtotal.toString(),
@@ -836,15 +905,31 @@ router.post('/', async (req, res) => {
     // The whole write is one transaction, so the loser rolled back completely:
     // no orphan lines, payments, or stock movements.
     if (err?.code === 'P2002') {
-      const winner = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId, storeId)
-      if (winner) {
-        return res.status(200).json(winner)
+      const existingInTenant = await (forTenant(tenantId) as any).sales.findFirst({
+        where: { client_sale_id: parsed.data.clientSaleId },
+      })
+      if (existingInTenant) {
+        if (existingInTenant.store_id !== storeId) {
+          return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This sale ID was already used by a different store.' })
+        }
+        if (existingInTenant.request_hash && existingInTenant.request_hash !== requestHash) {
+          return res.status(409).json({ code: 'IDEMPOTENCY_CONFLICT', error: 'This sale ID was already used for different sale data.' })
+        }
+        const winner = await loadSaleByClientSaleId(tenantId, parsed.data.clientSaleId, storeId, existingInTenant)
+        if (winner) return res.status(200).json(winner)
       }
       // A P2002 on some other constraint, or the row vanished. Fall through.
     }
-    // Postgres floor-guard (23514, adjustment/transfer only from this route's
-    // own perspective) or payment-sum trigger errors map to a 400; anything
-    // else is a generic 500, never leaking raw internals.
+    // The route's friendly stock read can race another checkout. Migration
+    // 0085 is the serialized database authority; translate its rollback into
+    // a permanent stock rejection so the client does not treat it as an
+    // uncertain sale and blindly retry.
+    if (isStockFloorViolation(err)) {
+      return res.status(409).json({
+        code: 'INSUFFICIENT_STOCK',
+        error: 'Stock changed while this sale was being completed. Review the cart before charging again.',
+      })
+    }
     if (err?.code === 'P2003') {
       return res.status(400).json({ error: 'Invalid reference in request' })
     }

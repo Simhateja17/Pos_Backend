@@ -37,7 +37,7 @@ describe('requireRole', () => {
 
     expect(next).not.toHaveBeenCalled()
     expect(res.status).toHaveBeenCalledWith(403)
-    expect(res.json).toHaveBeenCalledWith({ error: 'Insufficient permissions' })
+    expect(res.json).toHaveBeenCalledWith({ code: 'FORBIDDEN', message: 'Insufficient permissions.' })
   })
 
   it('Test 3a: req.user.role = owner, no actingStaff, requireRole(owner) -> next()', () => {
