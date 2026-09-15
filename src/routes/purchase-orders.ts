@@ -88,7 +88,9 @@ router.get('/:poId', async (req, res) => {
 /** POST / — raise a draft PO. */
 router.post('/', async (req, res) => {
   const parsed = CreatePurchaseOrderSchema.safeParse(req.body)
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid request' })
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() })
+  }
 
   const variantIds = parsed.data.lines.map((l) => l.variantId)
   if (new Set(variantIds).size !== variantIds.length) {
