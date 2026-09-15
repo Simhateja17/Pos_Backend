@@ -49,14 +49,14 @@ describe('Payment-sum exact-cent invariant (unit, no live DB)', () => {
     expect(paymentSum.equals(total)).toBe(true)
   })
 
-  it('split-tender payments (cash + UPI) keep exact-total validation and require a UPI reference', () => {
+  it('split-tender payments (cash + UPI) keep exact-total validation with an optional UPI reference', () => {
     const { total } = computeCheckout(input)
     const cash = total.dividedBy(2).toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN)
     const upi = total.minus(cash)
     expect(cash.plus(upi).equals(total)).toBe(true)
 
     expect(PaymentInputSchema.safeParse({ method: 'upi', amount: upi.toFixed(2), referenceCode: 'UPI-123' }).success).toBe(true)
-    expect(PaymentInputSchema.safeParse({ method: 'upi', amount: upi.toFixed(2) }).success).toBe(false)
+    expect(PaymentInputSchema.safeParse({ method: 'upi', amount: upi.toFixed(2) }).success).toBe(true)
     expect(PaymentInputSchema.safeParse({ method: 'upi', amount: upi.toFixed(2), referenceCode: '   ' }).success).toBe(false)
   })
 })

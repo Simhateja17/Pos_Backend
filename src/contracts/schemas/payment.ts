@@ -9,10 +9,6 @@ export const PaymentInputSchema = z
     amount: z.string().regex(/^\d+\.\d{2}$/),
     referenceCode: z.string().trim().min(1).max(50).optional(),
   })
-  .refine((p) => !['card', 'upi'].includes(p.method) || !!p.referenceCode, {
-    message: 'referenceCode is required for card and UPI payments',
-    path: ['referenceCode'],
-  })
   .openapi('PaymentInput')
 
 export const PaymentSchema = z
