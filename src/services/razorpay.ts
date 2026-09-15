@@ -104,6 +104,8 @@ export async function createRazorpaySubscription(input: {
   planId: string
   billingCycle: 'monthly' | 'annual'
   notes: Record<string, string>
+  /** Unix seconds. When set, the owner authorises now and the first charge happens then. */
+  startAt?: number
 }): Promise<RazorpaySubscription> {
   // Limit mandates to 10 years; a 100-year term exceeds UPI Checkout's end-time limit.
   const totalCount = input.billingCycle === 'monthly' ? 120 : 10
@@ -115,8 +117,31 @@ export async function createRazorpaySubscription(input: {
       quantity: 1,
       customer_notify: true,
       notes: input.notes,
+      ...(input.startAt ? { start_at: input.startAt } : {}),
     }),
   })
+}
+
+export type RazorpayInvoice = {
+  id: string
+  subscription_id?: string | null
+  payment_id?: string | null
+  status?: string
+  amount?: number
+  amount_paid?: number
+  currency?: string
+  date?: number | null
+  paid_at?: number | null
+  billing_start?: number | null
+  billing_end?: number | null
+  short_url?: string | null
+}
+
+export async function listRazorpayInvoices(subscriptionId: string): Promise<RazorpayInvoice[]> {
+  const response = await razorpayRequest<{ items?: RazorpayInvoice[] }>(
+    `/invoices?subscription_id=${encodeURIComponent(subscriptionId)}&count=50`,
+  )
+  return response.items ?? []
 }
 
 export async function fetchRazorpaySubscription(subscriptionId: string): Promise<RazorpaySubscription> {

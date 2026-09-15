@@ -10,6 +10,8 @@ import { forTenant } from '../db/tenantClient'
 import { clearAuthCookies, getAuthCookies } from '../lib/authCookies'
 import { clearRegisterLockedCookie } from '../lib/counterDevice'
 import { signOperatorToken } from '../middleware/pinSwitch'
+import { requireRole } from '../middleware/requireRole'
+import { sendActivationEmail } from '../lib/activationEmail'
 
 const router = Router()
 
@@ -121,6 +123,88 @@ router.post('/otp/request', async (req, res) => {
 
   return res.status(200).json({ ok: true })
 })
+
+const ACTIVATION_EMAIL_COOLDOWN_MS = 60_000
+const activationEmailSentAt = new Map<string, number>()
+
+// Required per regional deployment, with no fallback: the web Supabase client
+// picks its Auth project by hostname, so an India token opened on the
+// International host would fail verification.
+function webAppOrigin(): string | null {
+  const configured = process.env.WEB_APP_URL
+  if (!configured) return null
+  try {
+    return new URL(configured).origin
+  } catch {
+    return null
+  }
+}
+
+/**
+ * POST /web-activation/email — emails the owner a single-use web sign-in link
+ * that lands on the plans page. Purchases are web-only: the mobile app never
+ * opens a checkout or links to one, so email is how it hands the owner over.
+ *
+ * The token is Supabase's own magic-link hashed token (single use, expiry set
+ * by the project), placed in the URL fragment so it never reaches a server log.
+ * It is never returned in this response.
+ *
+ * The in-memory cooldown is per backend process; it limits accidental repeats
+ * from the app, not a determined abuser (who would need an owner session).
+ */
+router.post('/web-activation/email', authMiddleware, requireRole('owner'), async (req, res) => {
+  const userId = req.user!.id
+  const now = Date.now()
+  const lastSent = activationEmailSentAt.get(userId)
+  if (lastSent && now - lastSent < ACTIVATION_EMAIL_COOLDOWN_MS) {
+    const retryAfter = Math.ceil((ACTIVATION_EMAIL_COOLDOWN_MS - (now - lastSent)) / 1000)
+    res.set('Retry-After', String(retryAfter))
+    return res.status(429).json(errorEnvelope('RATE_LIMITED', `Please wait ${retryAfter} seconds before requesting another email.`, retryAfter))
+  }
+
+  const origin = webAppOrigin()
+  if (!origin) {
+    console.log('[auth:web-activation] WEB_APP_URL is not configured')
+    return res.status(503).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Activation email is not available right now.'))
+  }
+
+  const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId)
+  const email = userData?.user?.email
+  if (userError || !email) {
+    console.log(`[auth:web-activation] userId=${userId} lookup failed message=${userError?.message}`)
+    return res.status(503).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not send the activation email. Please try again shortly.'))
+  }
+
+  const tenant = await forTenant(req.user!.tenantId).tenants.findFirst({
+    where: { id: req.user!.tenantId },
+    select: { country: true },
+  })
+  const region = ['IN', 'INDIA'].includes(String(tenant?.country ?? '').toUpperCase()) ? 'IN' : 'INTL'
+
+  const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({ type: 'magiclink', email })
+  const tokenHash = linkData?.properties?.hashed_token
+  if (linkError || !tokenHash) {
+    console.log(`[auth:web-activation] userId=${userId} generateLink failed status=${linkError?.status} message=${linkError?.message}`)
+    return res.status(502).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not send the activation email. Please try again shortly.'))
+  }
+
+  const activationUrl = `${origin}/activate#token_hash=${encodeURIComponent(tokenHash)}&region=${region}`
+  const sent = await sendActivationEmail({ to: email, activationUrl })
+  if (!sent.ok) {
+    console.log(`[auth:web-activation] userId=${userId} email send failed: ${sent.error}`)
+    return res.status(502).json(errorEnvelope('SERVICE_UNAVAILABLE', 'Could not send the activation email. Please try again shortly.'))
+  }
+
+  activationEmailSentAt.set(userId, now)
+  console.log(`[auth:web-activation] userId=${userId} sent to ${maskEmail(email)}`)
+  res.set('Cache-Control', 'no-store')
+  return res.json({ ok: true, sentTo: maskEmail(email) })
+})
+
+/** Test-only: the cooldown is module state. */
+export function resetActivationEmailCooldown() {
+  activationEmailSentAt.clear()
+}
 
 /**
  * POST /refresh is the mobile refresh owner. The caller sends the current

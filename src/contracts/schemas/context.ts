@@ -6,6 +6,11 @@ extendZodWithOpenApi(z)
 /** Safe display identity for the authenticated India application shell. */
 export const AppContextSchema = z
   .object({
+    /** Plan access for the tenant; the server still enforces 402 on operational routes. */
+    subscription: z.object({
+      accessAllowed: z.boolean(),
+      graceUntil: z.string().datetime().nullable(),
+    }).optional(),
     staff: z.object({
       id: z.string().uuid().nullable(),
       name: z.string().nullable(),

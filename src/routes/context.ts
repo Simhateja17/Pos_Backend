@@ -71,7 +71,15 @@ router.get('/', async (req, res) => {
         mustChangePin: false,
       }
 
+  // The same request-access snapshot requireSubscription enforces, so a client
+  // can show an activation gate instead of discovering it through 402s.
+  const access = req.accessContext?.subscription
+  const subscription = access
+    ? { accessAllowed: access.accessAllowed, graceUntil: access.graceUntil ? new Date(access.graceUntil).toISOString() : null }
+    : undefined
+
   return res.json({
+    subscription,
     staff: {
       id: staff?.id ?? null,
       name: staff?.name ?? null,

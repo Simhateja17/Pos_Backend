@@ -36,7 +36,7 @@ export async function storeAllowance(tx: any, tenantId: string): Promise<StoreAl
   const [activeStores, subscription, tenant, snapshotRow] = await Promise.all([
     tx.stores.count({ where: { is_active: true } }),
     tx.billing_subscriptions.findFirst({
-      where: { tenant_id: tenantId, status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
+      where: { tenant_id: tenantId, status: { in: [...OPEN_SUBSCRIPTION_STATUSES] }, switch_pending: false },
       orderBy: { updated_at: 'desc' },
       select: { included_store_count: true, additional_store_count: true, plan_key: true },
     }),
@@ -71,6 +71,7 @@ async function readStoredEntitlement(tx: any, tenantId: string): Promise<any | n
       FROM public.billing_subscriptions
       WHERE tenant_id = ${tenantId}::uuid
         AND status IN (${OPEN_SUBSCRIPTION_STATUSES[0]}, ${OPEN_SUBSCRIPTION_STATUSES[1]}, ${OPEN_SUBSCRIPTION_STATUSES[2]}, ${OPEN_SUBSCRIPTION_STATUSES[3]}, ${OPEN_SUBSCRIPTION_STATUSES[4]})
+        AND NOT switch_pending
       ORDER BY updated_at DESC
       LIMIT 1
     `

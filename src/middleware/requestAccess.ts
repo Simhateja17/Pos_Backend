@@ -82,6 +82,8 @@ export async function resolveRequestAccess(
       where: {
         tenant_id: identity.tenantId,
         status: { in: [...OPEN_SUBSCRIPTION_STATUSES] },
+        // A pending plan-change successor is not the live entitlement.
+        switch_pending: false,
       },
       orderBy: { updated_at: 'desc' },
     })

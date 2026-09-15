@@ -292,6 +292,7 @@ async function readSubscriptionRow(tx: any, tenantId: string): Promise<any | nul
       FROM public.billing_subscriptions
       WHERE tenant_id = ${tenantId}::uuid
         AND status IN (${OPEN_SUBSCRIPTION_STATUSES[0]}, ${OPEN_SUBSCRIPTION_STATUSES[1]}, ${OPEN_SUBSCRIPTION_STATUSES[2]}, ${OPEN_SUBSCRIPTION_STATUSES[3]}, ${OPEN_SUBSCRIPTION_STATUSES[4]})
+        AND NOT switch_pending
       ORDER BY updated_at DESC
       LIMIT 1
     `
@@ -300,7 +301,7 @@ async function readSubscriptionRow(tx: any, tenantId: string): Promise<any | nul
     // Unit tests and a pre-migration local client may not expose raw SQL. The
     // legacy model read remains a safe fallback; it simply has no snapshot.
     return tx.billing_subscriptions?.findFirst?.({
-      where: { tenant_id: tenantId, status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
+      where: { tenant_id: tenantId, status: { in: [...OPEN_SUBSCRIPTION_STATUSES] }, switch_pending: false },
       orderBy: { updated_at: 'desc' },
     }) ?? null
   }

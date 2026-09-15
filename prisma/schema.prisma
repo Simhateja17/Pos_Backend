@@ -781,6 +781,8 @@ model billing_subscription_attempts {
   failure_code             String?
   failure_message          String?
   provider_payload         Json?
+  replaces_subscription_id String?                 @db.Uuid
+  switch_kind              String?
   created_at               DateTime                @default(now()) @db.Timestamptz(6)
   updated_at               DateTime                @default(now()) @db.Timestamptz(6)
   billing_subscriptions    billing_subscriptions[]
@@ -822,6 +824,10 @@ model billing_subscriptions {
   last_payment_id               String?
   last_invoice_id               String?
   provider_payload              Json?
+  replaces_subscription_id      String?                        @db.Uuid
+  switch_kind                   String?
+  switch_pending                Boolean                        @default(false)
+  switch_starts_at              DateTime?                      @db.Timestamptz(6)
   created_at                    DateTime                       @default(now()) @db.Timestamptz(6)
   updated_at                    DateTime                       @default(now()) @db.Timestamptz(6)
   billing_subscription_attempts billing_subscription_attempts? @relation(fields: [attempt_id], references: [id], onDelete: SetNull, onUpdate: NoAction)

@@ -557,6 +557,9 @@
           "usage": {
             "$ref": "#/components/schemas/EntitlementUsage"
           },
+          "pendingChange": {
+            "$ref": "#/components/schemas/PendingPlanChange"
+          },
           "subscription": {
             "type": [
               "object",
@@ -630,6 +633,7 @@
           "entitlementVersion",
           "entitlements",
           "usage",
+          "pendingChange",
           "subscription"
         ]
       },
@@ -666,6 +670,63 @@
         ],
         "additionalProperties": false
       },
+      "PendingPlanChange": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "upgrade",
+              "downgrade",
+              "renewal"
+            ]
+          },
+          "planKey": {
+            "type": "string"
+          },
+          "billingCycle": {
+            "$ref": "#/components/schemas/BillingCycle"
+          },
+          "status": {
+            "type": "string"
+          },
+          "authorised": {
+            "type": "boolean"
+          },
+          "startsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "totalAmountMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "$ref": "#/components/schemas/BillingCurrency"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "planKey",
+          "billingCycle",
+          "status",
+          "authorised",
+          "startsAt",
+          "totalAmountMinor",
+          "currency"
+        ]
+      },
       "BillingCycle": {
         "type": "string",
         "enum": [
@@ -685,6 +746,13 @@
           },
           "razorpaySubscriptionId": {
             "type": "string"
+          },
+          "checkoutUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
           },
           "status": {
             "type": "string"
@@ -709,6 +777,7 @@
           "attemptId",
           "razorpayKeyId",
           "razorpaySubscriptionId",
+          "checkoutUrl",
           "status",
           "region",
           "planKey",
@@ -788,9 +857,168 @@
         },
         "additionalProperties": false
       },
+      "ChangeSubscriptionResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CreateSubscriptionResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "upgrade",
+                  "downgrade",
+                  "renewal"
+                ]
+              },
+              "startsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "kind",
+              "startsAt"
+            ]
+          }
+        ]
+      },
+      "ChangeSubscriptionRequest": {
+        "type": "object",
+        "properties": {
+          "planKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          },
+          "billingCycle": {
+            "$ref": "#/components/schemas/BillingCycle"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "planKey",
+          "billingCycle",
+          "idempotencyKey"
+        ],
+        "additionalProperties": false
+      },
+      "BillingInvoiceList": {
+        "type": "object",
+        "properties": {
+          "invoices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingInvoice"
+            }
+          },
+          "available": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "invoices",
+          "available"
+        ]
+      },
+      "BillingInvoice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "amountMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string"
+          },
+          "issuedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "paidAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "periodStart": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "periodEnd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "planKey": {
+            "type": "string"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "amountMinor",
+          "currency",
+          "issuedAt",
+          "paidAt",
+          "periodStart",
+          "periodEnd",
+          "planKey",
+          "url"
+        ]
+      },
       "AppContext": {
         "type": "object",
         "properties": {
+          "subscription": {
+            "type": "object",
+            "properties": {
+              "accessAllowed": {
+                "type": "boolean"
+              },
+              "graceUntil": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "accessAllowed",
+              "graceUntil"
+            ]
+          },
           "staff": {
             "type": "object",
             "properties": {
@@ -9871,7 +10099,20 @@
     },
     "/billing/status": {
       "get": {
-        "description": "Read the server-owned subscription entitlement and provider references for the authenticated tenant.",
+        "description": "Read the server-owned subscription entitlement and provider references for the authenticated tenant. `reconcile=1` (billing screens only) first refreshes an unfinished checkout or plan change from Razorpay.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            },
+            "required": false,
+            "name": "reconcile",
+            "in": "query"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Subscription entitlement",
@@ -9999,6 +10240,93 @@
           },
           "404": {
             "description": "No subscription found"
+          }
+        }
+      }
+    },
+    "/billing/subscription/change": {
+      "post": {
+        "description": "Upgrade, downgrade, or renew by authorising a new Razorpay subscription. Upgrades charge now and end the current subscription once authorised (no refund for unused days); downgrades and renewals start when the current period ends. Owner-only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeSubscriptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Razorpay checkout ready for authorisation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeSubscriptionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "409": {
+            "description": "No active subscription, same plan, a change already pending, or usage exceeds the target plan"
+          }
+        }
+      }
+    },
+    "/billing/subscription/change/cancel": {
+      "post": {
+        "description": "Discard a plan change that has not been authorised yet. Owner-only.",
+        "responses": {
+          "200": {
+            "description": "Pending change discarded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
+          },
+          "404": {
+            "description": "No pending change"
+          },
+          "409": {
+            "description": "Change already authorised"
+          }
+        }
+      }
+    },
+    "/billing/invoices": {
+      "get": {
+        "description": "Razorpay invoices for this business, newest first. `available` is false when Razorpay cannot be reached. Owner-only.",
+        "responses": {
+          "200": {
+            "description": "Invoices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingInvoiceList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated"
+          },
+          "403": {
+            "description": "Owner role required"
           }
         }
       }
@@ -10559,6 +10887,85 @@
           },
           "502": {
             "description": "Provider temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/web-activation/email": {
+      "post": {
+        "description": "Owner only. Email a single-use web sign-in link that opens the plans page. The link is never returned in the response.",
+        "responses": {
+          "200": {
+            "description": "Activation email sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "sentTo": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "sentTo"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Owner role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Cooldown between emails",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Email or auth provider unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Activation email not configured",
             "content": {
               "application/json": {
                 "schema": {

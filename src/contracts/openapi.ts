@@ -143,10 +143,13 @@ import {
   ReceiptResultSchema,
 } from './schemas/purchaseOrder'
 import {
+  BillingInvoiceListSchema,
   BillingPlanCatalogSchema,
   BillingRegionSchema,
   BillingStatusSchema,
   CancelSubscriptionSchema,
+  ChangeSubscriptionResponseSchema,
+  ChangeSubscriptionSchema,
   CreateSubscriptionResponseSchema,
   CreateSubscriptionSchema,
   VerifySubscriptionSchema,
@@ -202,7 +205,8 @@ registry.registerPath({
 registry.registerPath({
   method: 'get',
   path: '/billing/status',
-  description: 'Read the server-owned subscription entitlement and provider references for the authenticated tenant.',
+  description: 'Read the server-owned subscription entitlement and provider references for the authenticated tenant. `reconcile=1` (billing screens only) first refreshes an unfinished checkout or plan change from Razorpay.',
+  request: { query: z.object({ reconcile: z.enum(['1']).optional() }) },
   responses: {
     200: { description: 'Subscription entitlement', content: { 'application/json': { schema: BillingStatusSchema } } },
     401: { description: 'Unauthenticated' },
@@ -248,6 +252,43 @@ registry.registerPath({
     401: { description: 'Unauthenticated' },
     403: { description: 'Owner role required' },
     404: { description: 'No subscription found' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/billing/subscription/change',
+  description: 'Upgrade, downgrade, or renew by authorising a new Razorpay subscription. Upgrades charge now and end the current subscription once authorised (no refund for unused days); downgrades and renewals start when the current period ends. Owner-only.',
+  request: { body: { content: { 'application/json': { schema: ChangeSubscriptionSchema } } } },
+  responses: {
+    201: { description: 'Razorpay checkout ready for authorisation', content: { 'application/json': { schema: ChangeSubscriptionResponseSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    409: { description: 'No active subscription, same plan, a change already pending, or usage exceeds the target plan' },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/billing/subscription/change/cancel',
+  description: 'Discard a plan change that has not been authorised yet. Owner-only.',
+  responses: {
+    200: { description: 'Pending change discarded', content: { 'application/json': { schema: BillingStatusSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
+    404: { description: 'No pending change' },
+    409: { description: 'Change already authorised' },
+  },
+})
+
+registry.registerPath({
+  method: 'get',
+  path: '/billing/invoices',
+  description: 'Razorpay invoices for this business, newest first. `available` is false when Razorpay cannot be reached. Owner-only.',
+  responses: {
+    200: { description: 'Invoices', content: { 'application/json': { schema: BillingInvoiceListSchema } } },
+    401: { description: 'Unauthenticated' },
+    403: { description: 'Owner role required' },
   },
 })
 
@@ -423,6 +464,20 @@ registry.registerPath({
     401: { description: 'Refresh token rejected', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
     403: { description: 'No tenant membership', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
     502: { description: 'Provider temporarily unavailable', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+  },
+})
+
+registry.registerPath({
+  method: 'post',
+  path: '/auth/web-activation/email',
+  description: 'Owner only. Email a single-use web sign-in link that opens the plans page. The link is never returned in the response.',
+  responses: {
+    200: { description: 'Activation email sent', content: { 'application/json': { schema: z.object({ ok: z.boolean(), sentTo: z.string() }) } } },
+    401: { description: 'Not authenticated', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+    403: { description: 'Owner role required', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+    429: { description: 'Cooldown between emails', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+    502: { description: 'Email or auth provider unavailable', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
+    503: { description: 'Activation email not configured', content: { 'application/json': { schema: ApiErrorEnvelopeSchema } } },
   },
 })
 

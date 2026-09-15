@@ -2,11 +2,12 @@ import { Router } from 'express'
 import {
   BillingRegionSchema,
   CancelSubscriptionSchema,
+  ChangeSubscriptionSchema,
   CreateSubscriptionSchema,
   VerifySubscriptionSchema,
 } from '../contracts/schemas/billing'
 import { requireRole } from '../middleware/requireRole'
-import { cancelSubscription, createSubscription, getBillingStatus, billingMode, regionForCountry, verifySubscription } from '../services/billing'
+import { cancelPendingChange, cancelSubscription, changeSubscription, createSubscription, getBillingStatus, billingMode, listInvoices, reconcilePendingSwitch, regionForCountry, verifySubscription } from '../services/billing'
 import { canonicalBillingRegion, getPlan, getPlans, toPlanOption } from '../services/billingCatalog'
 import { entitlementStatusFields, getEntitlementSummary } from '../services/entitlements'
 import { forTenant, forTenantTransaction } from '../db/tenantClient'
@@ -136,6 +137,8 @@ router.get('/private-offers', requireRole('owner'), async (req, res) => {
 })
 
 router.get('/status', async (req, res) => {
+  // Only the billing screens ask for this; it may call Razorpay.
+  if (req.query.reconcile === '1') await reconcilePendingSwitch(req.user!.tenantId)
   const billing = await getBillingStatus(req.user!.tenantId)
   const entitlements = await getEntitlementSummary(req.user!.tenantId)
   return res.json({
@@ -163,6 +166,20 @@ router.post('/subscription/cancel', requireRole('owner'), async (req, res) => {
   const parsed = CancelSubscriptionSchema.safeParse(req.body ?? {})
   if (!parsed.success) return res.status(400).json({ error: 'Cancellation must be scheduled at the end of the current cycle' })
   return res.json(await cancelSubscription(req.user!.tenantId))
+})
+
+router.post('/subscription/change', requireRole('owner'), async (req, res) => {
+  const parsed = ChangeSubscriptionSchema.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid plan change request' })
+  return res.status(201).json(await changeSubscription(req.user!.tenantId, parsed.data))
+})
+
+router.post('/subscription/change/cancel', requireRole('owner'), async (req, res) => {
+  return res.json(await cancelPendingChange(req.user!.tenantId))
+})
+
+router.get('/invoices', requireRole('owner'), async (req, res) => {
+  return res.json(await listInvoices(req.user!.tenantId))
 })
 
 export default router

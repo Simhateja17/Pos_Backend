@@ -114,6 +114,7 @@ describe('context and tenant record read routes', () => {
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual({
+      subscription: expect.objectContaining({ accessAllowed: expect.any(Boolean) }),
       staff: { id: 'staff-1', name: 'Real Owner', role: 'owner' },
       tenant: { id: 'tenant-real', businessName: 'Real Shop', locality: 'Mumbai, Maharashtra' },
       store: { id: 'store-1', name: 'Bandra', locality: 'Mumbai, Maharashtra', combinedTaxRatePercent: '4.0000', taxTreatment: 'cgst_sgst' },

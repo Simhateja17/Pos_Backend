@@ -105,6 +105,7 @@ export const CreateSubscriptionResponseSchema = z
     attemptId: z.string().uuid(),
     razorpayKeyId: z.string(),
     razorpaySubscriptionId: z.string(),
+    checkoutUrl: z.string().url().nullable(),
     status: z.string(),
     region: BillingRegionSchema,
     planKey: z.string(),
@@ -124,6 +125,20 @@ export const VerifySubscriptionSchema = z
   .strict()
   .openapi('VerifySubscriptionRequest')
 
+export const PendingPlanChangeSchema = z
+  .object({
+    id: z.string().uuid(),
+    kind: z.enum(['upgrade', 'downgrade', 'renewal']),
+    planKey: z.string(),
+    billingCycle: BillingCycleSchema,
+    status: z.string(),
+    authorised: z.boolean(),
+    startsAt: z.string().datetime().nullable(),
+    totalAmountMinor: z.number().int().nonnegative(),
+    currency: BillingCurrencySchema,
+  })
+  .openapi('PendingPlanChange')
+
 export const BillingStatusSchema = z
   .object({
     hasSubscription: z.boolean(),
@@ -136,6 +151,7 @@ export const BillingStatusSchema = z
     entitlementVersion: z.string(),
     entitlements: EntitlementLimitsSchema,
     usage: EntitlementUsageSchema,
+    pendingChange: PendingPlanChangeSchema.nullable(),
     subscription: z
       .object({
         id: z.string().uuid(),
@@ -152,6 +168,41 @@ export const BillingStatusSchema = z
       .nullable(),
   })
   .openapi('BillingStatus')
+
+export const ChangeSubscriptionSchema = z
+  .object({
+    planKey: z.string().trim().min(1).max(50),
+    billingCycle: BillingCycleSchema,
+    idempotencyKey: z.string().uuid(),
+  })
+  .strict()
+  .openapi('ChangeSubscriptionRequest')
+
+export const ChangeSubscriptionResponseSchema = CreateSubscriptionResponseSchema
+  .extend({
+    kind: z.enum(['upgrade', 'downgrade', 'renewal']),
+    startsAt: z.string().datetime().nullable(),
+  })
+  .openapi('ChangeSubscriptionResponse')
+
+export const BillingInvoiceSchema = z
+  .object({
+    id: z.string(),
+    status: z.string(),
+    amountMinor: z.number().int().nonnegative(),
+    currency: z.string(),
+    issuedAt: z.string().datetime().nullable(),
+    paidAt: z.string().datetime().nullable(),
+    periodStart: z.string().datetime().nullable(),
+    periodEnd: z.string().datetime().nullable(),
+    planKey: z.string(),
+    url: z.string().url().nullable(),
+  })
+  .openapi('BillingInvoice')
+
+export const BillingInvoiceListSchema = z
+  .object({ invoices: z.array(BillingInvoiceSchema), available: z.boolean() })
+  .openapi('BillingInvoiceList')
 
 export const CancelSubscriptionSchema = z
   .object({ cancelAtCycleEnd: z.literal(true).default(true) })
